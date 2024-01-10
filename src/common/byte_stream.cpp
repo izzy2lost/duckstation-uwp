@@ -1047,8 +1047,13 @@ std::unique_ptr<ByteStream> ByteStream::OpenFile(const char* fileName, u32 openM
     if (openMode & BYTESTREAM_OPEN_READ)
       desiredAccess |= GENERIC_READ;
 
+ #ifndef _UWP
     HANDLE hFile =
       CreateFileW(wideTemporaryFileName.c_str(), desiredAccess, FILE_SHARE_DELETE, NULL, CREATE_NEW, 0, NULL);
+ #else
+    HANDLE hFile =
+      CreateFile2FromAppW(wideTemporaryFileName.c_str(), desiredAccess, FILE_SHARE_DELETE, CREATE_NEW, nullptr);
+ #endif
 
     if (hFile == INVALID_HANDLE_VALUE)
       return nullptr;

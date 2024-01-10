@@ -117,6 +117,7 @@ void Timer::SleepUntil(Value value, bool exact)
     if (diff <= 0)
       return;
 
+ #ifndef _UWP
     HANDLE timer = GetSleepTimer();
     if (timer)
     {
@@ -133,6 +134,7 @@ void Timer::SleepUntil(Value value, bool exact)
         return;
       }
     }
+#endif
 
     // falling back to sleep... bad.
     Sleep(static_cast<DWORD>(static_cast<u64>(diff) / 1000000));

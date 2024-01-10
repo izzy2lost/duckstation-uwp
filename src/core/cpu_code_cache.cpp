@@ -119,7 +119,7 @@ PerfScope MIPSPerfScope("MIPS");
 #endif
 
 // Currently remapping the code buffer doesn't work in macOS. TODO: Make dynamic instead...
-#ifndef __APPLE__
+#ifndef __APPLE__ && !defined(_UWP)
 #define USE_STATIC_CODE_BUFFER 1
 #endif
 

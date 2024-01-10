@@ -2,6 +2,7 @@
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="..\..\dep\msvc\vsprops\Configurations.props" />
   <ItemGroup>
+    <ClInclude Include="http_downloader_uwp.h" />
     <ClInclude Include="imgui_animated.h" />
     <ClInclude Include="audio_stream.h" />
     <ClInclude Include="cd_image.h" />
@@ -18,12 +19,16 @@
     <ClInclude Include="d3d12_stream_buffer.h" />
     <ClInclude Include="d3d12_texture.h" />
     <ClInclude Include="d3d_common.h" />
-    <ClInclude Include="dinput_source.h" />
+    <ClInclude Include="dinput_source.h">
+      <ExcludedFromBuild Condition="'$(BuildingForUWP)'=='true'">true</ExcludedFromBuild>
+    </ClInclude>
     <ClInclude Include="gl\context.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="gl\context_wgl.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="gpu_device.h" />
     <ClInclude Include="gpu_framebuffer_manager.h" />
@@ -50,18 +55,23 @@
     </ClInclude>
     <ClInclude Include="opengl_device.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="opengl_loader.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="opengl_pipeline.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="opengl_stream_buffer.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="opengl_texture.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="page_fault_handler.h" />
     <ClInclude Include="cd_subchannel_replacement.h" />
@@ -71,7 +81,9 @@
     <ClInclude Include="postprocessing_shader.h" />
     <ClInclude Include="postprocessing_shader_fx.h" />
     <ClInclude Include="postprocessing_shader_glsl.h" />
-    <ClInclude Include="sdl_input_source.h" />
+    <ClInclude Include="sdl_input_source.h">
+      <ExcludedFromBuild Condition="'$(BuildingForUWP)'=='true'">true</ExcludedFromBuild>
+    </ClInclude>
     <ClInclude Include="shadergen.h" />
     <ClInclude Include="shiftjis.h" />
     <ClInclude Include="spirv_compiler.h">
@@ -81,27 +93,35 @@
     <ClInclude Include="cd_xa.h" />
     <ClInclude Include="vulkan_builders.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="vulkan_device.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="vulkan_entry_points.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="vulkan_loader.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="vulkan_pipeline.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="vulkan_stream_buffer.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="vulkan_swap_chain.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="vulkan_texture.h">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="wav_writer.h" />
     <ClInclude Include="win32_raw_input_source.h" />
@@ -121,7 +141,9 @@
     <ClCompile Include="cd_image_mds.cpp" />
     <ClCompile Include="cd_image_memory.cpp" />
     <ClCompile Include="cd_image_pbp.cpp" />
-    <ClCompile Include="cubeb_audio_stream.cpp" />
+    <ClCompile Include="cubeb_audio_stream.cpp">
+      <ExcludedFromBuild Condition="'$(BuildingForUWP)'=='true'">true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="cue_parser.cpp" />
     <ClCompile Include="cd_image_ppf.cpp" />
     <ClCompile Include="d3d11_device.cpp" />
@@ -135,12 +157,16 @@
     <ClCompile Include="d3d12_stream_buffer.cpp" />
     <ClCompile Include="d3d12_texture.cpp" />
     <ClCompile Include="d3d_common.cpp" />
-    <ClCompile Include="dinput_source.cpp" />
+    <ClCompile Include="dinput_source.cpp">
+      <ExcludedFromBuild Condition="'$(BuildingForUWP)'=='true'">true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="gl\context.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="gl\context_wgl.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="gpu_device.cpp" />
     <ClCompile Include="gpu_shader_cache.cpp" />
@@ -150,7 +176,10 @@
     <ClCompile Include="http_downloader_curl.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="http_downloader_winhttp.cpp" />
+    <ClCompile Include="http_downloader_uwp.cpp" />
+    <ClCompile Include="http_downloader_winhttp.cpp">
+      <ExcludedFromBuild Condition="'$(BuildingForUWP)'=='true'">true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="imgui_fullscreen.cpp" />
     <ClCompile Include="imgui_manager.cpp" />
     <ClCompile Include="ini_settings_interface.cpp" />
@@ -161,15 +190,19 @@
     <ClCompile Include="cd_subchannel_replacement.cpp" />
     <ClCompile Include="opengl_device.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="opengl_pipeline.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="opengl_stream_buffer.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="opengl_texture.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
@@ -179,7 +212,9 @@
     <ClCompile Include="postprocessing_shader.cpp" />
     <ClCompile Include="postprocessing_shader_fx.cpp" />
     <ClCompile Include="postprocessing_shader_glsl.cpp" />
-    <ClCompile Include="sdl_input_source.cpp" />
+    <ClCompile Include="sdl_input_source.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="shadergen.cpp" />
     <ClCompile Include="shiftjis.cpp" />
     <ClCompile Include="page_fault_handler.cpp" />
@@ -190,24 +225,31 @@
     <ClCompile Include="cd_xa.cpp" />
     <ClCompile Include="vulkan_builders.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="vulkan_device.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="vulkan_loader.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="vulkan_pipeline.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="vulkan_stream_buffer.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="vulkan_swap_chain.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="vulkan_texture.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'=='ARM64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="wav_writer.cpp" />
     <ClCompile Include="win32_raw_input_source.cpp" />

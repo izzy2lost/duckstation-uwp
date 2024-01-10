@@ -29,6 +29,20 @@
 #include <share.h>
 #include <shlobj.h>
 #include <winioctl.h>
+
+#if defined(_UWP)
+#include <fcntl.h>
+#include <io.h>
+
+#include <winrt/Windows.ApplicationModel.h>
+#include <winrt/Windows.Devices.Enumeration.h>
+#include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Storage.FileProperties.h>
+#include <winrt/Windows.Storage.Search.h>
+#include <winrt/Windows.Storage.h>
+#endif
+
 #else
 #include <dirent.h>
 #include <errno.h>
@@ -693,7 +707,7 @@ std::vector<std::string> FileSystem::GetRootDirectoryList()
 {
   std::vector<std::string> results;
 
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(_UWP)
   char buf[256];
   const DWORD size = GetLogicalDriveStringsA(sizeof(buf), buf);
   if (size != 0 && size < (sizeof(buf) - 1))
@@ -705,6 +719,28 @@ std::vector<std::string> FileSystem::GetRootDirectoryList()
       results.emplace_back(ptr, len);
       ptr += len + 1u;
     }
+  }
+#elif defined(_UWP)
+  if (const auto install_location = winrt::Windows::ApplicationModel::Package::Current().InstalledLocation();
+      install_location)
+  {
+    if (const auto path = install_location.Path(); !path.empty())
+      results.push_back(StringUtil::WideStringToUTF8String(path));
+  }
+
+  if (const auto local_location = winrt::Windows::Storage::ApplicationData::Current().LocalFolder(); local_location)
+  {
+    if (const auto path = local_location.Path(); !path.empty())
+      results.push_back(StringUtil::WideStringToUTF8String(path));
+  }
+
+  const auto devices = winrt::Windows::Storage::KnownFolders::RemovableDevices();
+  const auto folders_task(devices.GetFoldersAsync());
+  for (const auto& storage_folder : folders_task.get())
+  {
+    const auto path = storage_folder.Path();
+    if (!path.empty())
+      results.push_back(StringUtil::WideStringToUTF8String(path));
   }
 #else
   const char* home_path = std::getenv("HOME");
@@ -756,8 +792,12 @@ std::FILE* FileSystem::OpenCFile(const char* filename, const char* mode, Error* 
     const errno_t err = _wfopen_s(&fp, wfilename.c_str(), wmode.c_str());
     if (err != 0)
     {
+#ifdef _UWP
+      return OpenCFileUWP(wfilename, wmode);
+#else
       Error::SetErrno(error, err);
       return nullptr;
+#endif
     }
 
     return fp;
@@ -779,6 +819,106 @@ std::FILE* FileSystem::OpenCFile(const char* filename, const char* mode, Error* 
   return fp;
 #endif
 }
+
+#ifdef _UWP
+std::FILE* OpenCFileUWP(const wchar_t* wfilename, const wchar_t* mode)
+{
+  DWORD access = 0;
+  DWORD share = 0;
+  DWORD disposition = 0;
+
+  int flags = 0;
+  const wchar_t* tmode = mode;
+  while (*tmode)
+  {
+    if (*tmode == L'r' && *(tmode + 1) == L'+')
+    {
+      access = GENERIC_READ | GENERIC_WRITE;
+      share = 0;
+      disposition = OPEN_EXISTING;
+      flags |= _O_RDWR;
+      tmode += 2;
+    }
+    else if (*tmode == L'w' && *(tmode + 1) == L'+')
+    {
+      access = GENERIC_READ | GENERIC_WRITE;
+      share = 0;
+      disposition = CREATE_ALWAYS;
+      flags |= _O_RDWR | _O_CREAT | _O_TRUNC;
+      tmode += 2;
+    }
+    else if (*tmode == L'a' && *(tmode + 1) == L'+')
+    {
+      access = GENERIC_READ | GENERIC_WRITE;
+      share = 0;
+      disposition = CREATE_ALWAYS;
+      flags |= _O_RDWR | _O_APPEND | _O_CREAT | _O_TRUNC;
+      tmode += 2;
+    }
+    else if (*tmode == L'r')
+    {
+      access = GENERIC_READ;
+      share = 0;
+      disposition = OPEN_EXISTING;
+      flags |= _O_RDONLY;
+      tmode++;
+    }
+    else if (*tmode == L'w')
+    {
+      access = GENERIC_WRITE;
+      share = 0;
+      disposition = CREATE_ALWAYS;
+      flags |= _O_WRONLY | _O_CREAT | _O_TRUNC;
+      tmode++;
+    }
+    else if (*tmode == L'a')
+    {
+      access = GENERIC_READ | GENERIC_WRITE;
+      share = 0;
+      disposition = CREATE_ALWAYS;
+      flags |= _O_WRONLY | _O_APPEND | _O_CREAT | _O_TRUNC;
+      tmode++;
+    }
+    else if (*tmode == L'b')
+    {
+      flags |= _O_BINARY;
+      tmode++;
+    }
+    else
+    {
+      Log_ErrorPrintf("Unknown mode flags: '%s'", StringUtil::WideStringToUTF8String(mode).c_str());
+      return nullptr;
+    }
+  }
+
+  HANDLE hFile = CreateFileFromAppW(wfilename, access, share, nullptr, disposition, 0, nullptr);
+  if (hFile == INVALID_HANDLE_VALUE)
+    return nullptr;
+
+  if (flags & _O_APPEND && !SetFilePointerEx(hFile, LARGE_INTEGER{}, nullptr, FILE_END))
+  {
+    Log_ErrorPrintf("SetFilePointerEx() failed: %08X", GetLastError());
+    CloseHandle(hFile);
+    return nullptr;
+  }
+
+  int fd = _open_osfhandle(reinterpret_cast<intptr_t>(hFile), flags);
+  if (fd < 0)
+  {
+    CloseHandle(hFile);
+    return nullptr;
+  }
+
+  std::FILE* fp = _wfdopen(fd, mode);
+  if (!fp)
+  {
+    _close(fd);
+    return nullptr;
+  }
+
+  return fp;
+}
+#endif
 
 int FileSystem::OpenFDFile(const char* filename, int flags, int mode, Error* error)
 {
@@ -1062,6 +1202,19 @@ static u32 TranslateWin32Attributes(u32 Win32Attributes)
     r |= FILESYSTEM_FILE_ATTRIBUTE_COMPRESSED;
 
   return r;
+}
+
+static DWORD WrapGetFileAttributes(const wchar_t* path)
+{
+#ifndef _UWP
+  return GetFileAttributesW(path);
+#else
+  WIN32_FILE_ATTRIBUTE_DATA fad;
+  if (!GetFileAttributesExFromAppW(path, GetFileExInfoStandard, &fad))
+    return INVALID_FILE_ATTRIBUTES;
+
+  return fad.dwFileAttributes;
+#endif
 }
 
 static u32 RecursiveFindFiles(const char* origin_path, const char* parent_path, const char* path, const char* pattern,

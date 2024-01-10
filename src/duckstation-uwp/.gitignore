@@ -1,0 +1,7 @@
+database/
+inputprofiles/
+resources/
+shaders/
+BundleArtifacts/
+duckstation-uwp.pfx
+x64/*

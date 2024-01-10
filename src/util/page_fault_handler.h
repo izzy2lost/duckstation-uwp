@@ -15,5 +15,6 @@ using Handler = HandlerResult (*)(void* exception_pc, void* fault_address, bool 
 
 bool InstallHandler(Handler callback);
 bool RemoveHandler(Handler callback);
+u32 GetHandlerCodeSize();
 
 } // namespace Common::PageFaultHandler

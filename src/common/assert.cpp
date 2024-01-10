@@ -6,7 +6,7 @@
 #include <cstdlib>
 #include <mutex>
 
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(_UWP)
 #include "windows_headers.h"
 #include <intrin.h>
 #include <tlhelp32.h>
@@ -20,7 +20,7 @@ static std::mutex s_AssertFailedMutex;
 
 static inline void FreezeThreads(void** ppHandle)
 {
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(_UWP)
   HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
   if (hSnapshot != INVALID_HANDLE_VALUE)
   {
@@ -50,7 +50,7 @@ static inline void FreezeThreads(void** ppHandle)
 
 static inline void ResumeThreads(void* pHandle)
 {
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(_UWP)
   HANDLE hSnapshot = (HANDLE)pHandle;
   if (pHandle != INVALID_HANDLE_VALUE)
   {
@@ -86,7 +86,7 @@ void Y_OnAssertFailed(const char* szMessage, const char* szFunction, const char*
   char szMsg[512];
   std::snprintf(szMsg, sizeof(szMsg), "%s in function %s (%s:%u)", szMessage, szFunction, szFile, uLine);
 
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(_UWP)
   SetConsoleTextAttribute(GetStdHandle(STD_ERROR_HANDLE), FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
   WriteConsoleA(GetStdHandle(STD_ERROR_HANDLE), szMsg, static_cast<DWORD>(std::strlen(szMsg)), NULL, NULL);
   OutputDebugStringA(szMsg);
@@ -121,7 +121,7 @@ void Y_OnAssertFailed(const char* szMessage, const char* szFunction, const char*
   char szMsg[512];
   std::snprintf(szMsg, sizeof(szMsg), "%s in function %s (%s:%u)", szMessage, szFunction, szFile, uLine);
 
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(_UWP)
   SetConsoleTextAttribute(GetStdHandle(STD_ERROR_HANDLE), FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
   WriteConsoleA(GetStdHandle(STD_ERROR_HANDLE), szMsg, static_cast<DWORD>(std::strlen(szMsg)), NULL, NULL);
   OutputDebugStringA(szMsg);

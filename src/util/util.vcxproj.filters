@@ -72,6 +72,7 @@
     <ClInclude Include="http_downloader.h" />
     <ClInclude Include="gpu_framebuffer_manager.h" />
     <ClInclude Include="imgui_animated.h" />
+    <ClInclude Include="http_downloader_uwp.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="jit_code_buffer.cpp" />
@@ -153,6 +154,7 @@
     <ClCompile Include="http_downloader.cpp" />
     <ClCompile Include="metal_device.mm" />
     <ClCompile Include="metal_stream_buffer.mm" />
+    <ClCompile Include="http_downloader_uwp.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="gl">

@@ -450,7 +450,7 @@ struct Settings
 
 #if defined(ENABLE_CUBEB)
   static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::Cubeb;
-#elif defined(_WIN32)
+#elif defined(_WIN32) || defined(_UWP)
   static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::XAudio2;
 #elif defined(__ANDROID__)
   static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::AAudio;
