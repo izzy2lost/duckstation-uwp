@@ -163,14 +163,8 @@
     <ClInclude Include="types.h" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\dep\discord-rpc\discord-rpc.vcxproj">
-      <Project>{4266505b-dbaf-484b-ab31-b53b9c8235b3}</Project>
-    </ProjectReference>
     <ProjectReference Include="..\..\dep\imgui\imgui.vcxproj">
       <Project>{bb08260f-6fbc-46af-8924-090ee71360c6}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\..\dep\rainterface\rainterface.vcxproj" Condition="'$(Platform)'!='ARM64'">
-      <Project>{e4357877-d459-45c7-b8f6-dcbb587bb528}</Project>
     </ProjectReference>
     <ProjectReference Include="..\..\dep\rcheevos\rcheevos.vcxproj">
       <Project>{4ba0a6d4-3ae1-42b2-9347-096fd023ff64}</Project>

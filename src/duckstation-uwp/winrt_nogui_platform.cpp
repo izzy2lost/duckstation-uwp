@@ -42,17 +42,17 @@
 #include <winrt/Windows.UI.Input.h>
 #include <winrt/Windows.UI.ViewManagement.Core.h>
 
-using namespace Windows;
-using namespace Windows::ApplicationModel::Core;
-using namespace Windows::Graphics::Display::Core;
-using namespace Windows::Foundation::Numerics;
-using namespace Windows::UI;
-using namespace Windows::UI::Core;
-using namespace Windows::UI::Composition;
+using namespace winrt::Windows;
+using namespace winrt::Windows::ApplicationModel::Core;
+using namespace winrt::Windows::Graphics::Display::Core;
+using namespace winrt::Windows::Foundation::Numerics;
+using namespace winrt::Windows::UI;
+using namespace winrt::Windows::UI::Core;
+using namespace winrt::Windows::UI::Composition;
 
 
 
-static CoreWindow^ s_corewind = nullptr;
+static CoreWindow* s_corewind = nullptr;
 static std::deque<std::function<void()>> m_event_queue;
 static std::mutex m_event_mutex;
 
@@ -81,9 +81,9 @@ WinRTNoGUIPlatform::~WinRTNoGUIPlatform()
 
 bool WinRTNoGUIPlatform::Initialize()
 {
-  CoreWindow^ window = CoreWindow::GetForCurrentThread();
-  window->Activate();
-  s_corewind = window;
+  CoreWindow window = CoreWindow::GetForCurrentThread();
+  window.Activate();
+  s_corewind = &window;
 
   auto navigation = winrt::Windows::UI::Core::SystemNavigationManager::GetForCurrentView();
   navigation.BackRequested([](const winrt::Windows::Foundation::IInspectable&,
@@ -94,17 +94,11 @@ bool WinRTNoGUIPlatform::Initialize()
 
 void WinRTNoGUIPlatform::ReportError(const std::string_view& title, const std::string_view& message)
 {
-  const std::wstring title_copy(StringUtil::UTF8StringToWideString(title));
-  const std::wstring message_copy(StringUtil::UTF8StringToWideString(message));
-
   //MessageBoxW(m_hwnd, message_copy.c_str(), title_copy.c_str(), MB_ICONERROR | MB_OK);
 }
 
 bool WinRTNoGUIPlatform::ConfirmMessage(const std::string_view& title, const std::string_view& message)
 {
-  const std::wstring title_copy(StringUtil::UTF8StringToWideString(title));
-  const std::wstring message_copy(StringUtil::UTF8StringToWideString(message));
-
   //return (MessageBoxW(m_hwnd, message_copy.c_str(), title_copy.c_str(), MB_ICONQUESTION | MB_YESNO) == IDYES);
   return true;
 }
@@ -214,11 +208,11 @@ std::optional<WindowInfo> WinRTHost::GetPlatformWindowInfo()
     GetGamingDeviceModelInformation(&info);
     if (info.vendorId == GAMING_DEVICE_VENDOR_ID_MICROSOFT)
     {
-      HdmiDisplayInformation^ hdi = HdmiDisplayInformation::GetForCurrentView();
+      HdmiDisplayInformation hdi = HdmiDisplayInformation::GetForCurrentView();
       if (hdi)
       {
-        width = hdi->GetCurrentDisplayMode()->ResolutionWidthInRawPixels;
-        height = hdi->GetCurrentDisplayMode()->ResolutionHeightInRawPixels;
+        width = hdi.GetCurrentDisplayMode().ResolutionWidthInRawPixels();
+        height = hdi.GetCurrentDisplayMode().ResolutionHeightInRawPixels();
         // Our UI is based on 1080p, and we're adding a modifier to zoom in by 80%
         scale = ((float)width / 1920.0f) * 1.8f;
       }
@@ -228,7 +222,7 @@ std::optional<WindowInfo> WinRTHost::GetPlatformWindowInfo()
     wi.surface_height = height;
     wi.surface_scale = 1.0f;
     wi.type = WindowInfo::Type::Win32;
-    wi.window_handle = reinterpret_cast<void*>(winrt::get_abi(s_corewind));
+    wi.window_handle = reinterpret_cast<void*>(winrt::get_abi(*s_corewind));
   }
   else
   {

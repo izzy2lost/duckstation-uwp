@@ -65,7 +65,7 @@
       <Configuration>Release-Clang</Configuration>
       <Platform>x64</Platform>
     </ProjectConfiguration>
-     <ProjectConfiguration Include="DebugUWP|ARM64">
+    <ProjectConfiguration Include="DebugUWP|ARM64">
       <Configuration>DebugUWP</Configuration>
       <Platform>ARM64</Platform>
     </ProjectConfiguration>

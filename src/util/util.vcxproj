@@ -258,9 +258,6 @@
     <ClCompile Include="xinput_source.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\dep\cubeb\cubeb.vcxproj">
-      <Project>{72f9423c-91ee-4487-aac6-555ed6f61aa1}</Project>
-    </ProjectReference>
     <ProjectReference Include="..\..\dep\d3d12ma\d3d12ma.vcxproj">
       <Project>{f351c4d8-594a-4850-b77b-3c1249812cce}</Project>
     </ProjectReference>
