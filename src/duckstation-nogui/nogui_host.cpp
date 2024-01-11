@@ -109,6 +109,7 @@ static u32 s_blocking_cpu_events_pending = 0; // TODO: Token system would work b
 
 static std::mutex s_async_op_mutex;
 static std::thread s_async_op_thread;
+static std::string s_uwpPath;
 static FullscreenUI::ProgressCallback* s_async_op_progress = nullptr;
 
 //////////////////////////////////////////////////////////////////////////
@@ -177,7 +178,7 @@ void NoGUIHost::SetDataDirectory()
     return;
   }
 
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(_UWP)
   // On Windows, use My Documents\DuckStation.
   PWSTR documents_directory;
   if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, 0, NULL, &documents_directory)))
@@ -186,6 +187,8 @@ void NoGUIHost::SetDataDirectory()
       EmuFolders::DataRoot = Path::Combine(StringUtil::WideStringToUTF8String(documents_directory), "DuckStation");
     CoTaskMemFree(documents_directory);
   }
+#elif defined(_UWP)
+  EmuFolders::DataRoot = s_uwpPath;
 #elif defined(__linux__) || defined(__FreeBSD__)
   // Use $XDG_CONFIG_HOME/duckstation if it exists.
   const char* xdg_config_home = getenv("XDG_CONFIG_HOME");
@@ -579,7 +582,7 @@ void NoGUIHost::ProcessCPUThreadPlatformMessages()
   // This is lame. On Win32, we need to pump messages, even though *we* don't have any windows
   // on the CPU thread, because SDL creates a hidden window for raw input for some game controllers.
   // If we don't do this, we don't get any controller events.
-#ifdef _WIN32
+#ifdef _WIN32 && !defined(_UWP)
   MSG msg;
   while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE))
   {
@@ -815,8 +818,10 @@ std::unique_ptr<NoGUIPlatform> NoGUIHost::CreatePlatform()
 {
   std::unique_ptr<NoGUIPlatform> ret;
 
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(_UWP)
   ret = NoGUIPlatform::CreateWin32Platform();
+#elif defined(_UWP)
+  ret = NoGUIPlatform::CreateWinRTPlatform();
 #elif defined(__APPLE__)
   ret = NoGUIPlatform::CreateCocoaPlatform();
 #else
@@ -1262,7 +1267,7 @@ int main(int argc, char* argv[])
   return EXIT_SUCCESS;
 }
 
-#ifdef _WIN32
+#ifdef _WIN32 && !defined(_UWP)
 
 int wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nShowCmd)
 {
@@ -1294,3 +1299,25 @@ int wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int
 }
 
 #endif
+
+// TODO: Cleaner way of firing things up?
+void NoGUIHost::externalRun(std::string path)
+{
+  s_uwpPath = path;
+ 
+  std::vector<std::string> argc_strings;
+  argc_strings.reserve(1);
+
+  // CommandLineToArgvW() only adds the program path if the command line is empty?!
+  argc_strings.push_back(FileSystem::GetProgramPath());
+
+  std::vector<char*> argc_pointers;
+  argc_pointers.reserve(argc_strings.size());
+  for (std::string& arg : argc_strings)
+    argc_pointers.push_back(arg.data());
+
+
+  main(argc_pointers.size(), argc_pointers.data());
+}
+
+

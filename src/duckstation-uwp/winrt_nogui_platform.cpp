@@ -2,9 +2,6 @@
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #define NOMINMAX
-#define UNICODE
-#define _UNICODE
-#define _M_X86
 
 #include "pch.h"
 
@@ -18,6 +15,7 @@
 #include "core/host.h"
 
 #include "util/imgui_manager.h"
+#include "util/input_manager.h"
 
 #include "common/scoped_guard.h"
 #include "common/string_util.h"
@@ -88,6 +86,23 @@ bool WinRTNoGUIPlatform::Initialize()
   auto navigation = winrt::Windows::UI::Core::SystemNavigationManager::GetForCurrentView();
   navigation.BackRequested([](const winrt::Windows::Foundation::IInspectable&,
                               const winrt::Windows::UI::Core::BackRequestedEventArgs& args) { args.Handled(true); });
+
+
+  namespace WGI = winrt::Windows::Gaming::Input;
+
+  try
+  {
+    WGI::RawGameController::RawGameControllerAdded([](auto&&, const WGI::RawGameController raw_game_controller) {
+      m_event_queue.push_back([]() { InputManager::ReloadDevices(); });
+    });
+
+    WGI::RawGameController::RawGameControllerRemoved([](auto&&, const WGI::RawGameController raw_game_controller) {
+      m_event_queue.push_back([]() { InputManager::ReloadDevices(); });
+    });
+  }
+  catch (winrt::hresult_error)
+  {
+  }
 
   return true;
 }
@@ -187,7 +202,7 @@ bool WinRTNoGUIPlatform::CopyTextToClipboard(const std::string_view& text)
   return false;
 }
 
-std::unique_ptr<NoGUIPlatform> NoGUIPlatform::CreateWin32Platform()
+std::unique_ptr<NoGUIPlatform> NoGUIPlatform::CreateWinRTPlatform()
 {
   std::unique_ptr<WinRTNoGUIPlatform> ret(new WinRTNoGUIPlatform());
   if (!ret->Initialize())

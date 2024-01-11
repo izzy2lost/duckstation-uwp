@@ -7,6 +7,9 @@
 #include <functional>
 #include <string>
 
+#define DllImport __declspec(dllimport)
+#define DllExport __declspec(dllexport)
+
 namespace NoGUIHost {
 /// Sets batch mode (exit after game shutdown).
 bool InBatchMode();
@@ -33,4 +36,8 @@ void PlatformWindowFocusLost();
 void PlatformDevicesChanged();
 bool GetSavedPlatformWindowGeometry(s32* x, s32* y, s32* width, s32* height);
 void SavePlatformWindowGeometry(s32 x, s32 y, s32 width, s32 height);
+
+// Helper to fire off main
+void externalRun(std::string path);
+
 } // namespace NoGUIHost

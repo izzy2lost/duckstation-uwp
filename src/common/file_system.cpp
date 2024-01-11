@@ -781,54 +781,15 @@ std::string Path::Combine(const std::string_view& base, const std::string_view& 
   return ret;
 }
 
-std::FILE* FileSystem::OpenCFile(const char* filename, const char* mode, Error* error)
-{
-#ifdef _WIN32
-  const std::wstring wfilename(StringUtil::UTF8StringToWideString(filename));
-  const std::wstring wmode(StringUtil::UTF8StringToWideString(mode));
-  if (!wfilename.empty() && !wmode.empty())
-  {
-    std::FILE* fp;
-    const errno_t err = _wfopen_s(&fp, wfilename.c_str(), wmode.c_str());
-    if (err != 0)
-    {
 #ifdef _UWP
-      return OpenCFileUWP(wfilename, wmode);
-#else
-      Error::SetErrno(error, err);
-      return nullptr;
-#endif
-    }
-
-    return fp;
-  }
-
-  std::FILE* fp;
-  const errno_t err = fopen_s(&fp, filename, mode);
-  if (err != 0)
-  {
-    Error::SetErrno(error, err);
-    return nullptr;
-  }
-
-  return fp;
-#else
-  std::FILE* fp = std::fopen(filename, mode);
-  if (!fp)
-    Error::SetErrno(error, errno);
-  return fp;
-#endif
-}
-
-#ifdef _UWP
-std::FILE* OpenCFileUWP(const wchar_t* wfilename, const wchar_t* mode)
+std::FILE* OpenCFileUWP(std::wstring wfilename, std::wstring mode)
 {
   DWORD access = 0;
   DWORD share = 0;
   DWORD disposition = 0;
 
   int flags = 0;
-  const wchar_t* tmode = mode;
+  const wchar_t* tmode = mode.c_str();
   while (*tmode)
   {
     if (*tmode == L'r' && *(tmode + 1) == L'+')
@@ -890,8 +851,9 @@ std::FILE* OpenCFileUWP(const wchar_t* wfilename, const wchar_t* mode)
       return nullptr;
     }
   }
+  LPCWSTR wtf;
 
-  HANDLE hFile = CreateFileFromAppW(wfilename, access, share, nullptr, disposition, 0, nullptr);
+  HANDLE hFile = CreateFileFromAppW(wfilename.c_str(), access, share, nullptr, disposition, 0, nullptr);
   if (hFile == INVALID_HANDLE_VALUE)
     return nullptr;
 
@@ -909,7 +871,7 @@ std::FILE* OpenCFileUWP(const wchar_t* wfilename, const wchar_t* mode)
     return nullptr;
   }
 
-  std::FILE* fp = _wfdopen(fd, mode);
+  std::FILE* fp = _wfdopen(fd, mode.c_str());
   if (!fp)
   {
     _close(fd);
@@ -918,7 +880,47 @@ std::FILE* OpenCFileUWP(const wchar_t* wfilename, const wchar_t* mode)
 
   return fp;
 }
+#endif // _UWP
+
+
+std::FILE* FileSystem::OpenCFile(const char* filename, const char* mode, Error* error)
+{
+#ifdef _WIN32
+  const std::wstring wfilename(StringUtil::UTF8StringToWideString(filename));
+  const std::wstring wmode(StringUtil::UTF8StringToWideString(mode));
+  if (!wfilename.empty() && !wmode.empty())
+  {
+    std::FILE* fp;
+    const errno_t err = _wfopen_s(&fp, wfilename.c_str(), wmode.c_str());
+    if (err != 0)
+    {
+#ifdef _UWP
+      return OpenCFileUWP(wfilename, wmode);
+#else
+      Error::SetErrno(error, err);
+      return nullptr;
 #endif
+    }
+
+    return fp;
+  }
+
+  std::FILE* fp;
+  const errno_t err = fopen_s(&fp, filename, mode);
+  if (err != 0)
+  {
+    Error::SetErrno(error, err);
+    return nullptr;
+  }
+
+  return fp;
+#else
+  std::FILE* fp = std::fopen(filename, mode);
+  if (!fp)
+    Error::SetErrno(error, errno);
+  return fp;
+#endif
+}
 
 int FileSystem::OpenFDFile(const char* filename, int flags, int mode, Error* error)
 {

@@ -72,6 +72,7 @@
     <ClInclude Include="gpu_framebuffer_manager.h" />
     <ClInclude Include="imgui_animated.h" />
     <ClInclude Include="http_downloader_uwp.h" />
+    <ClInclude Include="http_downloader_winhttp.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="jit_code_buffer.cpp" />
@@ -140,6 +141,20 @@
     <ClCompile Include="metal_device.mm" />
     <ClCompile Include="metal_stream_buffer.mm" />
     <ClCompile Include="http_downloader_uwp.cpp" />
+    <ClCompile Include="cubeb_audio_stream.cpp" />
+    <ClCompile Include="dinput_source.cpp" />
+    <ClCompile Include="opengl_device.cpp" />
+    <ClCompile Include="opengl_pipeline.cpp" />
+    <ClCompile Include="opengl_stream_buffer.cpp" />
+    <ClCompile Include="opengl_texture.cpp" />
+    <ClCompile Include="sdl_input_source.cpp" />
+    <ClCompile Include="vulkan_builders.cpp" />
+    <ClCompile Include="vulkan_device.cpp" />
+    <ClCompile Include="vulkan_loader.cpp" />
+    <ClCompile Include="vulkan_pipeline.cpp" />
+    <ClCompile Include="vulkan_stream_buffer.cpp" />
+    <ClCompile Include="vulkan_swap_chain.cpp" />
+    <ClCompile Include="vulkan_texture.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="gl">

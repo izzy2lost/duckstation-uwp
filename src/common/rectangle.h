@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #pragma once
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -15,8 +16,8 @@ namespace Common {
 template<typename T>
 struct Rectangle
 {
-  static constexpr T InvalidMinCoord = std::numeric_limits<T>::max();
-  static constexpr T InvalidMaxCoord = std::numeric_limits<T>::min();
+  static constexpr T InvalidMinCoord = (std::numeric_limits<T>::max)();
+  static constexpr T InvalidMaxCoord = (std::numeric_limits<T>::min)();
 
   /// Default constructor - initializes to an invalid coordinate range suitable for including points.
   constexpr Rectangle() : left(InvalidMinCoord), top(InvalidMinCoord), right(InvalidMaxCoord), bottom(InvalidMaxCoord)
