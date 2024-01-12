@@ -388,7 +388,6 @@
 			    $(RootBuildDir)common\common.lib;
 			    $(RootBuildDir)core\core.lib;
 			    $(RootBuildDir)util\util.lib;
-			    $(RootBuildDir)duckstation-nogui\duckstation-nogui.lib;
 			    $(RootBuildDir)d3d12ma\d3d12ma.lib;
 			    $(RootBuildDir)fmt\fmt.lib;
 			    $(RootBuildDir)imgui\imgui.lib;
@@ -432,6 +431,7 @@
   <ItemGroup>
     <ClInclude Include="pch.h" />
     <ClInclude Include="UWPUtils.h" />
+    <ClInclude Include="win32_key_names.h" />
     <ClInclude Include="winrt_nogui_platform.h" />
   </ItemGroup>
   <ItemGroup>

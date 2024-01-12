@@ -66,9 +66,6 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "reshadefx", "dep\reshadefx\reshadefx.vcxproj", "{27B8D4BB-4F01-4432-BC14-9BF6CA458EEE}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "duckstation-uwp", "src\duckstation-uwp\duckstation-uwp.vcxproj", "{F77B13F1-967A-4C9E-AB69-E5AFEEF5A880}"
-	ProjectSection(ProjectDependencies) = postProject
-		{0A172B2E-DC67-49FC-A4C1-975F93C586C4} = {0A172B2E-DC67-49FC-A4C1-975F93C586C4}
-	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "rcheevos", "dep\rcheevos\rcheevos.vcxproj", "{4BA0A6D4-3AE1-42B2-9347-096FD023FF64}"
 EndProject

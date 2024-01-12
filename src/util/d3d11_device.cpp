@@ -72,7 +72,7 @@ bool D3D11Device::CreateDevice(const std::string_view& adapter, bool threaded_pr
   if (m_debug_device || true)
     create_flags |= D3D11_CREATE_DEVICE_DEBUG;
 
-  m_dxgi_factory = D3DCommon::CreateFactory(m_debug_device);
+  m_dxgi_factory = D3DCommon::CreateFactory(m_debug_device); // TODO: revert to pass in m_debug_device
   if (!m_dxgi_factory)
     return false;
 
@@ -191,9 +191,9 @@ bool D3D11Device::CreateSwapChain()
     return false;
 
   const DXGI_FORMAT dxgi_format = D3DCommon::GetFormatMapping(s_swap_chain_format).resource_format;
-  const HWND window_hwnd = reinterpret_cast<HWND>(m_window_info.window_handle);
 
 #ifndef _UWP
+  const HWND window_hwnd = reinterpret_cast<HWND>(m_window_info.window_handle);
   RECT client_rc{};
   GetClientRect(window_hwnd, &client_rc);
 
@@ -230,11 +230,11 @@ bool D3D11Device::CreateSwapChain()
   swap_chain_desc.SampleDesc.Count = 1;
   swap_chain_desc.BufferCount = 3;
   swap_chain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-  //swap_chain_desc.SwapEffect = m_using_flip_model_swap_chain ? DXGI_SWAP_EFFECT_FLIP_DISCARD : DXGI_SWAP_EFFECT_DISCARD;
+  swap_chain_desc.SwapEffect = m_using_flip_model_swap_chain ? DXGI_SWAP_EFFECT_FLIP_DISCARD : DXGI_SWAP_EFFECT_DISCARD;
 
   m_using_allow_tearing = (m_allow_tearing_supported && m_using_flip_model_swap_chain && !m_is_exclusive_fullscreen);
-  //if (m_using_allow_tearing)
-    //swap_chain_desc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+  if (m_using_allow_tearing)
+    swap_chain_desc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
   HRESULT hr = S_OK;
 
