@@ -25,6 +25,7 @@
 #include "common/path.h"
 #include "common/threading.h"
 #include "util/imgui_manager.h"
+#include "util/ini_settings_interface.h"
 #include "util/input_manager.h"
 #include "util/platform_misc.h"
 
@@ -52,12 +53,15 @@ using namespace winrt::Windows::UI;
 using namespace winrt::Windows::UI::Core;
 using namespace winrt::Windows::UI::Composition;
 
+static constexpr u32 SETTINGS_VERSION = 3;
+
 
 //////////////////////////////////////////////////////////////////////////
 // Local variable declarations
 //////////////////////////////////////////////////////////////////////////
 static winrt::Windows::UI::Core::CoreWindow* s_corewind = NULL;
 
+static std::unique_ptr<INISettingsInterface> s_base_settings_interface;
 static bool s_batch_mode = false;
 static bool s_is_fullscreen = false;
 static bool s_was_paused_by_focus_loss = false;
@@ -95,6 +99,46 @@ namespace WinRTHost {
 bool WinRTHost::InitializeConfig()
 {
     // TODO: Might need thise
+  std::string settings_filename = Path::Combine(EmuFolders::DataRoot, "settings.ini");
+
+  Log_InfoPrintf("Loading config from %s.", settings_filename.c_str());
+  s_base_settings_interface = std::make_unique<INISettingsInterface>(std::move(settings_filename));
+  Host::Internal::SetBaseSettingsLayer(s_base_settings_interface.get());
+
+  u32 settings_version;
+  if (!s_base_settings_interface->Load() ||
+      !s_base_settings_interface->GetUIntValue("Main", "SettingsVersion", &settings_version) ||
+      settings_version != SETTINGS_VERSION)
+  {
+    if (s_base_settings_interface->ContainsValue("Main", "SettingsVersion"))
+    {
+      // NOTE: No point translating this, because there's no config loaded, so no language loaded.
+      Host::ReportErrorAsync("Error", fmt::format("Settings version {} does not match expected version {}, resetting.",
+                                                  settings_version, SETTINGS_VERSION));
+    }
+
+    s_base_settings_interface->SetUIntValue("Main", "SettingsVersion", SETTINGS_VERSION);
+
+    ::System::SetDefaultSettings(*s_base_settings_interface);
+    EmuFolders::SetDefaults();
+    EmuFolders::Save(*s_base_settings_interface);
+  }
+
+    InputManager::SetDefaultSourceConfig(*s_base_settings_interface);
+    Settings::SetDefaultControllerConfig(*s_base_settings_interface);
+    Settings::SetDefaultHotkeyConfig(*s_base_settings_interface);
+
+    s_base_settings_interface->Save();
+
+  EmuFolders::LoadConfig(*s_base_settings_interface.get());
+  EmuFolders::EnsureFoldersExist();
+
+  // We need to create the console window early, otherwise it appears behind the main window.
+  if (!Log::IsConsoleOutputEnabled() &&
+      s_base_settings_interface->GetBoolValue("Logging", "LogToConsole", Settings::DEFAULT_LOG_TO_CONSOLE))
+  {
+    Log::SetConsoleOutputParams(true, s_base_settings_interface->GetBoolValue("Logging", "LogTimestamps", true));
+  }
 }
 
 bool WinRTHost::InBatchMode()
@@ -173,7 +217,7 @@ void WinRTHost::CPUThreadEntryPoint()
       if (!InBatchMode())
         Host::RefreshGameListAsync(false);
 
-      CPUThreadMainLoop();
+      WinRTHost::CPUThreadMainLoop();
 
       Host::CancelGameListRefresh();
     }
@@ -584,7 +628,7 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 
     EmuFolders::AppRoot = Path::Canonicalize(Path::GetDirectory(program_path));
     EmuFolders::Resources = Path::Combine(EmuFolders::AppRoot, "resources");
-    EmuFolders::DataRoot = EmuFolders::AppRoot;
+    EmuFolders::DataRoot = UWP::GetLocalFolder();
   }
 
   void OnActivate(const winrt::Windows::ApplicationModel::Core::CoreApplicationView&,
@@ -604,12 +648,15 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 
     CrashHandler::Install();
 
+    WinRTHost::InitializeConfig();
+
     // the rest of initialization happens on the CPU thread.
     WinRTHost::StartCPUThread();
 
     while (s_running.load())
     {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        window.Dispatcher().ProcessEvents(CoreProcessEventsOption::ProcessAllIfPresent);
+        WinRTHost::ProcessCPUThreadEvents(false);
     }
 
     WinRTHost::CancelAsyncOp();
