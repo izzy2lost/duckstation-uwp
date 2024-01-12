@@ -29,23 +29,7 @@
 #include <share.h>
 #include <shlobj.h>
 #include <winioctl.h>
-
-#if defined(_UWP)
-#define CREATEFILEWFUNC CreateFile2FromAppW
-#include <fcntl.h>
-#include <io.h>
-
-#include <winrt/Windows.ApplicationModel.h>
-#include <winrt/Windows.Devices.Enumeration.h>
-#include <winrt/Windows.Foundation.Collections.h>
-#include <winrt/Windows.Foundation.h>
-#include <winrt/Windows.Storage.FileProperties.h>
-#include <winrt/Windows.Storage.Search.h>
-#include <winrt/Windows.Storage.h>
-#endif
-
 #else
-#define CREATEFILEWFUNC CreateFileW
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -56,19 +40,6 @@
 #endif
 
 Log_SetChannel(FileSystem);
-
-static DWORD WrapGetFileAttributes(const wchar_t* path)
-{
-#ifndef _UWP
-  return GetFileAttributesW(path);
-#else
-  WIN32_FILE_ATTRIBUTE_DATA fad;
-  if (!GetFileAttributesExFromAppW(path, GetFileExInfoStandard, &fad))
-    return INVALID_FILE_ATTRIBUTES;
-
-  return fad.dwFileAttributes;
-#endif
-}
 
 #ifndef __ANDROID__
 
@@ -257,19 +228,14 @@ std::string Path::RealPath(const std::string_view& path)
     {
       DWORD attribs;
       if (StringUtil::UTF8StringToWideString(wrealpath, realpath) &&
-          (attribs = WrapGetFileAttributes(wrealpath.c_str())) != INVALID_FILE_ATTRIBUTES)
+          (attribs = GetFileAttributesW(wrealpath.c_str())) != INVALID_FILE_ATTRIBUTES)
       {
         // if not a link, go to the next component
         if (attribs & FILE_ATTRIBUTE_REPARSE_POINT)
         {
-#ifndef _UWP
           const HANDLE hFile =
-            CREATEFILEWFUNC(wrealpath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            CreateFileW(wrealpath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                         nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-#else
-          const HANDLE hFile = 
-           CreateFile2FromAppW(wrealpath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, CREATE_NEW, nullptr);
-#endif
           if (hFile != INVALID_HANDLE_VALUE)
           {
             // is a link! resolve it.
@@ -727,7 +693,7 @@ std::vector<std::string> FileSystem::GetRootDirectoryList()
 {
   std::vector<std::string> results;
 
-#if defined(_WIN32) && !defined(_UWP)
+#if defined(_WIN32)
   char buf[256];
   const DWORD size = GetLogicalDriveStringsA(sizeof(buf), buf);
   if (size != 0 && size < (sizeof(buf) - 1))
@@ -739,28 +705,6 @@ std::vector<std::string> FileSystem::GetRootDirectoryList()
       results.emplace_back(ptr, len);
       ptr += len + 1u;
     }
-  }
-#elif defined(_UWP)
-  if (const auto install_location = winrt::Windows::ApplicationModel::Package::Current().InstalledLocation();
-      install_location)
-  {
-    if (const auto path = install_location.Path(); !path.empty())
-      results.push_back(StringUtil::WideStringToUTF8String(path));
-  }
-
-  if (const auto local_location = winrt::Windows::Storage::ApplicationData::Current().LocalFolder(); local_location)
-  {
-    if (const auto path = local_location.Path(); !path.empty())
-      results.push_back(StringUtil::WideStringToUTF8String(path));
-  }
-
-  const auto devices = winrt::Windows::Storage::KnownFolders::RemovableDevices();
-  const auto folders_task(devices.GetFoldersAsync());
-  for (const auto& storage_folder : folders_task.get())
-  {
-    const auto path = storage_folder.Path();
-    if (!path.empty())
-      results.push_back(StringUtil::WideStringToUTF8String(path));
   }
 #else
   const char* home_path = std::getenv("HOME");
@@ -801,108 +745,6 @@ std::string Path::Combine(const std::string_view& base, const std::string_view& 
   return ret;
 }
 
-#ifdef _UWP
-std::FILE* OpenCFileUWP(std::wstring wfilename, std::wstring mode)
-{
-  DWORD access = 0;
-  DWORD share = 0;
-  DWORD disposition = 0;
-
-  int flags = 0;
-  const wchar_t* tmode = mode.c_str();
-  while (*tmode)
-  {
-    if (*tmode == L'r' && *(tmode + 1) == L'+')
-    {
-      access = GENERIC_READ | GENERIC_WRITE;
-      share = 0;
-      disposition = OPEN_EXISTING;
-      flags |= _O_RDWR;
-      tmode += 2;
-    }
-    else if (*tmode == L'w' && *(tmode + 1) == L'+')
-    {
-      access = GENERIC_READ | GENERIC_WRITE;
-      share = 0;
-      disposition = CREATE_ALWAYS;
-      flags |= _O_RDWR | _O_CREAT | _O_TRUNC;
-      tmode += 2;
-    }
-    else if (*tmode == L'a' && *(tmode + 1) == L'+')
-    {
-      access = GENERIC_READ | GENERIC_WRITE;
-      share = 0;
-      disposition = CREATE_ALWAYS;
-      flags |= _O_RDWR | _O_APPEND | _O_CREAT | _O_TRUNC;
-      tmode += 2;
-    }
-    else if (*tmode == L'r')
-    {
-      access = GENERIC_READ;
-      share = 0;
-      disposition = OPEN_EXISTING;
-      flags |= _O_RDONLY;
-      tmode++;
-    }
-    else if (*tmode == L'w')
-    {
-      access = GENERIC_WRITE;
-      share = 0;
-      disposition = CREATE_ALWAYS;
-      flags |= _O_WRONLY | _O_CREAT | _O_TRUNC;
-      tmode++;
-    }
-    else if (*tmode == L'a')
-    {
-      access = GENERIC_READ | GENERIC_WRITE;
-      share = 0;
-      disposition = CREATE_ALWAYS;
-      flags |= _O_WRONLY | _O_APPEND | _O_CREAT | _O_TRUNC;
-      tmode++;
-    }
-    else if (*tmode == L'b')
-    {
-      flags |= _O_BINARY;
-      tmode++;
-    }
-    else
-    {
-      Log_ErrorPrintf("Unknown mode flags: '%s'", StringUtil::WideStringToUTF8String(mode).c_str());
-      return nullptr;
-    }
-  }
-  LPCWSTR wtf;
-
-  HANDLE hFile = CreateFileFromAppW(wfilename.c_str(), access, share, nullptr, disposition, 0, nullptr);
-  if (hFile == INVALID_HANDLE_VALUE)
-    return nullptr;
-
-  if (flags & _O_APPEND && !SetFilePointerEx(hFile, LARGE_INTEGER{}, nullptr, FILE_END))
-  {
-    Log_ErrorPrintf("SetFilePointerEx() failed: %08X", GetLastError());
-    CloseHandle(hFile);
-    return nullptr;
-  }
-
-  int fd = _open_osfhandle(reinterpret_cast<intptr_t>(hFile), flags);
-  if (fd < 0)
-  {
-    CloseHandle(hFile);
-    return nullptr;
-  }
-
-  std::FILE* fp = _wfdopen(fd, mode.c_str());
-  if (!fp)
-  {
-    _close(fd);
-    return nullptr;
-  }
-
-  return fp;
-}
-#endif // _UWP
-
-
 std::FILE* FileSystem::OpenCFile(const char* filename, const char* mode, Error* error)
 {
 #ifdef _WIN32
@@ -914,12 +756,8 @@ std::FILE* FileSystem::OpenCFile(const char* filename, const char* mode, Error* 
     const errno_t err = _wfopen_s(&fp, wfilename.c_str(), wmode.c_str());
     if (err != 0)
     {
-#ifdef _UWP
-      return OpenCFileUWP(wfilename, wmode);
-#else
       Error::SetErrno(error, err);
       return nullptr;
-#endif
     }
 
     return fp;
@@ -1226,8 +1064,6 @@ static u32 TranslateWin32Attributes(u32 Win32Attributes)
   return r;
 }
 
-
-
 static u32 RecursiveFindFiles(const char* origin_path, const char* parent_path, const char* path, const char* pattern,
                               u32 flags, FileSystem::FindResultsArray* results)
 {
@@ -1431,7 +1267,7 @@ bool FileSystem::StatFile(const char* path, FILESYSTEM_STAT_DATA* sd)
     return false;
 
   // determine attributes for the path. if it's a directory, things have to be handled differently..
-  DWORD fileAttributes = WrapGetFileAttributes(wpath.c_str());
+  DWORD fileAttributes = GetFileAttributesW(wpath.c_str());
   if (fileAttributes == INVALID_FILE_ATTRIBUTES)
     return false;
 
@@ -1439,24 +1275,13 @@ bool FileSystem::StatFile(const char* path, FILESYSTEM_STAT_DATA* sd)
   HANDLE hFile;
   if (fileAttributes & FILE_ATTRIBUTE_DIRECTORY)
   {
-#ifndef _UWP
-    hFile = CREATEFILEWFUNC(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+    hFile = CreateFileW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                         OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-#else
-    hFile = CreateFile2FromAppW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                OPEN_EXISTING, nullptr);
-#endif
   }
   else
   {
-#ifndef _UWP
-    hFile = CREATEFILEWFUNC(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+    hFile = CreateFileW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                         OPEN_EXISTING, 0, nullptr);
-#else
-    hFile = CreateFile2FromAppW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                OPEN_EXISTING, nullptr);
-
-#endif
   }
 
   // createfile succeded?
@@ -1520,7 +1345,7 @@ bool FileSystem::FileExists(const char* path)
     return false;
 
   // determine attributes for the path. if it's a directory, things have to be handled differently..
-  DWORD fileAttributes = WrapGetFileAttributes(wpath.c_str());
+  DWORD fileAttributes = GetFileAttributesW(wpath.c_str());
   if (fileAttributes == INVALID_FILE_ATTRIBUTES)
     return false;
 
@@ -1542,7 +1367,7 @@ bool FileSystem::DirectoryExists(const char* path)
     return false;
 
   // determine attributes for the path. if it's a directory, things have to be handled differently..
-  DWORD fileAttributes = WrapGetFileAttributes(wpath.c_str());
+  DWORD fileAttributes = GetFileAttributesW(wpath.c_str());
   if (fileAttributes == INVALID_FILE_ATTRIBUTES)
     return false;
 
@@ -1588,11 +1413,7 @@ bool FileSystem::CreateDirectory(const char* Path, bool Recursive)
     return false;
 
   // try just flat-out, might work if there's no other segments that have to be made
-#ifndef _UWP
   if (CreateDirectoryW(wpath.c_str(), nullptr))
-#else
-  if (CreateDirectoryFromAppW(wpath.c_str(), nullptr))
-#endif
     return true;
 
   if (!Recursive)
@@ -1603,7 +1424,7 @@ bool FileSystem::CreateDirectory(const char* Path, bool Recursive)
   if (lastError == ERROR_ALREADY_EXISTS)
   {
     // check the attributes
-    u32 Attributes = WrapGetFileAttributes(wpath.c_str());
+    u32 Attributes = GetFileAttributesW(wpath.c_str());
     if (Attributes != INVALID_FILE_ATTRIBUTES && Attributes & FILE_ATTRIBUTE_DIRECTORY)
       return true;
     else
@@ -1622,11 +1443,7 @@ bool FileSystem::CreateDirectory(const char* Path, bool Recursive)
     {
       if (wpath[i] == L'\\' || wpath[i] == L'/')
       {
-#ifndef _UWP
         const BOOL result = CreateDirectoryW(tempPath.c_str(), nullptr);
-#else
-        const BOOL result = CreateDirectoryFromAppW(tempPath.c_str(), nullptr);
-#endif
         if (!result)
         {
           lastError = GetLastError();
@@ -1646,11 +1463,7 @@ bool FileSystem::CreateDirectory(const char* Path, bool Recursive)
     // re-create the end if it's not a separator, check / as well because windows can interpret them
     if (wpath[pathLength - 1] != L'\\' && wpath[pathLength - 1] != L'/')
     {
-#ifndef _UWP
       const BOOL result = CreateDirectoryW(wpath.c_str(), nullptr);
-#else
-      const BOOL result = CreateDirectoryFromAppW(wpath.c_str(), nullptr);
-#endif
       if (!result)
       {
         lastError = GetLastError();
@@ -1675,15 +1488,11 @@ bool FileSystem::DeleteFile(const char* path)
     return false;
 
   const std::wstring wpath(StringUtil::UTF8StringToWideString(path));
-  const DWORD fileAttributes = WrapGetFileAttributes(wpath.c_str());
+  const DWORD fileAttributes = GetFileAttributesW(wpath.c_str());
   if (fileAttributes == INVALID_FILE_ATTRIBUTES || fileAttributes & FILE_ATTRIBUTE_DIRECTORY)
     return false;
 
-#ifndef _UWP
   return (DeleteFileW(wpath.c_str()) == TRUE);
-#else
-  return (DeleteFileFromAppW(wpath.c_str()) == TRUE);
-#endif
 }
 
 bool FileSystem::RenamePath(const char* old_path, const char* new_path)
@@ -1691,19 +1500,11 @@ bool FileSystem::RenamePath(const char* old_path, const char* new_path)
   const std::wstring old_wpath(StringUtil::UTF8StringToWideString(old_path));
   const std::wstring new_wpath(StringUtil::UTF8StringToWideString(new_path));
 
-#ifndef _UWP
   if (!MoveFileExW(old_wpath.c_str(), new_wpath.c_str(), MOVEFILE_REPLACE_EXISTING))
   {
     Log_ErrorPrintf("MoveFileEx('%s', '%s') failed: %08X", old_path, new_path, GetLastError());
     return false;
   }
-#else
-  if (!ReplaceFileFromAppW(old_wpath.c_str(), new_wpath.c_str(), nullptr, 0, nullptr, nullptr))
-  {
-    Log_ErrorPrintf("MoveFileFromAppW('%s', '%s') failed: %08X", old_path, new_path, GetLastError());
-    return false;
-  }
-#endif
 
   return true;
 }
@@ -1711,11 +1512,7 @@ bool FileSystem::RenamePath(const char* old_path, const char* new_path)
 bool FileSystem::DeleteDirectory(const char* path)
 {
   const std::wstring wpath(StringUtil::UTF8StringToWideString(path));
-#ifndef _UWP
   return RemoveDirectoryW(wpath.c_str());
-#else
-  return RemoveDirectoryFromAppW(wpath.c_str());
-#endif
 }
 
 std::string FileSystem::GetProgramPath()
@@ -1723,12 +1520,10 @@ std::string FileSystem::GetProgramPath()
   std::wstring buffer;
   buffer.resize(MAX_PATH);
 
-  HMODULE module = nullptr;
-#ifndef _UWP
   // Fall back to the main module if this fails.
+  HMODULE module = nullptr;
   GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                      reinterpret_cast<LPCWSTR>(&GetProgramPath), &module);
-#endif
 
   for (;;)
   {
@@ -1771,7 +1566,7 @@ bool FileSystem::SetWorkingDirectory(const char* path)
 bool FileSystem::SetPathCompression(const char* path, bool enable)
 {
   const std::wstring wpath(StringUtil::UTF8StringToWideString(path));
-  const DWORD attrs = WrapGetFileAttributes(wpath.c_str());
+  const DWORD attrs = GetFileAttributesW(wpath.c_str());
   if (attrs == INVALID_FILE_ATTRIBUTES)
     return false;
 
@@ -1785,14 +1580,8 @@ bool FileSystem::SetPathCompression(const char* path, bool enable)
   const bool isFile = !(attrs & FILE_ATTRIBUTE_DIRECTORY);
   const DWORD flags = isFile ? FILE_ATTRIBUTE_NORMAL : (FILE_FLAG_BACKUP_SEMANTICS | FILE_ATTRIBUTE_DIRECTORY);
 
-#ifndef _UWP
-  const HANDLE handle = CREATEFILEWFUNC(wpath.c_str(), FILE_GENERIC_WRITE | FILE_GENERIC_READ,
+  const HANDLE handle = CreateFileW(wpath.c_str(), FILE_GENERIC_WRITE | FILE_GENERIC_READ,
                                     FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, flags, nullptr);
-#else
-  const HANDLE handle = CreateFile2FromAppW(wpath.c_str(), FILE_GENERIC_WRITE | FILE_GENERIC_READ,
-                                             FILE_SHARE_READ | FILE_SHARE_DELETE, OPEN_EXISTING, nullptr);
-#endif
-
   if (handle == INVALID_HANDLE_VALUE)
     return false;
 
