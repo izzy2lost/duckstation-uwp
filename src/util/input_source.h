@@ -73,8 +73,8 @@ public:
 
 #ifdef _WIN32
   static std::unique_ptr<InputSource> CreateDInputSource();
-  static std::unique_ptr<InputSource> CreateXInputSource();
   static std::unique_ptr<InputSource> CreateWin32RawInputSource();
+  static std::unique_ptr<InputSource> CreateXInputSource();
 #endif
 #ifdef ENABLE_SDL2
   static std::unique_ptr<InputSource> CreateSDLSource();

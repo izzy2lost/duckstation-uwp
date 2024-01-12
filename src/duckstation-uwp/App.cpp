@@ -13,6 +13,10 @@
 #include <winrt/Windows.Gaming.Input.h>
 #include <winrt/Windows.System.h>
 
+#include "imgui.h"
+#include "imgui_internal.h"
+#include "imgui_stdlib.h"
+
 #include "core/achievements.h"
 #include "core/fullscreen_ui.h"
 #include "core/game_list.h"
@@ -94,7 +98,51 @@ namespace WinRTHost {
   static void CancelAsyncOp();
   static void AsyncOpThreadEntryPoint(std::function<void(ProgressCallback*)> callback);
   static void ProcessCPUThreadEvents(bool block);
+  static void SetupXboxController(INISettingsInterface& si);
   } // namespace WinRTHost
+
+void WinRTHost::SetupXboxController(INISettingsInterface& si)
+{
+  // TODO: Investigate DX12 black screen
+  //si.SetStringValue("GPU", "Renderer", "D3D12");
+
+  si.SetBoolValue("Main", "SyncToHostRefreshRate", true);
+  si.SetBoolValue("Display", "VSync", true);
+  si.SetBoolValue("Display", "DisplayAllFrames", true);
+  si.SetFloatValue("Display", "MaxFPS", 60.0f);
+
+  si.SetStringValue("CPU", "FastmemMode", "LUT");
+  si.SetStringValue("Main", "ControllerBackend", "XInput");
+
+  // Set up an analog controller in port 1.
+  si.SetStringValue("Controller1", "Type", "AnalogController");
+  si.SetStringValue("Controller1", "ButtonUp", "Controller0/Button11");
+  si.SetStringValue("Controller1", "ButtonDown", "Controller0/Button12");
+  si.SetStringValue("Controller1", "ButtonLeft", "Controller0/Button13");
+  si.SetStringValue("Controller1", "ButtonRight", "Controller0/Button14");
+  si.SetStringValue("Controller1", "ButtonStart", "Controller0/Button6");
+  si.SetStringValue("Controller1", "ButtonTriangle", "Controller0/Button3");
+  si.SetStringValue("Controller1", "ButtonCross", "Controller0/Button0");
+  si.SetStringValue("Controller1", "ButtonCircle", "Controller0/Button1");
+  si.SetStringValue("Controller1", "ButtonSquare", "Controller0/Button2");
+  si.SetStringValue("Controller1", "ButtonL1", "Controller0/Button9");
+  si.SetStringValue("Controller1", "ButtonL2", "Controller0/+Axis4");
+  si.SetStringValue("Controller1", "ButtonR1", "Controller0/Button10");
+  si.SetStringValue("Controller1", "ButtonR2", "Controller0/+Axis5");
+  si.SetStringValue("Controller1", "ButtonL3", "Controller0/Button7");
+  si.SetStringValue("Controller1", "ButtonR3", "Controller0/Button8");
+  si.SetStringValue("Controller1", "AxisLeftX", "Controller0/Axis0");
+  si.SetStringValue("Controller1", "AxisLeftY", "Controller0/Axis1");
+  si.SetStringValue("Controller1", "AxisRightX", "Controller0/Axis2");
+  si.SetStringValue("Controller1", "AxisRightY", "Controller0/Axis3");
+  si.SetStringValue("Controller1", "Rumble", "Controller0");
+  si.SetStringValue("Controller1", "ForceAnalogOnReset", "true");
+  si.SetStringValue("Controller1", "AnalogDPadInDigitalMode", "true");
+
+  // Repurpose the select button to open the menu.
+  // Not ideal, but all we can do until we have chords.
+  si.SetStringValue("Hotkeys", "OpenQuickMenu", "Controller0/Button4");
+}
 
 bool WinRTHost::InitializeConfig()
 {
@@ -125,7 +173,8 @@ bool WinRTHost::InitializeConfig()
   }
 
     InputManager::SetDefaultSourceConfig(*s_base_settings_interface);
-    Settings::SetDefaultControllerConfig(*s_base_settings_interface);
+    //Settings::SetDefaultControllerConfig(*s_base_settings_interface);
+    SetupXboxController(*s_base_settings_interface);
     Settings::SetDefaultHotkeyConfig(*s_base_settings_interface);
 
     s_base_settings_interface->Save();
@@ -241,6 +290,10 @@ void WinRTHost::CPUThreadMainLoop()
       {
         ::System::Execute();
         continue;
+      }
+      else
+      {
+        InputManager::PollSources();
       }
 
       Host::PumpMessagesOnCPUThread();
@@ -652,6 +705,13 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 
     // the rest of initialization happens on the CPU thread.
     WinRTHost::StartCPUThread();
+
+    // Refresh inputs
+    window.Dispatcher().RunAsync(CoreDispatcherPriority::Normal, []() {
+      Sleep(500);
+      InputManager::ReloadDevices();
+    });
+
 
     while (s_running.load())
     {
