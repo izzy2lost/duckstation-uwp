@@ -733,7 +733,7 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
     while (s_running.load())
     {
         window.Dispatcher().ProcessEvents(CoreProcessEventsOption::ProcessAllIfPresent);
-        WinRTHost::ProcessCPUThreadEvents(false);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     WinRTHost::CancelAsyncOp();
