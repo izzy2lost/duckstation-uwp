@@ -31,7 +31,7 @@
 #include <winioctl.h>
 
 #if defined(_UWP)
-#define CREATEFILEWFUNC CreateFileFromAppW
+#define CREATEFILEWFUNC CreateFile2FromAppW
 #include <fcntl.h>
 #include <io.h>
 
@@ -262,9 +262,14 @@ std::string Path::RealPath(const std::string_view& path)
         // if not a link, go to the next component
         if (attribs & FILE_ATTRIBUTE_REPARSE_POINT)
         {
+#ifndef _UWP
           const HANDLE hFile =
             CREATEFILEWFUNC(wrealpath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                         nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+#else
+          const HANDLE hFile = 
+           CreateFile2FromAppW(wrealpath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, CREATE_NEW, nullptr);
+#endif
           if (hFile != INVALID_HANDLE_VALUE)
           {
             // is a link! resolve it.
@@ -1434,13 +1439,24 @@ bool FileSystem::StatFile(const char* path, FILESYSTEM_STAT_DATA* sd)
   HANDLE hFile;
   if (fileAttributes & FILE_ATTRIBUTE_DIRECTORY)
   {
+#ifndef _UWP
     hFile = CREATEFILEWFUNC(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                         OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+#else
+    hFile = CreateFile2FromAppW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                OPEN_EXISTING, nullptr);
+#endif
   }
   else
   {
+#ifndef _UWP
     hFile = CREATEFILEWFUNC(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                         OPEN_EXISTING, 0, nullptr);
+#else
+    hFile = CreateFile2FromAppW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                OPEN_EXISTING, nullptr);
+
+#endif
   }
 
   // createfile succeded?
@@ -1769,8 +1785,14 @@ bool FileSystem::SetPathCompression(const char* path, bool enable)
   const bool isFile = !(attrs & FILE_ATTRIBUTE_DIRECTORY);
   const DWORD flags = isFile ? FILE_ATTRIBUTE_NORMAL : (FILE_FLAG_BACKUP_SEMANTICS | FILE_ATTRIBUTE_DIRECTORY);
 
+#ifndef _UWP
   const HANDLE handle = CREATEFILEWFUNC(wpath.c_str(), FILE_GENERIC_WRITE | FILE_GENERIC_READ,
                                     FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, flags, nullptr);
+#else
+  const HANDLE handle = CreateFile2FromAppW(wpath.c_str(), FILE_GENERIC_WRITE | FILE_GENERIC_READ,
+                                             FILE_SHARE_READ | FILE_SHARE_DELETE, OPEN_EXISTING, nullptr);
+#endif
+
   if (handle == INVALID_HANDLE_VALUE)
     return false;
 

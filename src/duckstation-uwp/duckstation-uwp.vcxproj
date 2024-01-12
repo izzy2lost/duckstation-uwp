@@ -108,7 +108,7 @@
     <WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>
     <WindowsTargetPlatformMinVersion>10.0.17134.0</WindowsTargetPlatformMinVersion>
     <ApplicationTypeRevision>10.0</ApplicationTypeRevision>
-    <AppxPackageSigningEnabled>false</AppxPackageSigningEnabled>
+    <AppxPackageSigningEnabled>True</AppxPackageSigningEnabled>
   </PropertyGroup>
   <Import Project="..\..\dep\msvc\vsprops\Toolkit.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -238,6 +238,8 @@
     <AppxBundle>Always</AppxBundle>
     <AppxBundlePlatforms>x64</AppxBundlePlatforms>
     <HoursBetweenUpdateChecks>0</HoursBetweenUpdateChecks>
+    <PackageCertificateKeyFile>duckstation-uwp_TemporaryKey.pfx</PackageCertificateKeyFile>
+    <AppxPackageSigningTimestampDigestAlgorithm>SHA256</AppxPackageSigningTimestampDigestAlgorithm>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
     <OutDir>$(SolutionDir)bin\</OutDir>
@@ -496,6 +498,7 @@
     <Text Include="resources\sounds\achievements\README.txt" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="duckstation-uwp_TemporaryKey.pfx" />
     <None Include="resources\gamedb.json">
       <DeploymentContent>true</DeploymentContent>
     </None>

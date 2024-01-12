@@ -58,6 +58,8 @@ using namespace winrt::Windows::UI::Core;
 using namespace winrt::Windows::UI::Composition;
 
 static constexpr u32 SETTINGS_VERSION = 3;
+static constexpr auto CPU_THREAD_POLL_INTERVAL = std::chrono::milliseconds(8); // how often we'll poll controllers when paused
+
 
 
 //////////////////////////////////////////////////////////////////////////
@@ -98,6 +100,7 @@ namespace WinRTHost {
   static void CancelAsyncOp();
   static void AsyncOpThreadEntryPoint(std::function<void(ProgressCallback*)> callback);
   static void ProcessCPUThreadEvents(bool block);
+  static void SaveSettings(); 
   static void SetupXboxController(INISettingsInterface& si);
   } // namespace WinRTHost
 
@@ -170,14 +173,14 @@ bool WinRTHost::InitializeConfig()
     ::System::SetDefaultSettings(*s_base_settings_interface);
     EmuFolders::SetDefaults();
     EmuFolders::Save(*s_base_settings_interface);
-  }
 
-    InputManager::SetDefaultSourceConfig(*s_base_settings_interface);
+	InputManager::SetDefaultSourceConfig(*s_base_settings_interface);
     //Settings::SetDefaultControllerConfig(*s_base_settings_interface);
     SetupXboxController(*s_base_settings_interface);
     Settings::SetDefaultHotkeyConfig(*s_base_settings_interface);
-
-    s_base_settings_interface->Save();
+  }
+    
+  s_base_settings_interface->Save();
 
   EmuFolders::LoadConfig(*s_base_settings_interface.get());
   EmuFolders::EnsureFoldersExist();
@@ -229,6 +232,13 @@ std::optional<WindowInfo> WinRTHost::GetPlatformWindowInfo()
     }
 
     return wi;
+}
+
+void WinRTHost::SaveSettings()
+{
+    auto lock = Host::GetSettingsLock();
+    if (!s_base_settings_interface->Save())
+      Log_ErrorPrintf("Failed to save settings.");
 }
 
 void WinRTHost::StartCPUThread()
@@ -314,6 +324,13 @@ void WinRTHost::ProcessCPUThreadEvents(bool block)
       {
         if (!block || !s_running.load(std::memory_order_acquire))
           return;
+
+         // we still need to keep polling the controllers when we're paused
+        do
+        {
+          InputManager::PollSources();
+        } while (!s_cpu_thread_event_posted.wait_for(lock, CPU_THREAD_POLL_INTERVAL,
+                                                     []() { return !s_cpu_thread_events.empty(); }));
       }
 
       // return after processing all events if we had one
@@ -617,7 +634,7 @@ void Host::CheckForSettingsChanges(const Settings& old_settings)
 
 void Host::CommitBaseSettingChanges()
 {
-  //NoGUIHost::SaveSettings();
+  WinRTHost::SaveSettings();
 }
 
 
@@ -698,6 +715,10 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
     CoreWindow window = CoreWindow::GetForCurrentThread();
     s_corewind = &window;
     window.Activate();
+
+    auto navigation = winrt::Windows::UI::Core::SystemNavigationManager::GetForCurrentView();
+    navigation.BackRequested([](const winrt::Windows::Foundation::IInspectable&,
+                                const winrt::Windows::UI::Core::BackRequestedEventArgs& args) { args.Handled(true); });
 
     CrashHandler::Install();
 
