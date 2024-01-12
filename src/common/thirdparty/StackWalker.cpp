@@ -94,7 +94,7 @@
 
 // If VC7 and later, then use the shipped 'dbghelp.h'-file
 #pragma pack(push, 8)
-#if _MSC_VER >= 1300
+#if _MSC_VER >= 1300 && !defined(_UWP)
 #include <dbghelp.h>
 #else
 // inline the important dbghelp.h-declarations...
@@ -409,9 +409,15 @@ public:
       if (this->pSGSP(m_hProcess, buf, StackWalker::STACKWALK_MAX_NAMELEN) == FALSE)
         this->m_parent->OnDbgHelpErr("SymGetSearchPath", GetLastError(), 0);
     }
+
+#ifndef _UWP
     char  szUserName[1024] = {0};
     DWORD dwSize = 1024;
+
     GetUserNameA(szUserName, &dwSize);
+#else
+    char szUserName[] = "User";
+#endif
     this->m_parent->OnSymInit(buf, symOptions, szUserName);
 
     return TRUE;
@@ -744,6 +750,7 @@ private:
     if ((m_parent != NULL) && (szImg != NULL))
     {
       // try to retrieve the file-version:
+#ifndef _UWP
       if ((this->m_parent->m_options & StackWalker::RetrieveFileVersion) != 0)
       {
         VS_FIXEDFILEINFO* fInfo = NULL;
@@ -770,6 +777,7 @@ private:
           }
         }
       }
+#endif
 
       // Retrieve some additional-infos about the module
       IMAGEHLP_MODULE64_V3 Module;
@@ -1351,11 +1359,15 @@ BOOL __stdcall StackWalker::myReadProcMem(HANDLE  hProcess,
 {
   if (s_readMemoryFunction == NULL)
   {
+#ifndef _UWP
     SIZE_T st;
     BOOL   bRet = ReadProcessMemory(hProcess, (LPVOID)qwBaseAddress, lpBuffer, nSize, &st);
     *lpNumberOfBytesRead = (DWORD)st;
     //printf("ReadMemory: hProcess: %p, baseAddr: %p, buffer: %p, size: %d, read: %d, result: %d\n", hProcess, (LPVOID) qwBaseAddress, lpBuffer, nSize, (DWORD) st, (DWORD) bRet);
     return bRet;
+#else
+    return false;
+#endif;
   }
   else
   {

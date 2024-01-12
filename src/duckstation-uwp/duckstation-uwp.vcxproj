@@ -51,10 +51,55 @@
       <Platform>ARM64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\dep\fmt\fmt.vcxproj">
+      <Project>{8BE398E6-B882-4248-9065-FECC8728E038}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\dep\imgui\imgui.vcxproj">
+      <Project>{bb08260f-6fbc-46af-8924-090ee71360c6}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\dep\rainterface\rainterface.vcxproj">
+      <Project>{e4357877-d459-45c7-b8f6-dcbb587bb528}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\dep\rcheevos\rcheevos.vcxproj">
+      <Project>{4ba0a6d4-3ae1-42b2-9347-096fd023ff64}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\dep\stb\stb.vcxproj">
+      <Project>{ed601289-ac1a-46b8-a8ed-17db9eb73423}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\dep\vixl\vixl.vcxproj" Condition="'$(Platform)'=='ARM64'">
+      <Project>{8906836e-f06e-46e8-b11a-74e5e8c7b8fb}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\dep\xxhash\xxhash.vcxproj">
+      <Project>{09553c96-9f39-49bf-8ae6-7acbd07c410c}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\dep\zlib\zlib.vcxproj">
+      <Project>{7ff9fdb9-d504-47db-a16a-b08071999620}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\dep\zstd\zstd.vcxproj">
+      <Project>{73ee0c55-6ffe-44e7-9c12-baa52434a797}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\dep\zydis\zydis.vcxproj" Condition="'$(Platform)'=='x64' And $(Configuration.Contains('Debug'))">
+      <Project>{c51a346a-86b2-46df-9bb3-d0aa7e5d8699}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\scmversion\scmversion.vcxproj">
+      <Project>{075ced82-6a20-46df-94c7-9624ac9ddbeb}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\common\common.vcxproj">
+      <Project>{EE054E08-3799-4A59-A422-18259C105FFD}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\core\core.vcxproj">
+      <Project>{868B98C8-65A1-494B-8346-250A73A48C0A}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\util\util.vcxproj">
+      <Project>{57f6206d-f264-4b07-baf8-11b9bbe1f455}</Project>
+    </ProjectReference>
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{f77b13f1-967a-4c9e-ab69-e5afeef5a880}</ProjectGuid>
-    <Keyword>DirectXApp</Keyword>
     <MinimalCoreWin>true</MinimalCoreWin>
+    <CppWinRTOptimized>true</CppWinRTOptimized>
+    <CppWinRTRootNamespaceAutoMerge>true</CppWinRTRootNamespaceAutoMerge>
     <RootNamespace>duckstation_uwp</RootNamespace>
     <DefaultLanguage>en-US</DefaultLanguage>
     <MinimumVisualStudioVersion>14.0</MinimumVisualStudioVersion>
@@ -187,6 +232,10 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
+    <OutDir>$(SolutionDir)bin\</OutDir>
+    <IntDir>$(SolutionDir)build\obj-$(ProjectName)-$(PlatformName)-$(Configuration)\</IntDir>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
     <Link>
       <AdditionalDependencies>d3d12.lib;dxgi.lib;dxguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -334,7 +383,27 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
     <Link>
-      <AdditionalDependencies>$(RootBuildDir)duckstation-nogui.lib;setupapi.lib;comctl32.lib;ws2_32.lib;shlwapi.lib;winmm.lib;rpcrt4.lib;xinputuap.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateWindowsMetadata>false</GenerateWindowsMetadata>
+      <AdditionalDependencies>
+			    $(RootBuildDir)common\common.lib;
+			    $(RootBuildDir)core\core.lib;
+			    $(RootBuildDir)util\util.lib;
+			    $(RootBuildDir)duckstation-nogui\duckstation-nogui.lib;
+			    $(RootBuildDir)d3d12ma\d3d12ma.lib;
+			    $(RootBuildDir)fmt\fmt.lib;
+			    $(RootBuildDir)imgui\imgui.lib;
+			    $(RootBuildDir)libchdr\libchdr.lib;
+			    $(RootBuildDir)lzma\lzma.lib;
+			    $(RootBuildDir)rcheevos\rcheevos.lib;
+			    $(RootBuildDir)reshadefx\reshadefx.lib;
+			    $(RootBuildDir)scmversion\scmversion.lib;
+			    $(RootBuildDir)soundtouch\soundtouch.lib;
+			    $(RootBuildDir)stb\stb.lib;
+			    $(RootBuildDir)xxhash\xxhash.lib;
+			    $(RootBuildDir)zlib\zlib.lib;
+			    $(RootBuildDir)zstd\zstd.lib;
+			    %(AdditionalDependencies)
+	    </AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories); $(RootBuildDir); $(VCInstallDir)\lib\store\amd64; $(VCInstallDir)\lib\amd64</AdditionalLibraryDirectories>
     </Link>
     <ClCompile>
@@ -347,7 +416,8 @@
       <CompileAsWinRT>false</CompileAsWinRT>
     </ClCompile>
     <ProjectReference>
-      <UseLibraryDependencyInputs>true</UseLibraryDependencyInputs>
+      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
     </ProjectReference>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -383,6 +453,7 @@
     <ClCompile Include="winrt_nogui_platform.cpp" />
   </ItemGroup>
   <Import Project="..\..\dep\msvc\vsprops\Base.props" />
+  <Import Project="..\common\common.props" />
   <ItemGroup>
     <AppxManifest Include="Package.appxmanifest">
       <SubType>Designer</SubType>

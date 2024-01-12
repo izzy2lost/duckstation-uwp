@@ -122,6 +122,8 @@
     <ClCompile>
       <ObjectFileName>$(IntDir)/%(RelativeDir)/</ObjectFileName>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(SolutionDir)dep\zstd\lib</AdditionalIncludeDirectories>
+      <CompileAsWinRT Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">false</CompileAsWinRT>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">stdcpp20</LanguageStandard>
     </ClCompile>
   </ItemDefinitionGroup>
   <Import Project="..\..\dep\msvc\vsprops\Targets.props" />

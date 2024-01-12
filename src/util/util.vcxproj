@@ -319,6 +319,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <ForcedIncludeFiles>pch.h</ForcedIncludeFiles>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">stdcpp20</LanguageStandard>
+      <CompileAsWinRT Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">false</CompileAsWinRT>
     </ClCompile>
   </ItemDefinitionGroup>
   <Import Project="..\..\dep\msvc\vsprops\Targets.props" />

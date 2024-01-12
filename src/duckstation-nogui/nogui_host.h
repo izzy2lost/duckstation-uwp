@@ -3,12 +3,9 @@
 
 #pragma once
 #include "common/types.h"
-
+#include <winrt/Windows.UI.Core.h>
 #include <functional>
 #include <string>
-
-#define DllImport __declspec(dllimport)
-#define DllExport __declspec(dllexport)
 
 namespace NoGUIHost {
 /// Sets batch mode (exit after game shutdown).
@@ -38,6 +35,8 @@ bool GetSavedPlatformWindowGeometry(s32* x, s32* y, s32* width, s32* height);
 void SavePlatformWindowGeometry(s32 x, s32 y, s32 width, s32 height);
 
 // Helper to fire off main
+int XboxRun();
 void externalRun(std::string path);
+
 
 } // namespace NoGUIHost

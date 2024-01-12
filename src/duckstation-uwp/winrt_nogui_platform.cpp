@@ -49,8 +49,7 @@ using namespace winrt::Windows::UI::Core;
 using namespace winrt::Windows::UI::Composition;
 
 
-
-static CoreWindow* s_corewind = nullptr;
+static winrt::Windows::UI::Core::CoreWindow s_corewind{nullptr};
 static std::deque<std::function<void()>> m_event_queue;
 static std::mutex m_event_mutex;
 
@@ -79,9 +78,7 @@ WinRTNoGUIPlatform::~WinRTNoGUIPlatform()
 
 bool WinRTNoGUIPlatform::Initialize()
 {
-  CoreWindow window = CoreWindow::GetForCurrentThread();
-  window.Activate();
-  s_corewind = &window;
+  s_corewind = CoreWindow::GetForCurrentThread();
 
   auto navigation = winrt::Windows::UI::Core::SystemNavigationManager::GetForCurrentView();
   navigation.BackRequested([](const winrt::Windows::Foundation::IInspectable&,
@@ -237,7 +234,7 @@ std::optional<WindowInfo> WinRTHost::GetPlatformWindowInfo()
     wi.surface_height = height;
     wi.surface_scale = 1.0f;
     wi.type = WindowInfo::Type::Win32;
-    wi.window_handle = reinterpret_cast<void*>(winrt::get_abi(*s_corewind));
+    wi.window_handle = reinterpret_cast<void*>(winrt::get_abi(s_corewind)); 
   }
   else
   {

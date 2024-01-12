@@ -51,7 +51,10 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
   void Uninitialize() {}
 
   void Run() { 
-      NoGUIHost::externalRun(UWP::GetLocalFolder());
+    CoreWindow window = CoreWindow::GetForCurrentThread();
+    window.Activate();
+
+    NoGUIHost::externalRun(UWP::GetLocalFolder());
   }
 
   void SetWindow(CoreWindow const& window) { window.CharacterReceived({this, &App::OnKeyInput}); }

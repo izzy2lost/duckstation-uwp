@@ -29,6 +29,7 @@
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
       <AdditionalIncludeDirectories>$(SolutionDir)dep\fmt\include;$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>FMT_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">stdcpp20</LanguageStandard>
     </ClCompile>
   </ItemDefinitionGroup>
   <Import Project="..\msvc\vsprops\Targets.props" />

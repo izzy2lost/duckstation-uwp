@@ -34,6 +34,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories></AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_UWP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <CompileAsWinRT Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">false</CompileAsWinRT>
     </ClCompile>
   </ItemDefinitionGroup>
 

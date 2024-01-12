@@ -69,7 +69,7 @@ bool D3D11Device::CreateDevice(const std::string_view& adapter, bool threaded_pr
   std::unique_lock lock(s_instance_mutex);
 
   UINT create_flags = 0;
-  if (m_debug_device)
+  if (m_debug_device || true)
     create_flags |= D3D11_CREATE_DEVICE_DEBUG;
 
   m_dxgi_factory = D3DCommon::CreateFactory(m_debug_device);
@@ -187,12 +187,13 @@ void D3D11Device::SetFeatures(FeatureMask disabled_features)
 
 bool D3D11Device::CreateSwapChain()
 {
-  if (m_window_info.type != WindowInfo::Type::Win32)
+  if (m_window_info.type != WindowInfo::Type::Win32 && m_window_info.type != WindowInfo::Type::WINRT)
     return false;
 
   const DXGI_FORMAT dxgi_format = D3DCommon::GetFormatMapping(s_swap_chain_format).resource_format;
-
   const HWND window_hwnd = reinterpret_cast<HWND>(m_window_info.window_handle);
+
+#ifndef _UWP
   RECT client_rc{};
   GetClientRect(window_hwnd, &client_rc);
 
@@ -212,25 +213,32 @@ bool D3D11Device::CreateSwapChain()
   {
     m_is_exclusive_fullscreen = false;
   }
+  u32 surface_width = static_cast<u32>(client_rc.right - client_rc.left);
+  u32 surface_height = static_cast<u32>(client_rc.right - client_rc.left);
+#else
+  u32 surface_width = m_window_info.surface_width;
+  u32 surface_height = m_window_info.surface_height;
+#endif
 
   m_using_flip_model_swap_chain =
     !Host::GetBoolSettingValue("Display", "UseBlitSwapChain", false) || m_is_exclusive_fullscreen;
 
   DXGI_SWAP_CHAIN_DESC1 swap_chain_desc = {};
-  swap_chain_desc.Width = static_cast<u32>(client_rc.right - client_rc.left);
-  swap_chain_desc.Height = static_cast<u32>(client_rc.bottom - client_rc.top);
+  swap_chain_desc.Width = surface_width;
+  swap_chain_desc.Height = surface_height; 
   swap_chain_desc.Format = dxgi_format;
   swap_chain_desc.SampleDesc.Count = 1;
   swap_chain_desc.BufferCount = 3;
   swap_chain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-  swap_chain_desc.SwapEffect = m_using_flip_model_swap_chain ? DXGI_SWAP_EFFECT_FLIP_DISCARD : DXGI_SWAP_EFFECT_DISCARD;
+  //swap_chain_desc.SwapEffect = m_using_flip_model_swap_chain ? DXGI_SWAP_EFFECT_FLIP_DISCARD : DXGI_SWAP_EFFECT_DISCARD;
 
   m_using_allow_tearing = (m_allow_tearing_supported && m_using_flip_model_swap_chain && !m_is_exclusive_fullscreen);
-  if (m_using_allow_tearing)
-    swap_chain_desc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+  //if (m_using_allow_tearing)
+    //swap_chain_desc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
   HRESULT hr = S_OK;
 
+#ifndef _UWP
   if (m_is_exclusive_fullscreen)
   {
     DXGI_SWAP_CHAIN_DESC1 fs_sd_desc = swap_chain_desc;
@@ -287,6 +295,18 @@ bool D3D11Device::CreateSwapChain()
   {
     Log_WarningPrintf("MakeWindowAssociation() to disable ALT+ENTER failed");
   }
+#else
+  Log_VerbosePrintf("Creating a %dx%d winrt swap chain", swap_chain_desc.Width, swap_chain_desc.Height);
+  hr = m_dxgi_factory->CreateSwapChainForCoreWindow(m_device.Get(),
+                        static_cast<::IUnknown*>(m_window_info.window_handle),
+                        &swap_chain_desc, nullptr, m_swap_chain.ReleaseAndGetAddressOf());
+
+  if (FAILED(hr))
+  {
+    Log_ErrorPrintf("winrt swap chain create failed 0x%08X", hr);
+    return false;
+  }
+#endif
 
   if (!CreateSwapChainRTV())
   {
@@ -330,7 +350,7 @@ bool D3D11Device::CreateSwapChainRTV()
 
   if (m_window_info.type == WindowInfo::Type::Win32)
   {
-    BOOL fullscreen = FALSE;
+    BOOL fullscreen = TRUE;
     DXGI_SWAP_CHAIN_DESC desc;
     if (SUCCEEDED(m_swap_chain->GetFullscreenState(&fullscreen, nullptr)) && fullscreen &&
         SUCCEEDED(m_swap_chain->GetDesc(&desc)))

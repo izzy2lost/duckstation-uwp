@@ -95,6 +95,7 @@
     <BuildingForUWP Condition="'$(Configuration)'=='DebugUWP' Or '$(Configuration)'=='ReleaseUWP'">true</BuildingForUWP>
   </PropertyGroup>
 
+
   <PropertyGroup Label="Globals" Condition="'$(BuildingForUWP)'!='true'">
     <ProjectName>$(MSBuildProjectName)</ProjectName>
     <RootNamespace>$(MSBuildProjectName)</RootNamespace>

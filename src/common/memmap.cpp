@@ -122,8 +122,22 @@ bool SharedMemoryMappingArea::Create(size_t size)
 
   AssertMsg(Common::IsAlignedPow2(size, HOST_PAGE_SIZE), "Size is page aligned");
 
+#ifndef _UWP
   m_base_ptr = static_cast<u8*>(VirtualAlloc2(GetCurrentProcess(), nullptr, size, MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
                                               PAGE_NOACCESS, nullptr, 0));
+#else
+  m_base_ptr = static_cast<u8*>(
+    VirtualAlloc2FromApp(GetCurrentProcess(), nullptr, size, MEM_COMMIT, PAGE_READWRITE, nullptr, 0));
+  if (m_base_ptr)
+  {
+    ULONG old_protection;
+    if (!VirtualProtectFromApp(m_base_ptr, size, PAGE_EXECUTE_READWRITE, &old_protection))
+    {
+      VirtualFree(m_base_ptr, size, MEM_RELEASE);
+      return false;
+    }
+  }
+#endif
   if (!m_base_ptr)
     return false;
 
@@ -195,6 +209,7 @@ u8* SharedMemoryMappingArea::Map(void* file_handle, size_t file_offset, void* ma
     }
   }
 
+#ifndef _UWP
   // actually do the mapping, replacing the placeholder on the range
   if (!MapViewOfFile3(static_cast<HANDLE>(file_handle), GetCurrentProcess(), map_base, file_offset, map_size,
                       MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0))
@@ -202,6 +217,14 @@ u8* SharedMemoryMappingArea::Map(void* file_handle, size_t file_offset, void* ma
     Log_ErrorPrintf("MapViewOfFile3() failed: %u", GetLastError());
     return nullptr;
   }
+#else
+  if (!MapViewOfFile3FromApp(static_cast<HANDLE>(file_handle), GetCurrentProcess(), map_base, file_offset, map_size,
+                             MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, nullptr, 0))
+  {
+    Log_ErrorPrintf("MapViewOfFile3FromApp() failed: %u", GetLastError());
+    return nullptr;
+  }
+#endif
 
   if (mode != PageProtect::ReadWrite)
   {

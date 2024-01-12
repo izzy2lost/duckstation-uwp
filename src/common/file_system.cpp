@@ -31,6 +31,7 @@
 #include <winioctl.h>
 
 #if defined(_UWP)
+#define CREATEFILEWFUNC CreateFileFromAppW
 #include <fcntl.h>
 #include <io.h>
 
@@ -44,6 +45,7 @@
 #endif
 
 #else
+#define CREATEFILEWFUNC CreateFileW
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -248,7 +250,7 @@ std::string Path::RealPath(const std::string_view& path)
         if (attribs & FILE_ATTRIBUTE_REPARSE_POINT)
         {
           const HANDLE hFile =
-            CreateFileW(wrealpath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            CREATEFILEWFUNC(wrealpath.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                         nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
           if (hFile != INVALID_HANDLE_VALUE)
           {
@@ -1430,12 +1432,12 @@ bool FileSystem::StatFile(const char* path, FILESYSTEM_STAT_DATA* sd)
   HANDLE hFile;
   if (fileAttributes & FILE_ATTRIBUTE_DIRECTORY)
   {
-    hFile = CreateFileW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+    hFile = CREATEFILEWFUNC(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                         OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
   }
   else
   {
-    hFile = CreateFileW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+    hFile = CREATEFILEWFUNC(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
                         OPEN_EXISTING, 0, nullptr);
   }
 
@@ -1735,7 +1737,7 @@ bool FileSystem::SetPathCompression(const char* path, bool enable)
   const bool isFile = !(attrs & FILE_ATTRIBUTE_DIRECTORY);
   const DWORD flags = isFile ? FILE_ATTRIBUTE_NORMAL : (FILE_FLAG_BACKUP_SEMANTICS | FILE_ATTRIBUTE_DIRECTORY);
 
-  const HANDLE handle = CreateFileW(wpath.c_str(), FILE_GENERIC_WRITE | FILE_GENERIC_READ,
+  const HANDLE handle = CREATEFILEWFUNC(wpath.c_str(), FILE_GENERIC_WRITE | FILE_GENERIC_READ,
                                     FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, flags, nullptr);
   if (handle == INVALID_HANDLE_VALUE)
     return false;

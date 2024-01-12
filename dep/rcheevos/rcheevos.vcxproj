@@ -54,6 +54,7 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{4BA0A6D4-3AE1-42B2-9347-096FD023FF64}</ProjectGuid>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="..\msvc\vsprops\StaticLibrary.props" />
   <ItemDefinitionGroup>
@@ -61,6 +62,7 @@
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
       <PreprocessorDefinitions>RC_DISABLE_LUA;RCHEEVOS_URL_SSL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">stdcpp20</LanguageStandard>
     </ClCompile>
   </ItemDefinitionGroup>
   <Import Project="..\msvc\vsprops\Targets.props" />

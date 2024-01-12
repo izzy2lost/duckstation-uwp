@@ -43,9 +43,6 @@
     <ProjectReference Include="..\core\core.vcxproj">
       <Project>{868b98c8-65a1-494b-8346-250a73a48c0a}</Project>
     </ProjectReference>
-    <ProjectReference Include="..\util\util.vcxproj">
-      <Project>{57f6206d-f264-4b07-baf8-11b9bbe1f455}</Project>
-    </ProjectReference>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{0A172B2E-DC67-49FC-A4C1-975F93C586C4}</ProjectGuid>
@@ -64,7 +61,7 @@
       <ForcedIncludeFiles>pch.h</ForcedIncludeFiles>
     </ClCompile>
     <ProjectReference>
-      <LinkLibraryDependencies Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">true</LinkLibraryDependencies>
+      <LinkLibraryDependencies Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">false</LinkLibraryDependencies>
     </ProjectReference>
   </ItemDefinitionGroup>
   <Import Project="..\..\dep\msvc\vsprops\Targets.props" />
