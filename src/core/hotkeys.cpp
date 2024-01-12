@@ -137,7 +137,7 @@ BEGIN_HOTKEY_LIST(g_common_hotkeys)
 DEFINE_HOTKEY("OpenPauseMenu", TRANSLATE_NOOP("Hotkeys", "General"), TRANSLATE_NOOP("Hotkeys", "Open Pause Menu"),
               [](s32 pressed) {
                 if (!pressed && CanPause())
-                  FullscreenUI::OpenPauseMenu();
+                  Host::RunOnCPUThread(FullscreenUI::OpenPauseMenu);
               })
 #endif
 

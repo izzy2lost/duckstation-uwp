@@ -298,12 +298,8 @@ void WinRTHost::CPUThreadMainLoop()
     {
       if (::System::IsRunning())
       {
-        ::System::Execute();
-        continue;
-      }
-      else
-      {
-        InputManager::PollSources();
+          ::System::Execute();
+          continue;
       }
 
       Host::PumpMessagesOnCPUThread();
@@ -325,7 +321,7 @@ void WinRTHost::ProcessCPUThreadEvents(bool block)
         if (!block || !s_running.load(std::memory_order_acquire))
           return;
 
-         // we still need to keep polling the controllers when we're paused
+        // we still need to keep polling the controllers when we're paused
         do
         {
           InputManager::PollSources();

@@ -20,7 +20,7 @@ void WindowInfo::SetSurfaceless()
 #endif
 }
 
-#if defined(_WIN32) && ~defined(_UWP)
+#if defined(_WIN32) && !defined(_UWP)
 
 #include "common/windows_headers.h"
 #include <dwmapi.h>

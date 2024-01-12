@@ -306,11 +306,9 @@ bool RemoveHandler(Handler handler)
 
   s_exception_handler_callback = nullptr;
 
-#if defined(_WIN32) && !defined(_UWP) && (defined(CPU_ARCH_X64) || defined(CPU_ARCH_ARM64))
+#if defined(_WIN32) && (defined(CPU_ARCH_X64) || defined(CPU_ARCH_ARM64))
   RemoveVectoredExceptionHandler(s_veh_handle);
   s_veh_handle = nullptr;
-#elif defined(_UWP)
-  // nothing to do here, any unregistered regions will be ignored
 #elif defined(USE_SIGSEGV)
   struct sigaction sa;
 #if defined(__APPLE__) || defined(__aarch64__)

@@ -119,7 +119,7 @@ PerfScope MIPSPerfScope("MIPS");
 #endif
 
 // Currently remapping the code buffer doesn't work in macOS. TODO: Make dynamic instead...
-#ifndef __APPLE__ && !defined(_UWP)
+#ifndef __APPLE__
 #define USE_STATIC_CODE_BUFFER 1
 #endif
 
@@ -177,10 +177,6 @@ void CPU::CodeCache::ProcessStartup()
   {
     Panic("Failed to initialize code space");
   }
-#endif
-
-#ifdef _UWP
-  s_code_buffer.ReserveCode(Common::PageFaultHandler::GetHandlerCodeSize());
 #endif
 
   if (!Common::PageFaultHandler::InstallHandler(ExceptionHandler))
