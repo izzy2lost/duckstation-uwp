@@ -231,7 +231,14 @@
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
-  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Label="UserMacros">
+    <GenerateAppInstallerFile>False</GenerateAppInstallerFile>
+    <AppxAutoIncrementPackageRevision>False</AppxAutoIncrementPackageRevision>
+    <GenerateTestArtifacts>True</GenerateTestArtifacts>
+    <AppxBundle>Always</AppxBundle>
+    <AppxBundlePlatforms>x64</AppxBundlePlatforms>
+    <HoursBetweenUpdateChecks>0</HoursBetweenUpdateChecks>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
     <OutDir>$(SolutionDir)bin\</OutDir>
     <IntDir>$(SolutionDir)build\obj-$(ProjectName)-$(PlatformName)-$(Configuration)\</IntDir>
@@ -427,6 +434,27 @@
     <Image Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" />
     <Image Include="Assets\StoreLogo.png" />
     <Image Include="Assets\Wide310x150Logo.scale-200.png" />
+    <Image Include="resources\fullscreenui\address-book-new.png" />
+    <Image Include="resources\fullscreenui\applications-system.png" />
+    <Image Include="resources\fullscreenui\media-cdrom.png" />
+    <Image Include="resources\fullscreenui\multimedia-player.png" />
+    <Image Include="resources\fullscreenui\NTSC-J.png" />
+    <Image Include="resources\fullscreenui\NTSC-U.png" />
+    <Image Include="resources\fullscreenui\PAL.png" />
+    <Image Include="resources\fullscreenui\star-0.png" />
+    <Image Include="resources\fullscreenui\star-1.png" />
+    <Image Include="resources\fullscreenui\star-2.png" />
+    <Image Include="resources\fullscreenui\star-3.png" />
+    <Image Include="resources\fullscreenui\star-4.png" />
+    <Image Include="resources\fullscreenui\star-5.png" />
+    <Image Include="resources\images\cover-placeholder.png" />
+    <Image Include="resources\images\crosshair.png" />
+    <Image Include="resources\images\duck.png" />
+    <Image Include="resources\images\placeholder.png" />
+    <Image Include="resources\no-save.png" />
+    <Image Include="resources\shaders\reshade\Textures\crt-newpixie\crtframe.png" />
+    <Image Include="resources\shaders\reshade\Textures\FontAtlas.png" />
+    <Image Include="resources\shaders\reshade\Textures\lut.png" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
@@ -458,6 +486,89 @@
     <AppxManifest Include="Package.appxmanifest">
       <SubType>Designer</SubType>
     </AppxManifest>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="resources\chtdb.txt" />
+    <Text Include="resources\fonts\LICENSE.txt" />
+    <Text Include="resources\gamecontrollerdb.txt" />
+    <Text Include="resources\images\sources.txt" />
+    <Text Include="resources\shaders\reshade\source.txt" />
+    <Text Include="resources\sounds\achievements\README.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="resources\gamedb.json">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\Cccalibrator.glsl">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\crt-lottes.glsl">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\reshade\Shaders\Blending.fxh">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\reshade\Shaders\DrawText.fxh">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\reshade\Shaders\Macros.fxh">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\reshade\Shaders\ReShade.fxh">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\reshade\Shaders\ReShadeUI.fxh">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\reshade\Shaders\TriDither.fxh">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\simple-brightness.glsl">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\simple-flip.glsl">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\simple-gamma.glsl">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\simple-sharpen.glsl">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Media Include="resources\sounds\achievements\lbsubmit.wav" />
+    <Media Include="resources\sounds\achievements\message.wav" />
+    <Media Include="resources\sounds\achievements\unlock.wav" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="resources\shaders\reshade\Shaders\CRT-NewPixie.fx">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\reshade\Shaders\CRTLottes2.fx">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\reshade\Shaders\Daltonize.fx">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\reshade\Shaders\Deband.fx">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\reshade\Shaders\FilmGrain2.fx">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\reshade\Shaders\LUT.fx">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\shaders\reshade\Shaders\scanlines-abs.fx">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Font Include="resources\fonts\fa-solid-900.ttf" />
+    <Font Include="resources\fonts\promptfont.otf" />
+    <Font Include="resources\fonts\Roboto-Regular.ttf" />
+    <Font Include="resources\fonts\RobotoMono-Medium.ttf" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

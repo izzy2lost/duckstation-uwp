@@ -578,6 +578,13 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
   void Initialize(CoreApplicationView const& v)
   {
     v.Activated({this, &App::OnActivate});
+
+    // Setup folders
+    const std::string program_path = FileSystem::GetProgramPath();
+
+    EmuFolders::AppRoot = Path::Canonicalize(Path::GetDirectory(program_path));
+    EmuFolders::Resources = Path::Combine(EmuFolders::AppRoot, "resources");
+    EmuFolders::DataRoot = EmuFolders::AppRoot;
   }
 
   void OnActivate(const winrt::Windows::ApplicationModel::Core::CoreApplicationView&,
