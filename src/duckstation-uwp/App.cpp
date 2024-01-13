@@ -695,6 +695,22 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
     EmuFolders::AppRoot = Path::Canonicalize(Path::GetDirectory(program_path));
     EmuFolders::Resources = Path::Combine(EmuFolders::AppRoot, "resources");
     EmuFolders::DataRoot = UWP::GetLocalFolder();
+
+    namespace WGI = winrt::Windows::Gaming::Input;
+    try
+    {
+        WGI::RawGameController::RawGameControllerAdded([](auto&&, const WGI::RawGameController raw_game_controller) {
+          Host::RunOnCPUThread([]() { InputManager::ReloadDevices(); });
+        });
+
+        WGI::RawGameController::RawGameControllerRemoved([](auto&&, const WGI::RawGameController raw_game_controller) {
+          Host::RunOnCPUThread([]() { InputManager::ReloadDevices(); });
+        });
+    }
+    catch (winrt::hresult_error)
+    {
+    }
+
   }
 
   void OnActivate(const winrt::Windows::ApplicationModel::Core::CoreApplicationView&,
