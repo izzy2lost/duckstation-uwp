@@ -277,6 +277,12 @@ void D3D12Device::DestroyDevice()
 
 bool D3D12Device::ReadPipelineCache(const std::string& filename)
 {
+// Caching is a nogo on xbox with D3D12
+#ifdef _UWP
+  Log_WarningPrint("Pipeline caching unavailable on xbox hardware.");
+  return false;
+#endif
+
   std::optional<std::vector<u8>> data;
 
   auto fp = FileSystem::OpenManagedCFile(filename.c_str(), "rb");

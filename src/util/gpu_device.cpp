@@ -211,7 +211,7 @@ RenderAPI GPUDevice::GetPreferredAPI()
 {
 #if defined(_WIN32) && !defined(_M_ARM64)
   // Perfer DX11 on Windows, except ARM64, where QCom has slow DX11 drivers.
-  return RenderAPI::D3D11;
+  return RenderAPI::D3D12;
 #elif defined(_WIN32) && defined(_M_ARM64)
   return RenderAPI::D3D12;
 #elif defined(__APPLE__)

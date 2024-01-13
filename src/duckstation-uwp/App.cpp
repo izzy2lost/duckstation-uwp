@@ -107,7 +107,7 @@ namespace WinRTHost {
 void WinRTHost::SetupXboxController(INISettingsInterface& si)
 {
   // TODO: Investigate DX12 black screen
-  //si.SetStringValue("GPU", "Renderer", "D3D12");
+  si.SetStringValue("GPU", "Renderer", "D3D12");
 
   si.SetBoolValue("Main", "SyncToHostRefreshRate", true);
   si.SetBoolValue("Display", "VSync", true);
@@ -175,8 +175,8 @@ bool WinRTHost::InitializeConfig()
     EmuFolders::Save(*s_base_settings_interface);
 
 	InputManager::SetDefaultSourceConfig(*s_base_settings_interface);
-    //Settings::SetDefaultControllerConfig(*s_base_settings_interface);
     SetupXboxController(*s_base_settings_interface);
+    Settings::SetDefaultControllerConfig(*s_base_settings_interface);
     Settings::SetDefaultHotkeyConfig(*s_base_settings_interface);
   }
     
