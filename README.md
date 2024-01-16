@@ -131,7 +131,7 @@ CHD images with built-in subchannel information are also supported.
 
 ## Building
 
-### Windows
+### Windows & UWP
 Requirements:
  - Visual Studio 2022
 
@@ -141,6 +141,8 @@ Requirements:
 4. Build solution.
 5. Binaries are located in `bin/x64`.
 6. Run `duckstation-qt-x64-Release.exe` or whichever config you used.
+
+__Note__: For UWP platforms, right click the `duckstation-uwp` project and then click Publish and follow the instructions in the wizard.  Signed appx bundles are GPL gray territory and distribution of such bundles is not endorsed by the main developers or the maintainer of this fork.  Please do not report issues that only affect this project to the main repository.
 
 ### Linux
 Requirements (Debian/Ubuntu package names):

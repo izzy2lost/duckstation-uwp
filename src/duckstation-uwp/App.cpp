@@ -92,6 +92,8 @@ namespace WinRTHost {
   static bool InBatchMode();
   static std::optional<WindowInfo> GetPlatformWindowInfo();
 
+  static std::string GetResourcePath(std::string_view name, bool allow_override);
+
   static void StartCPUThread();
   static void StopCPUThread();
   static void CPUThreadEntryPoint();
@@ -381,6 +383,12 @@ void WinRTHost::AsyncOpThreadEntryPoint(std::function<void(ProgressCallback*)> c
     s_async_op_progress = nullptr;
 }
 
+ALWAYS_INLINE std::string WinRTHost::GetResourcePath(std::string_view filename, bool allow_override)
+{
+    return allow_override ? EmuFolders::GetOverridableResourcePath(filename) :
+                            Path::Combine(EmuFolders::Resources, filename);
+}
+
 void Host::RunOnCPUThread(std::function<void()> function, bool block /* = false */)
 {
     std::unique_lock lock(s_cpu_thread_events_mutex);
@@ -476,33 +484,33 @@ s32 Host::Internal::GetTranslatedStringImpl(const std::string_view& context, con
   return static_cast<s32>(msg.size());
 }
 
-std::optional<std::vector<u8>> Host::ReadResourceFile(const char* filename)
+std::optional<std::vector<u8>> Host::ReadResourceFile(std::string_view filename, bool allow_override)
 {
-  const std::string path(Path::Combine(EmuFolders::Resources, filename));
+  const std::string path = WinRTHost::GetResourcePath(filename, allow_override);
   std::optional<std::vector<u8>> ret(FileSystem::ReadBinaryFile(path.c_str()));
   if (!ret.has_value())
     Log_ErrorPrintf("Failed to read resource file '%s'", filename);
   return ret;
 }
 
-bool Host::ResourceFileExists(const char* filename)
+bool Host::ResourceFileExists(std::string_view filename, bool allow_override)
 {
-  const std::string path(Path::Combine(EmuFolders::Resources, filename));
+  const std::string path = WinRTHost::GetResourcePath(filename, allow_override);
   return FileSystem::FileExists(path.c_str());
 }
 
-std::optional<std::string> Host::ReadResourceFileToString(const char* filename)
+std::optional<std::string> Host::ReadResourceFileToString(std::string_view filename, bool allow_override)
 {
-  const std::string path(Path::Combine(EmuFolders::Resources, filename));
+  const std::string path = WinRTHost::GetResourcePath(filename, allow_override);
   std::optional<std::string> ret(FileSystem::ReadFileToString(path.c_str()));
   if (!ret.has_value())
     Log_ErrorPrintf("Failed to read resource file to string '%s'", filename);
   return ret;
 }
 
-std::optional<std::time_t> Host::GetResourceFileTimestamp(const char* filename)
+std::optional<std::time_t> Host::GetResourceFileTimestamp(std::string_view filename, bool allow_override)
 {
-  const std::string path(Path::Combine(EmuFolders::Resources, filename));
+  const std::string path = WinRTHost::GetResourcePath(filename, allow_override);
   FILESYSTEM_STAT_DATA sd;
   if (!FileSystem::StatFile(path.c_str(), &sd))
   {

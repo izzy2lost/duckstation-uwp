@@ -1,3 +1,5 @@
+// Copied from nogui project, may need a UWP keymap instead
+// Original Commit: 6df7d9acda92a5e7ddbb0e5639c82cd2065a04f5
 #pragma once
 #include "common/types.h"
 #include "common/windows_headers.h"

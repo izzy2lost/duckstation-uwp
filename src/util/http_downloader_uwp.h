@@ -1,3 +1,6 @@
+// Pulled from 56ef250c367727a389ac86e5d6bfe43d66eba659
+// Originally authored by stenzek
+
 #pragma once
 #include "http_downloader.h"
 
