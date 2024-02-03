@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2023 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "vulkan_device.h"
@@ -13,6 +13,7 @@
 #include "common/align.h"
 #include "common/assert.h"
 #include "common/bitutils.h"
+#include "common/error.h"
 #include "common/file_system.h"
 #include "common/log.h"
 #include "common/path.h"
@@ -1139,13 +1140,33 @@ bool VulkanDevice::SetGPUTimingEnabled(bool enabled)
 
 void VulkanDevice::WaitForCommandBufferCompletion(u32 index)
 {
-  // Wait for this command buffer to be completed.
-  VkResult res = vkWaitForFences(m_device, 1, &m_frame_resources[index].fence, VK_TRUE, UINT64_MAX);
-  if (res != VK_SUCCESS)
+  // We might be waiting for the buffer we just submitted to the worker thread.
+  if (m_queued_present.command_buffer_index == index && !m_present_done.load(std::memory_order_acquire))
   {
-    LOG_VULKAN_ERROR(res, "vkWaitForFences failed: ");
-    m_last_submit_failed.store(true, std::memory_order_release);
-    return;
+    Log_WarningFmt("Waiting for threaded submission of cmdbuffer {}", index);
+    WaitForPresentComplete();
+  }
+
+  // Wait for this command buffer to be completed.
+  static constexpr u32 MAX_TIMEOUTS = 10;
+  u32 timeouts = 0;
+  for (;;)
+  {
+    VkResult res = vkWaitForFences(m_device, 1, &m_frame_resources[index].fence, VK_TRUE, UINT64_MAX);
+    if (res == VK_SUCCESS)
+      break;
+
+    if (res == VK_TIMEOUT && (++timeouts) <= MAX_TIMEOUTS)
+    {
+      Log_ErrorFmt("vkWaitForFences() for cmdbuffer {} failed with VK_TIMEOUT, trying again.", index);
+      continue;
+    }
+    else if (res != VK_SUCCESS)
+    {
+      LOG_VULKAN_ERROR(res, "vkWaitForFences() for cmdbuffer %u failed: ", index);
+      m_last_submit_failed.store(true, std::memory_order_release);
+      return;
+    }
   }
 
   // Clean up any resources for command buffers between the last known completed buffer and this
@@ -1161,7 +1182,7 @@ void VulkanDevice::WaitForCommandBufferCompletion(u32 index)
     if (m_gpu_timing_enabled && resources.timestamp_written)
     {
       std::array<u64, 2> timestamps;
-      res =
+      VkResult res =
         vkGetQueryPoolResults(m_device, m_timestamp_query_pool, index * 2, static_cast<u32>(timestamps.size()),
                               sizeof(u64) * timestamps.size(), timestamps.data(), sizeof(u64), VK_QUERY_RESULT_64_BIT);
       if (res == VK_SUCCESS)
@@ -1244,7 +1265,7 @@ void VulkanDevice::SubmitCommandBuffer(VulkanSwapChain* present_swap_chain /* = 
 
   m_queued_present.command_buffer_index = m_current_frame;
   m_queued_present.swap_chain = present_swap_chain;
-  m_present_done.store(false);
+  m_present_done.store(false, std::memory_order_release);
   m_present_queued_cv.notify_one();
 }
 
@@ -1315,7 +1336,7 @@ void VulkanDevice::DoPresent(VulkanSwapChain* present_swap_chain)
 
 void VulkanDevice::WaitForPresentComplete()
 {
-  if (m_present_done.load())
+  if (m_present_done.load(std::memory_order_acquire))
     return;
 
   std::unique_lock<std::mutex> lock(m_present_mutex);
@@ -1324,26 +1345,28 @@ void VulkanDevice::WaitForPresentComplete()
 
 void VulkanDevice::WaitForPresentComplete(std::unique_lock<std::mutex>& lock)
 {
-  if (m_present_done.load())
+  if (m_present_done.load(std::memory_order_acquire))
     return;
 
-  m_present_done_cv.wait(lock, [this]() { return m_present_done.load(); });
+  m_present_done_cv.wait(lock, [this]() { return m_present_done.load(std::memory_order_acquire); });
 }
 
 void VulkanDevice::PresentThread()
 {
   std::unique_lock<std::mutex> lock(m_present_mutex);
-  while (!m_present_thread_done.load())
+  while (!m_present_thread_done.load(std::memory_order_acquire))
   {
-    m_present_queued_cv.wait(lock, [this]() { return !m_present_done.load() || m_present_thread_done.load(); });
+    m_present_queued_cv.wait(lock, [this]() {
+      return !m_present_done.load(std::memory_order_acquire) || m_present_thread_done.load(std::memory_order_acquire);
+    });
 
-    if (m_present_done.load())
+    if (m_present_done.load(std::memory_order_acquire))
       continue;
 
     DoSubmitCommandBuffer(m_queued_present.command_buffer_index, m_queued_present.swap_chain);
     if (m_queued_present.swap_chain)
       DoPresent(m_queued_present.swap_chain);
-    m_present_done.store(true);
+    m_present_done.store(true, std::memory_order_release);
     m_present_done_cv.notify_one();
   }
 }
@@ -1351,7 +1374,7 @@ void VulkanDevice::PresentThread()
 void VulkanDevice::StartPresentThread()
 {
   DebugAssert(!m_present_thread.joinable());
-  m_present_thread_done.store(false);
+  m_present_thread_done.store(false, std::memory_order_release);
   m_present_thread = std::thread(&VulkanDevice::PresentThread, this);
 }
 
@@ -1363,7 +1386,7 @@ void VulkanDevice::StopPresentThread()
   {
     std::unique_lock<std::mutex> lock(m_present_mutex);
     WaitForPresentComplete(lock);
-    m_present_thread_done.store(true);
+    m_present_thread_done.store(true, std::memory_order_release);
     m_present_queued_cv.notify_one();
   }
 
@@ -1378,9 +1401,6 @@ void VulkanDevice::MoveToNextCommandBuffer()
 void VulkanDevice::BeginCommandBuffer(u32 index)
 {
   CommandBuffer& resources = m_frame_resources[index];
-
-  if (!m_present_done.load() && m_queued_present.command_buffer_index == index)
-    WaitForPresentComplete();
 
   // Wait for the GPU to finish with all resources for this command buffer.
   if (resources.fence_counter > m_completed_fence_counter)
@@ -1859,7 +1879,8 @@ bool VulkanDevice::HasSurface() const
 }
 
 bool VulkanDevice::CreateDevice(const std::string_view& adapter, bool threaded_presentation,
-                                std::optional<bool> exclusive_fullscreen_control, FeatureMask disabled_features)
+                                std::optional<bool> exclusive_fullscreen_control, FeatureMask disabled_features,
+                                Error* error)
 {
   std::unique_lock lock(s_instance_mutex);
   bool enable_debug_utils = m_debug_device;
@@ -1867,7 +1888,7 @@ bool VulkanDevice::CreateDevice(const std::string_view& adapter, bool threaded_p
 
   if (!Vulkan::LoadVulkanLibrary())
   {
-    Host::ReportErrorAsync("Error", "Failed to load Vulkan library. Does your GPU and/or driver support Vulkan?");
+    Error::SetStringView(error, "Failed to load Vulkan library. Does your GPU and/or driver support Vulkan?");
     return false;
   }
 
@@ -1883,8 +1904,7 @@ bool VulkanDevice::CreateDevice(const std::string_view& adapter, bool threaded_p
         CreateVulkanInstance(m_window_info, &m_optional_extensions, enable_debug_utils, enable_validation_layer);
       if (m_instance == VK_NULL_HANDLE)
       {
-        Host::ReportErrorAsync("Error",
-                               "Failed to create Vulkan instance. Does your GPU and/or driver support Vulkan?");
+        Error::SetStringView(error, "Failed to create Vulkan instance. Does your GPU and/or driver support Vulkan?");
         return false;
       }
 
@@ -1895,13 +1915,14 @@ bool VulkanDevice::CreateDevice(const std::string_view& adapter, bool threaded_p
   if (!Vulkan::LoadVulkanInstanceFunctions(m_instance))
   {
     Log_ErrorPrintf("Failed to load Vulkan instance functions");
+    Error::SetStringView(error, "Failed to load Vulkan instance functions");
     return false;
   }
 
   GPUList gpus = EnumerateGPUs(m_instance);
   if (gpus.empty())
   {
-    Host::ReportErrorAsync("Error", "No physical devices found. Does your GPU and/or driver support Vulkan?");
+    Error::SetStringView(error, "No physical devices found. Does your GPU and/or driver support Vulkan?");
     return false;
   }
 
@@ -1964,7 +1985,7 @@ bool VulkanDevice::CreateDevice(const std::string_view& adapter, bool threaded_p
 
   if (!CheckFeatures(disabled_features))
   {
-    Host::ReportErrorAsync("Error", "Your GPU does not support the required Vulkan features.");
+    Error::SetStringView(error, "Your GPU does not support the required Vulkan features.");
     return false;
   }
 
@@ -1982,7 +2003,7 @@ bool VulkanDevice::CreateDevice(const std::string_view& adapter, bool threaded_p
     m_swap_chain = VulkanSwapChain::Create(m_window_info, surface, m_vsync_enabled, m_exclusive_fullscreen_control);
     if (!m_swap_chain)
     {
-      Log_ErrorPrintf("Failed to create swap chain");
+      Error::SetStringView(error, "Failed to create swap chain");
       return false;
     }
 
@@ -1998,12 +2019,15 @@ bool VulkanDevice::CreateDevice(const std::string_view& adapter, bool threaded_p
 
   if (!CreateNullTexture())
   {
-    Log_ErrorPrint("Failed to create dummy texture");
+    Error::SetStringView(error, "Failed to create dummy texture");
     return false;
   }
 
   if (!CreateBuffers() || !CreatePersistentDescriptorSets())
+  {
+    Error::SetStringView(error, "Failed to create buffers/descriptor sets");
     return false;
+  }
 
   return true;
 }
@@ -2563,6 +2587,8 @@ void VulkanDevice::CopyTextureRegion(GPUTexture* dst, u32 dst_x, u32 dst_y, u32 
   if (InRenderPass())
     EndRenderPass();
 
+  s_stats.num_copies++;
+
   S->SetUseFenceCounter(GetCurrentFenceCounter());
   D->SetUseFenceCounter(GetCurrentFenceCounter());
   S->TransitionToLayout((D == S) ? VulkanTexture::Layout::TransferSelf : VulkanTexture::Layout::TransferSrc);
@@ -2586,6 +2612,8 @@ void VulkanDevice::ResolveTextureRegion(GPUTexture* dst, u32 dst_x, u32 dst_y, u
 
   if (InRenderPass())
     EndRenderPass();
+
+  s_stats.num_copies++;
 
   VulkanTexture* D = static_cast<VulkanTexture*>(dst);
   VulkanTexture* S = static_cast<VulkanTexture*>(src);
@@ -2694,7 +2722,9 @@ void VulkanDevice::MapVertexBuffer(u32 vertex_size, u32 vertex_count, void** map
 
 void VulkanDevice::UnmapVertexBuffer(u32 vertex_size, u32 vertex_count)
 {
-  m_vertex_buffer.CommitMemory(vertex_size * vertex_count);
+  const u32 size = vertex_size * vertex_count;
+  s_stats.buffer_streamed += size;
+  m_vertex_buffer.CommitMemory(size);
 }
 
 void VulkanDevice::MapIndexBuffer(u32 index_count, DrawIndex** map_ptr, u32* map_space, u32* map_base_index)
@@ -2714,12 +2744,15 @@ void VulkanDevice::MapIndexBuffer(u32 index_count, DrawIndex** map_ptr, u32* map
 
 void VulkanDevice::UnmapIndexBuffer(u32 used_index_count)
 {
-  m_index_buffer.CommitMemory(sizeof(DrawIndex) * used_index_count);
+  const u32 size = sizeof(DrawIndex) * used_index_count;
+  s_stats.buffer_streamed += size;
+  m_index_buffer.CommitMemory(size);
 }
 
 void VulkanDevice::PushUniformBuffer(const void* data, u32 data_size)
 {
   DebugAssert(data_size < UNIFORM_PUSH_CONSTANTS_SIZE);
+  s_stats.buffer_streamed += data_size;
   vkCmdPushConstants(GetCurrentCommandBuffer(), GetCurrentVkPipelineLayout(), UNIFORM_PUSH_CONSTANTS_STAGES, 0,
                      data_size, data);
 }
@@ -2740,6 +2773,7 @@ void* VulkanDevice::MapUniformBuffer(u32 size)
 
 void VulkanDevice::UnmapUniformBuffer(u32 size)
 {
+  s_stats.buffer_streamed += size;
   m_uniform_buffer_position = m_uniform_buffer.GetCurrentOffset();
   m_uniform_buffer.CommitMemory(size);
   m_dirty_flags |= DIRTY_FLAG_DYNAMIC_OFFSETS;
@@ -3142,6 +3176,8 @@ void VulkanDevice::BeginRenderPass()
     vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &bi, VK_SUBPASS_CONTENTS_INLINE);
   }
 
+  s_stats.num_render_passes++;
+
   // If this is a new command buffer, bind the pipeline and such.
   if (m_dirty_flags & DIRTY_FLAG_INITIAL)
     SetInitialPipelineState();
@@ -3207,6 +3243,7 @@ void VulkanDevice::BeginSwapChainRenderPass()
     vkCmdBeginRenderPass(GetCurrentCommandBuffer(), &rp, VK_SUBPASS_CONTENTS_INLINE);
   }
 
+  s_stats.num_render_passes++;
   m_num_current_render_targets = 0;
   std::memset(m_current_render_targets.data(), 0, sizeof(m_current_render_targets));
   m_current_depth_target = nullptr;
@@ -3563,11 +3600,13 @@ bool VulkanDevice::UpdateDescriptorSets(u32 dirty)
 void VulkanDevice::Draw(u32 vertex_count, u32 base_vertex)
 {
   PreDrawCheck();
+  s_stats.num_draws++;
   vkCmdDraw(GetCurrentCommandBuffer(), vertex_count, 1, base_vertex, 0);
 }
 
 void VulkanDevice::DrawIndexed(u32 index_count, u32 base_index, u32 base_vertex)
 {
   PreDrawCheck();
+  s_stats.num_draws++;
   vkCmdDrawIndexed(GetCurrentCommandBuffer(), index_count, 1, base_index, base_vertex, 0);
 }

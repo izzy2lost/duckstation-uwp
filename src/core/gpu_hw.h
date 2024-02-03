@@ -188,7 +188,7 @@ private:
   void CopyVRAM(u32 src_x, u32 src_y, u32 dst_x, u32 dst_y, u32 width, u32 height) override;
   void DispatchRenderCommand() override;
   void FlushRender() override;
-  void DrawRendererStats(bool is_idle_frame) override;
+  void DrawRendererStats() override;
 
   bool BlitVRAMReplacementTexture(const TextureReplacementTexture* tex, u32 dst_x, u32 dst_y, u32 width, u32 height);
 
@@ -252,6 +252,7 @@ private:
   GPUDownsampleMode m_downsample_mode = GPUDownsampleMode::Disabled;
   GPUWireframeMode m_wireframe_mode = GPUWireframeMode::Disabled;
   bool m_true_color = true;
+  bool m_debanding = false;
   bool m_clamp_uvs = false;
   bool m_compute_uv_range = false;
   bool m_pgxp_depth_buffer = false;
@@ -285,8 +286,7 @@ private:
   // [depth_24][interlace_mode]
   DimensionalArray<std::unique_ptr<GPUPipeline>, 3, 2> m_display_pipelines{};
 
-  // TODO: get rid of this, and use image blits instead where supported
-  std::unique_ptr<GPUPipeline> m_copy_pipeline;
+  std::unique_ptr<GPUPipeline> m_vram_write_replacement_pipeline;
 
   std::unique_ptr<GPUTexture> m_downsample_texture;
   std::unique_ptr<GPUPipeline> m_downsample_first_pass_pipeline;
@@ -296,8 +296,4 @@ private:
   std::unique_ptr<GPUSampler> m_downsample_lod_sampler;
   std::unique_ptr<GPUSampler> m_downsample_composite_sampler;
   u32 m_downsample_scale_or_levels = 0;
-
-  // Statistics
-  RendererStats m_renderer_stats = {};
-  RendererStats m_last_renderer_stats = {};
 };

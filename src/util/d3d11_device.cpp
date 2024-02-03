@@ -10,6 +10,7 @@
 #include "common/align.h"
 #include "common/assert.h"
 #include "common/bitutils.h"
+#include "common/error.h"
 #include "common/file_system.h"
 #include "common/log.h"
 #include "common/path.h"
@@ -64,7 +65,8 @@ bool D3D11Device::HasSurface() const
 }
 
 bool D3D11Device::CreateDevice(const std::string_view& adapter, bool threaded_presentation,
-                               std::optional<bool> exclusive_fullscreen_control, FeatureMask disabled_features)
+                               std::optional<bool> exclusive_fullscreen_control, FeatureMask disabled_features,
+                               Error* error)
 {
   std::unique_lock lock(s_instance_mutex);
 
@@ -72,7 +74,7 @@ bool D3D11Device::CreateDevice(const std::string_view& adapter, bool threaded_pr
   if (m_debug_device)
     create_flags |= D3D11_CREATE_DEVICE_DEBUG;
 
-  m_dxgi_factory = D3DCommon::CreateFactory(m_debug_device);
+  m_dxgi_factory = D3DCommon::CreateFactory(m_debug_device, error);
   if (!m_dxgi_factory)
     return false;
 
@@ -90,12 +92,12 @@ bool D3D11Device::CreateDevice(const std::string_view& adapter, bool threaded_pr
 
   if (FAILED(hr))
   {
-    Log_ErrorPrintf("Failed to create D3D device: 0x%08X", hr);
+    Error::SetHResult(error, "Failed to create D3D device: ", hr);
     return false;
   }
   else if (FAILED(hr = temp_device.As(&m_device)) || FAILED(hr = temp_context.As(&m_context)))
   {
-    Log_ErrorPrintf("Failed to get D3D11.1 device: 0x%08X", hr);
+    Error::SetHResult(error, "Failed to get D3D11.1 device: ", hr);
     return false;
   }
 
@@ -135,10 +137,16 @@ bool D3D11Device::CreateDevice(const std::string_view& adapter, bool threaded_pr
   SetFeatures(disabled_features);
 
   if (m_window_info.type != WindowInfo::Type::Surfaceless && !CreateSwapChain())
+  {
+    Error::SetStringView(error, "Failed to create swap chain");
     return false;
+  }
 
   if (!CreateBuffers())
+  {
+    Error::SetStringView(error, "Failed to create buffers");
     return false;
+  }
 
   return true;
 }
@@ -525,6 +533,8 @@ void D3D11Device::CopyTextureRegion(GPUTexture* dst, u32 dst_x, u32 dst_y, u32 d
 
   src11->CommitClear(m_context.Get());
 
+  s_stats.num_copies++;
+
   const CD3D11_BOX src_box(static_cast<LONG>(src_x), static_cast<LONG>(src_y), 0, static_cast<LONG>(src_x + width),
                            static_cast<LONG>(src_y + height), 1);
   m_context->CopySubresourceRegion(dst11->GetD3DTexture(), D3D11CalcSubresource(dst_level, dst_layer, dst->GetLevels()),
@@ -542,6 +552,8 @@ void D3D11Device::ResolveTextureRegion(GPUTexture* dst, u32 dst_x, u32 dst_y, u3
   DebugAssert((dst_x + width) <= dst->GetMipWidth(dst_level));
   DebugAssert((dst_y + height) <= dst->GetMipHeight(dst_level));
   DebugAssert(!dst->IsMultisampled() && src->IsMultisampled());
+
+  s_stats.num_copies++;
 
   // DX11 can't resolve partial rects.
   Assert(src_x == 0 && src_y == 0 && width == src->GetWidth() && height == src->GetHeight() && dst_x == 0 &&
@@ -647,6 +659,7 @@ bool D3D11Device::BeginPresent(bool skip_present)
   static constexpr float clear_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
   m_context->ClearRenderTargetView(m_swap_chain_rtv.Get(), clear_color);
   m_context->OMSetRenderTargets(1, m_swap_chain_rtv.GetAddressOf(), nullptr);
+  s_stats.num_render_passes++;
   m_num_current_render_targets = 0;
   std::memset(m_current_render_targets.data(), 0, sizeof(m_current_render_targets));
   m_current_depth_target = nullptr;
@@ -683,7 +696,7 @@ GPUDevice::AdapterAndModeList D3D11Device::StaticGetAdapterAndModeList()
   }
   else
   {
-    ComPtr<IDXGIFactory5> factory = D3DCommon::CreateFactory(false);
+    ComPtr<IDXGIFactory5> factory = D3DCommon::CreateFactory(false, nullptr);
     if (factory)
       GetAdapterAndModeList(&ret, factory.Get());
   }
@@ -864,7 +877,9 @@ void D3D11Device::MapVertexBuffer(u32 vertex_size, u32 vertex_count, void** map_
 
 void D3D11Device::UnmapVertexBuffer(u32 vertex_size, u32 vertex_count)
 {
-  m_vertex_buffer.Unmap(m_context.Get(), vertex_size * vertex_count);
+  const u32 upload_size = vertex_size * vertex_count;
+  s_stats.buffer_streamed += upload_size;
+  m_vertex_buffer.Unmap(m_context.Get(), upload_size);
 }
 
 void D3D11Device::MapIndexBuffer(u32 index_count, DrawIndex** map_ptr, u32* map_space, u32* map_base_index)
@@ -877,6 +892,7 @@ void D3D11Device::MapIndexBuffer(u32 index_count, DrawIndex** map_ptr, u32* map_
 
 void D3D11Device::UnmapIndexBuffer(u32 used_index_count)
 {
+  s_stats.buffer_streamed += sizeof(DrawIndex) * used_index_count;
   m_index_buffer.Unmap(m_context.Get(), sizeof(DrawIndex) * used_index_count);
 }
 
@@ -886,6 +902,7 @@ void D3D11Device::PushUniformBuffer(const void* data, u32 data_size)
   const auto res = m_uniform_buffer.Map(m_context.Get(), UNIFORM_BUFFER_ALIGNMENT, used_space);
   std::memcpy(res.pointer, data, data_size);
   m_uniform_buffer.Unmap(m_context.Get(), data_size);
+  s_stats.buffer_streamed += data_size;
 
   const UINT first_constant = (res.index_aligned * UNIFORM_BUFFER_ALIGNMENT) / 16u;
   const UINT num_constants = (used_space * UNIFORM_BUFFER_ALIGNMENT) / 16u;
@@ -907,6 +924,8 @@ void D3D11Device::UnmapUniformBuffer(u32 size)
   const UINT num_constants = used_space / 16u;
 
   m_uniform_buffer.Unmap(m_context.Get(), used_space);
+  s_stats.buffer_streamed += size;
+
   m_context->VSSetConstantBuffers1(0, 1, m_uniform_buffer.GetD3DBufferArray(), &first_constant, &num_constants);
   m_context->PSSetConstantBuffers1(0, 1, m_uniform_buffer.GetD3DBufferArray(), &first_constant, &num_constants);
 }
@@ -956,6 +975,7 @@ void D3D11Device::SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUTextu
   if (!changed)
     return;
 
+  s_stats.num_render_passes++;
   m_context->OMSetRenderTargets(num_rts, rtvs, ds ? static_cast<D3D11Texture*>(ds)->GetD3DDSV() : nullptr);
 }
 
@@ -1047,10 +1067,12 @@ void D3D11Device::SetScissor(s32 x, s32 y, s32 width, s32 height)
 
 void D3D11Device::Draw(u32 vertex_count, u32 base_vertex)
 {
+  s_stats.num_draws++;
   m_context->Draw(vertex_count, base_vertex);
 }
 
 void D3D11Device::DrawIndexed(u32 index_count, u32 base_index, u32 base_vertex)
 {
+  s_stats.num_draws++;
   m_context->DrawIndexed(index_count, base_index, base_vertex);
 }

@@ -127,6 +127,12 @@ static std::tuple<float, float> GetMinMax(std::span<const float> values)
 void Host::DisplayLoadingScreen(const char* message, int progress_min /*= -1*/, int progress_max /*= -1*/,
                                 int progress_value /*= -1*/)
 {
+  if (!g_gpu_device)
+  {
+    Log_InfoPrintf("%s: %d/%d", message, progress_value, progress_max);
+    return;
+  }
+
   const auto& io = ImGui::GetIO();
   const float scale = ImGuiManager::GetGlobalScale();
   const float width = (400.0f * scale);
@@ -253,8 +259,8 @@ void ImGuiManager::FormatProcessorStat(SmallStringBase& text, double usage, doub
 
 void ImGuiManager::DrawPerformanceOverlay()
 {
-  if (!(g_settings.display_show_fps || g_settings.display_show_speed || g_settings.display_show_resolution ||
-        g_settings.display_show_cpu ||
+  if (!(g_settings.display_show_fps || g_settings.display_show_speed || g_settings.display_show_gpu_stats ||
+        g_settings.display_show_resolution || g_settings.display_show_cpu_usage ||
         (g_settings.display_show_status_indicators &&
          (System::IsPaused() || System::IsFastForwardEnabled() || System::IsTurboEnabled()))))
   {
@@ -322,6 +328,15 @@ void ImGuiManager::DrawPerformanceOverlay()
       DRAW_LINE(fixed_font, text, color);
     }
 
+    if (g_settings.display_show_gpu_stats)
+    {
+      g_gpu->GetStatsString(text);
+      DRAW_LINE(fixed_font, text, IM_COL32(255, 255, 255, 255));
+
+      g_gpu->GetMemoryStatsString(text);
+      DRAW_LINE(fixed_font, text, IM_COL32(255, 255, 255, 255));
+    }
+
     if (g_settings.display_show_resolution)
     {
       // TODO: this seems wrong?
@@ -333,7 +348,7 @@ void ImGuiManager::DrawPerformanceOverlay()
       DRAW_LINE(fixed_font, text, IM_COL32(255, 255, 255, 255));
     }
 
-    if (g_settings.display_show_cpu)
+    if (g_settings.display_show_cpu_usage)
     {
       text.format("{:.2f}ms | {:.2f}ms | {:.2f}ms", System::GetMinimumFrameTime(), System::GetAverageFrameTime(),
                   System::GetMaximumFrameTime());
@@ -405,16 +420,10 @@ void ImGuiManager::DrawPerformanceOverlay()
 #endif
     }
 
-    if (g_settings.display_show_gpu)
+    if (g_settings.display_show_gpu_usage && g_gpu_device->IsGPUTimingEnabled())
     {
-      if (g_gpu_device->IsGPUTimingEnabled())
-      {
-        text.assign("GPU: ");
-        FormatProcessorStat(text, System::GetGPUUsage(), System::GetGPUAverageTime());
-        DRAW_LINE(fixed_font, text, IM_COL32(255, 255, 255, 255));
-      }
-
-      text.format("VRAM: {} MB", (g_gpu_device->GetVRAMUsage() + (1048576 - 1)) / 1048576);
+      text.assign("GPU: ");
+      FormatProcessorStat(text, System::GetGPUUsage(), System::GetGPUAverageTime());
       DRAW_LINE(fixed_font, text, IM_COL32(255, 255, 255, 255));
     }
 
@@ -526,7 +535,16 @@ void ImGuiManager::DrawEnhancementsOverlay()
     text.append_format(" {}x{}", g_settings.gpu_multisamples, g_settings.gpu_per_sample_shading ? "SSAA" : "MSAA");
   }
   if (g_settings.gpu_true_color)
-    text.append(" TrueCol");
+  {
+    if (g_settings.gpu_debanding)
+    {
+      text.append(" TrueColDeband");
+    }
+    else
+    {
+      text.append(" TrueCol");
+    }
+  }
   if (g_settings.gpu_disable_interlacing)
     text.append(" ForceProg");
   if (g_settings.gpu_force_ntsc_timings && System::GetRegion() == ConsoleRegion::PAL)
@@ -722,8 +740,6 @@ void SaveStateSelectorUI::Open(float open_time /* = DEFAULT_OPEN_TIME */)
   if (!s_placeholder_texture)
     s_placeholder_texture = ImGuiFullscreen::LoadTexture("no-save.png");
 
-  s_scroll_animated.Reset(0.0f);
-  s_background_animated.Reset(0.0f);
   s_open = true;
   RefreshList(serial);
   RefreshHotkeyLegend();
@@ -790,6 +806,8 @@ void SaveStateSelectorUI::Clear()
 
   s_current_slot = 0;
   s_current_slot_global = false;
+  s_scroll_animated.Reset(0.0f);
+  s_background_animated.Reset(0.0f);
 }
 
 void SaveStateSelectorUI::ClearList()

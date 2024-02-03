@@ -56,7 +56,7 @@ DisplaySettingsWidget::DisplaySettingsWidget(SettingsWindow* dialog, QWidget* pa
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showCPU, "Display", "ShowCPU", false);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showGPU, "Display", "ShowGPU", false);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showInput, "Display", "ShowInputs", false);
-  SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showSettings, "Display", "ShowEnhancements", false);
+  SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showGPUStatistics, "Display", "ShowGPUStatistics", false);
 
   connect(m_ui.renderer, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
           &DisplaySettingsWidget::populateGPUAdaptersAndResolutions);
@@ -105,7 +105,7 @@ DisplaySettingsWidget::DisplaySettingsWidget(SettingsWindow* dialog, QWidget* pa
                                 "option is disabled, the screenshots will be taken at the window's resolution. "
                                 "Internal resolution screenshots can be very large at high rendering scales."));
   dialog->registerWidgetHelp(
-    m_ui.vsync, tr("VSync"), tr("Checked"),
+    m_ui.vsync, tr("VSync"), tr("Unchecked"),
     tr("Enable this option to match DuckStation's refresh rate with your current monitor or screen. "
        "VSync is automatically disabled when it is not possible (e.g. running at non-100% speed)."));
   dialog->registerWidgetHelp(m_ui.threadedPresentation, tr("Threaded Presentation"), tr("Checked"),
@@ -129,6 +129,10 @@ DisplaySettingsWidget::DisplaySettingsWidget(SettingsWindow* dialog, QWidget* pa
     tr("Shows the host's CPU usage based on threads in the top-right corner of the display. This does not display the "
        "emulated system CPU's usage. If a value close to 100% is being displayed, this means your host's CPU is likely "
        "the bottleneck. In this case, you should reduce enhancement-related settings such as overclocking."));
+  dialog->registerWidgetHelp(m_ui.showGPUStatistics, tr("Show GPU Statistics"), tr("Unchecked"),
+                             tr("Shows information about the emulated GPU in the top-right corner of the display."));
+  dialog->registerWidgetHelp(m_ui.showGPU, tr("Show GPU Usage"), tr("Unchecked"),
+                             tr("Shows the host's GPU usage in the top-right corner of the display."));
   dialog->registerWidgetHelp(
     m_ui.showInput, tr("Show Controller Input"), tr("Unchecked"),
     tr("Shows the current controller state of the system in the bottom-left corner of the display."));

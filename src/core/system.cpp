@@ -952,9 +952,10 @@ void System::SetDefaultSettings(SettingsInterface& si)
   temp.display_show_osd_messages = g_settings.display_show_osd_messages;
   temp.display_show_fps = g_settings.display_show_fps;
   temp.display_show_speed = g_settings.display_show_speed;
+  temp.display_show_gpu_stats = g_settings.display_show_gpu_stats;
   temp.display_show_resolution = g_settings.display_show_resolution;
-  temp.display_show_cpu = g_settings.display_show_cpu;
-  temp.display_show_gpu = g_settings.display_show_gpu;
+  temp.display_show_cpu_usage = g_settings.display_show_cpu_usage;
+  temp.display_show_gpu_usage = g_settings.display_show_gpu_usage;
   temp.display_show_frame_times = g_settings.display_show_frame_times;
 
   // keep controller, we reset it elsewhere
@@ -1454,6 +1455,10 @@ bool System::BootSystem(SystemBootParameters parameters)
       Log_ErrorPrintf("Not patching fast boot, as BIOS is not patch compatible.");
     }
   }
+
+  // Texture replacement preloading.
+  // TODO: Move this and everything else below OnSystemStarted().
+  g_texture_replacements.SetGameID(s_running_game_serial);
 
   // Good to go.
   s_state = State::Running;
@@ -2517,7 +2522,8 @@ void System::UpdatePerformanceCounters()
   if (time < PERFORMANCE_COUNTER_UPDATE_INTERVAL)
     return;
 
-  const float frames_run = static_cast<float>(s_frame_number - s_last_frame_number);
+  const u32 frames_run = s_frame_number - s_last_frame_number;
+  const float frames_runf = static_cast<float>(frames_run);
   const u32 global_tick_counter = TimingEvents::GetGlobalTickCounter();
 
   // TODO: Make the math here less rubbish
@@ -2525,13 +2531,13 @@ void System::UpdatePerformanceCounters()
     100.0 * (1.0 / ((static_cast<double>(ticks_diff) * static_cast<double>(Threading::GetThreadTicksPerSecond())) /
                     Common::Timer::GetFrequency() / 1000000000.0));
   const double time_divider = 1000.0 * (1.0 / static_cast<double>(Threading::GetThreadTicksPerSecond())) *
-                              (1.0 / static_cast<double>(frames_run));
+                              (1.0 / static_cast<double>(frames_runf));
 
   s_minimum_frame_time = std::exchange(s_minimum_frame_time_accumulator, 0.0f);
-  s_average_frame_time = std::exchange(s_average_frame_time_accumulator, 0.0f) / frames_run;
+  s_average_frame_time = std::exchange(s_average_frame_time_accumulator, 0.0f) / frames_runf;
   s_maximum_frame_time = std::exchange(s_maximum_frame_time_accumulator, 0.0f);
 
-  s_vps = static_cast<float>(frames_run / time);
+  s_vps = static_cast<float>(frames_runf / time);
   s_last_frame_number = s_frame_number;
   s_fps = static_cast<float>(s_internal_frame_number - s_last_internal_frame_number) / time;
   s_last_internal_frame_number = s_internal_frame_number;
@@ -2562,6 +2568,9 @@ void System::UpdatePerformanceCounters()
   }
   s_accumulated_gpu_time = 0.0f;
   s_presents_since_last_update = 0;
+
+  if (g_settings.display_show_gpu_stats)
+    g_gpu->UpdateStatistics(frames_run);
 
   Log_VerbosePrintf("FPS: %.2f VPS: %.2f CPU: %.2f GPU: %.2f Average: %.2fms Min: %.2fms Max: %.2f ms", s_fps, s_vps,
                     s_cpu_thread_usage, s_gpu_usage, s_average_frame_time, s_minimum_frame_time, s_maximum_frame_time);
@@ -3350,7 +3359,8 @@ void System::UpdateRunningGame(const char* path, CDImage* image, bool booting)
     }
   }
 
-  g_texture_replacements.SetGameID(s_running_game_serial);
+  if (!booting)
+    g_texture_replacements.SetGameID(s_running_game_serial);
 
   if (booting)
     Achievements::ResetHardcoreMode();
@@ -3626,6 +3636,7 @@ void System::CheckForSettingsChanges(const Settings& old_settings)
         g_settings.gpu_fifo_size != old_settings.gpu_fifo_size ||
         g_settings.gpu_max_run_ahead != old_settings.gpu_max_run_ahead ||
         g_settings.gpu_true_color != old_settings.gpu_true_color ||
+        g_settings.gpu_debanding != old_settings.gpu_debanding ||
         g_settings.gpu_scaled_dithering != old_settings.gpu_scaled_dithering ||
         g_settings.gpu_texture_filter != old_settings.gpu_texture_filter ||
         g_settings.gpu_disable_interlacing != old_settings.gpu_disable_interlacing ||
@@ -3638,7 +3649,7 @@ void System::CheckForSettingsChanges(const Settings& old_settings)
         g_settings.display_aspect_ratio != old_settings.display_aspect_ratio ||
         g_settings.display_alignment != old_settings.display_alignment ||
         g_settings.display_scaling != old_settings.display_scaling ||
-        g_settings.display_show_gpu != old_settings.display_show_gpu ||
+        g_settings.display_show_gpu_usage != old_settings.display_show_gpu_usage ||
         g_settings.gpu_pgxp_enable != old_settings.gpu_pgxp_enable ||
         g_settings.gpu_pgxp_texture_correction != old_settings.gpu_pgxp_texture_correction ||
         g_settings.gpu_pgxp_color_correction != old_settings.gpu_pgxp_color_correction ||
@@ -3676,6 +3687,9 @@ void System::CheckForSettingsChanges(const Settings& old_settings)
 
       CPU::CodeCache::Reset();
     }
+
+    if (g_settings.display_show_gpu_stats != old_settings.display_show_gpu_stats)
+      g_gpu->ResetStatistics();
 
     if (g_settings.cdrom_readahead_sectors != old_settings.cdrom_readahead_sectors)
       CDROM::SetReadaheadSectors(g_settings.cdrom_readahead_sectors);

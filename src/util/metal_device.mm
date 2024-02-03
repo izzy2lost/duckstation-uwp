@@ -6,6 +6,7 @@
 
 #include "common/align.h"
 #include "common/assert.h"
+#include "common/error.h"
 #include "common/file_system.h"
 #include "common/log.h"
 #include "common/path.h"
@@ -78,6 +79,17 @@ static void LogNSError(NSError* error, const char* desc, ...)
   Log::Writef("MetalDevice", "", LOGLEVEL_ERROR, "  NSError Description: %s", [error.description UTF8String]);
 }
 
+static GPUTexture::Format GetTextureFormatForMTLFormat(MTLPixelFormat fmt)
+{
+  for (u32 i = 0; i < static_cast<u32>(GPUTexture::Format::MaxCount); i++)
+  {
+    if (s_pixel_format_mapping[i] == fmt)
+      return static_cast<GPUTexture::Format>(i);
+  }
+
+  return GPUTexture::Format::Unknown;
+}
+
 template<typename F>
 static void RunOnMainThread(F&& f)
 {
@@ -121,8 +133,8 @@ void MetalDevice::SetVSync(bool enabled)
 }
 
 bool MetalDevice::CreateDevice(const std::string_view& adapter, bool threaded_presentation,
-                               std::optional<bool> exclusive_fullscreen_control,
-                               FeatureMask disabled_features)
+                               std::optional<bool> exclusive_fullscreen_control, FeatureMask disabled_features,
+                               Error* error)
 {
   @autoreleasepool
   {
@@ -149,7 +161,7 @@ bool MetalDevice::CreateDevice(const std::string_view& adapter, bool threaded_pr
       device = [MTLCreateSystemDefaultDevice() autorelease];
       if (device == nil)
       {
-        Log_ErrorPrint("Failed to create default Metal device.");
+        Error::SetStringView(error, "Failed to create default Metal device.");
         return false;
       }
     }
@@ -157,7 +169,7 @@ bool MetalDevice::CreateDevice(const std::string_view& adapter, bool threaded_pr
     id<MTLCommandQueue> queue = [[device newCommandQueue] autorelease];
     if (queue == nil)
     {
-      Log_ErrorPrint("Failed to create command queue.");
+      Error::SetStringView(error, "Failed to create command queue.");
       return false;
     }
 
@@ -168,20 +180,23 @@ bool MetalDevice::CreateDevice(const std::string_view& adapter, bool threaded_pr
     SetFeatures(disabled_features);
 
     if (m_window_info.type != WindowInfo::Type::Surfaceless && !CreateLayer())
+    {
+      Error::SetStringView(error, "Failed to create layer.");
       return false;
+    }
 
     CreateCommandBuffer();
     RenderBlankFrame();
 
     if (!LoadShaders())
     {
-      Log_ErrorPrint("Failed to load shaders.");
+      Error::SetStringView(error, "Failed to load shaders.");
       return false;
     }
 
     if (!CreateBuffers())
     {
-      Log_ErrorPrintf("Failed to create buffers.");
+      Error::SetStringView(error, "Failed to create buffers.");
       return false;
     }
 
@@ -341,13 +356,24 @@ bool MetalDevice::CreateLayer()
     RunOnMainThread([this]() {
       @autoreleasepool
       {
-        Log_InfoPrintf("Creating a %ux%u Metal layer.", m_window_info.surface_width, m_window_info.surface_height);
+        Log_InfoFmt("Creating a {}x{} Metal layer.", m_window_info.surface_width, m_window_info.surface_height);
         const auto size =
           CGSizeMake(static_cast<float>(m_window_info.surface_width), static_cast<float>(m_window_info.surface_height));
         m_layer = [CAMetalLayer layer];
         [m_layer setDevice:m_device];
         [m_layer setDrawableSize:size];
-        [m_layer setPixelFormat:MTLPixelFormatRGBA8Unorm];
+
+        // Default should be BGRA8.
+        const MTLPixelFormat layer_fmt = [m_layer pixelFormat];
+        m_window_info.surface_format = GetTextureFormatForMTLFormat(layer_fmt);
+        if (m_window_info.surface_format == GPUTexture::Format::Unknown)
+        {
+          Log_ErrorFmt("Invalid pixel format {} in layer, using BGRA8.", static_cast<u32>(layer_fmt));
+          [m_layer setPixelFormat:MTLPixelFormatBGRA8Unorm];
+          m_window_info.surface_format = GPUTexture::Format::BGRA8;
+        }
+
+        Log_VerboseFmt("Metal layer pixel format is {}.", GPUTexture::GetFormatName(m_window_info.surface_format));
 
         NSView* view = GetWindowView();
         [view setWantsLayer:TRUE];
@@ -356,7 +382,6 @@ bool MetalDevice::CreateLayer()
     });
 
     [m_layer setDisplaySyncEnabled:m_vsync_enabled];
-    m_window_info.surface_format = GPUTexture::Format::RGBA8;
 
     DebugAssert(m_layer_pass_desc == nil);
     m_layer_pass_desc = [[MTLRenderPassDescriptor renderPassDescriptor] retain];
@@ -886,6 +911,9 @@ bool MetalTexture::Update(u32 x, u32 y, u32 width, u32 height, const void* data,
   const u32 aligned_pitch = Common::AlignUpPow2(width * GetPixelSize(), TEXTURE_UPLOAD_PITCH_ALIGNMENT);
   const u32 req_size = height * aligned_pitch;
 
+  GPUDevice::GetStatistics().buffer_streamed += req_size;
+  GPUDevice::GetStatistics().num_uploads++;
+
   MetalDevice& dev = MetalDevice::GetInstance();
   MetalStreamBuffer& sb = dev.GetTextureStreamBuffer();
   id<MTLBuffer> actual_buffer;
@@ -985,6 +1013,9 @@ void MetalTexture::Unmap()
   const u32 aligned_pitch = Common::AlignUpPow2(m_map_width * GetPixelSize(), TEXTURE_UPLOAD_PITCH_ALIGNMENT);
   const u32 req_size = m_map_height * aligned_pitch;
 
+  GPUDevice::GetStatistics().buffer_streamed += req_size;
+  GPUDevice::GetStatistics().num_uploads++;
+
   MetalDevice& dev = MetalDevice::GetInstance();
   MetalStreamBuffer& sb = dev.GetTextureStreamBuffer();
   const u32 offset = sb.GetCurrentOffset();
@@ -1048,7 +1079,7 @@ std::unique_ptr<GPUTexture> MetalDevice::CreateTexture(u32 width, u32 height, u3
                                                                                 mipmapped:(levels > 1)];
 
     desc.mipmapLevelCount = levels;
-    desc.storageMode = MTLStorageModeShared;
+    desc.storageMode = MTLStorageModePrivate;
     if (samples > 1)
     {
       desc.textureType = (layers > 1) ? MTLTextureType2DMultisampleArray : MTLTextureType2DMultisample;
@@ -1202,6 +1233,8 @@ bool MetalDevice::DownloadTexture(GPUTexture* texture, u32 x, u32 y, u32 width, 
   MetalTexture* T = static_cast<MetalTexture*>(texture);
   CommitClear(T);
 
+  s_stats.num_downloads++;
+
   @autoreleasepool
   {
     id<MTLBlitCommandEncoder> encoder = GetBlitEncoder(true);
@@ -1252,6 +1285,14 @@ bool MetalDevice::CheckDownloadBufferSize(u32 required_size)
 
 bool MetalDevice::SupportsTextureFormat(GPUTexture::Format format) const
 {
+  if (format == GPUTexture::Format::RGB565 || format == GPUTexture::Format::RGBA5551)
+  {
+    // These formats require an Apple Silicon GPU.
+    // See https://developer.apple.com/metal/Metal-Feature-Set-Tables.pdf
+    if (![m_device supportsFamily:MTLGPUFamilyApple2])
+      return false;
+  }
+
   return (s_pixel_format_mapping[static_cast<u8>(format)] != MTLPixelFormatInvalid);
 }
 
@@ -1298,6 +1339,8 @@ void MetalDevice::CopyTextureRegion(GPUTexture* dst, u32 dst_x, u32 dst_y, u32 d
 
   S->SetUseFenceCounter(m_current_fence_counter);
   D->SetUseFenceCounter(m_current_fence_counter);
+
+  s_stats.num_copies++;
 
   @autoreleasepool
   {
@@ -1360,6 +1403,8 @@ void MetalDevice::ResolveTextureRegion(GPUTexture* dst, u32 dst_x, u32 dst_y, u3
 
   if (InRenderPass())
     EndRenderPass();
+
+  s_stats.num_copies++;
 
   const u32 threadgroupHeight = resolve_pipeline.maxTotalThreadsPerThreadgroup / resolve_pipeline.threadExecutionWidth;
   const MTLSize intrinsicThreadgroupSize = MTLSizeMake(resolve_pipeline.threadExecutionWidth, threadgroupHeight, 1);
@@ -1468,7 +1513,10 @@ void* MetalTextureBuffer::Map(u32 required_elements)
 
 void MetalTextureBuffer::Unmap(u32 used_elements)
 {
-  m_buffer.CommitMemory(GetElementSize(m_format) * used_elements);
+  const u32 size = GetElementSize(m_format) * used_elements;
+  GPUDevice::GetStatistics().buffer_streamed += size;
+  GPUDevice::GetStatistics().num_uploads++;
+  m_buffer.CommitMemory(size);
 }
 
 void MetalTextureBuffer::SetDebugName(const std::string_view& name)
@@ -1519,7 +1567,9 @@ void MetalDevice::MapVertexBuffer(u32 vertex_size, u32 vertex_count, void** map_
 
 void MetalDevice::UnmapVertexBuffer(u32 vertex_size, u32 vertex_count)
 {
-  m_vertex_buffer.CommitMemory(vertex_size * vertex_count);
+  const u32 size = vertex_size * vertex_count;
+  s_stats.buffer_streamed += size;
+  m_vertex_buffer.CommitMemory(size);
 }
 
 void MetalDevice::MapIndexBuffer(u32 index_count, DrawIndex** map_ptr, u32* map_space, u32* map_base_index)
@@ -1539,11 +1589,14 @@ void MetalDevice::MapIndexBuffer(u32 index_count, DrawIndex** map_ptr, u32* map_
 
 void MetalDevice::UnmapIndexBuffer(u32 used_index_count)
 {
-  m_index_buffer.CommitMemory(sizeof(DrawIndex) * used_index_count);
+  const u32 size = sizeof(DrawIndex) * used_index_count;
+  s_stats.buffer_streamed += size;
+  m_index_buffer.CommitMemory(size);
 }
 
 void MetalDevice::PushUniformBuffer(const void* data, u32 data_size)
 {
+  s_stats.buffer_streamed += data_size;
   void* map = MapUniformBuffer(data_size);
   std::memcpy(map, data, data_size);
   UnmapUniformBuffer(data_size);
@@ -1564,6 +1617,7 @@ void* MetalDevice::MapUniformBuffer(u32 size)
 
 void MetalDevice::UnmapUniformBuffer(u32 size)
 {
+  s_stats.buffer_streamed += size;
   m_current_uniform_buffer_position = m_uniform_buffer.GetCurrentOffset();
   m_uniform_buffer.CommitMemory(size);
   if (InRenderPass())
@@ -1754,6 +1808,8 @@ void MetalDevice::BeginRenderPass()
     m_inline_upload_encoder = nil;
   }
 
+  s_stats.num_render_passes++;
+
   @autoreleasepool
   {
     MTLRenderPassDescriptor* desc = [MTLRenderPassDescriptor renderPassDescriptor];
@@ -1923,12 +1979,15 @@ void MetalDevice::PreDrawCheck()
 void MetalDevice::Draw(u32 vertex_count, u32 base_vertex)
 {
   PreDrawCheck();
+  s_stats.num_draws++;
   [m_render_encoder drawPrimitives:m_current_pipeline->GetPrimitive() vertexStart:base_vertex vertexCount:vertex_count];
 }
 
 void MetalDevice::DrawIndexed(u32 index_count, u32 base_index, u32 base_vertex)
 {
   PreDrawCheck();
+
+  s_stats.num_draws++;
 
   const u32 index_offset = base_index * sizeof(u16);
   [m_render_encoder drawIndexedPrimitives:m_current_pipeline->GetPrimitive()
@@ -1996,6 +2055,7 @@ bool MetalDevice::BeginPresent(bool skip_present)
     m_layer_pass_desc.colorAttachments[0].texture = layer_texture;
     m_layer_pass_desc.colorAttachments[0].loadAction = MTLLoadActionClear;
     m_render_encoder = [[m_render_cmdbuf renderCommandEncoderWithDescriptor:m_layer_pass_desc] retain];
+    s_stats.num_render_passes++;
     std::memset(m_current_render_targets.data(), 0, sizeof(m_current_render_targets));
     m_num_current_render_targets = 0;
     m_current_depth_target = nullptr;

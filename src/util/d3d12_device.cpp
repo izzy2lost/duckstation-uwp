@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2023 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "d3d12_device.h"
@@ -13,6 +13,7 @@
 #include "common/align.h"
 #include "common/assert.h"
 #include "common/bitutils.h"
+#include "common/error.h"
 #include "common/file_system.h"
 #include "common/log.h"
 #include "common/path.h"
@@ -117,11 +118,12 @@ D3D12Device::ComPtr<ID3D12RootSignature> D3D12Device::CreateRootSignature(const 
 }
 
 bool D3D12Device::CreateDevice(const std::string_view& adapter, bool threaded_presentation,
-                               std::optional<bool> exclusive_fullscreen_control, FeatureMask disabled_features)
+                               std::optional<bool> exclusive_fullscreen_control, FeatureMask disabled_features,
+                               Error* error)
 {
   std::unique_lock lock(s_instance_mutex);
 
-  m_dxgi_factory = D3DCommon::CreateFactory(m_debug_device);
+  m_dxgi_factory = D3DCommon::CreateFactory(m_debug_device, error);
   if (!m_dxgi_factory)
     return false;
 
@@ -150,7 +152,7 @@ bool D3D12Device::CreateDevice(const std::string_view& adapter, bool threaded_pr
   hr = D3D12CreateDevice(m_adapter.Get(), m_feature_level, IID_PPV_ARGS(&m_device));
   if (FAILED(hr))
   {
-    Log_ErrorPrintf("Failed to create D3D12 device: %08X", hr);
+    Error::SetHResult(error, "Failed to create D3D12 device: ", hr);
     return false;
   }
 
@@ -192,7 +194,7 @@ bool D3D12Device::CreateDevice(const std::string_view& adapter, bool threaded_pr
   hr = m_device->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&m_command_queue));
   if (FAILED(hr))
   {
-    Log_ErrorPrintf("Failed to create command queue: %08X", hr);
+    Error::SetHResult(error, "Failed to create command queue: ", hr);
     return false;
   }
 
@@ -206,34 +208,43 @@ bool D3D12Device::CreateDevice(const std::string_view& adapter, bool threaded_pr
   hr = D3D12MA::CreateAllocator(&allocatorDesc, m_allocator.GetAddressOf());
   if (FAILED(hr))
   {
-    Log_ErrorPrintf("D3D12MA::CreateAllocator() failed with HRESULT %08X", hr);
+    Error::SetHResult(error, "D3D12MA::CreateAllocator() failed: ", hr);
     return false;
   }
 
   hr = m_device->CreateFence(m_completed_fence_value, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence));
   if (FAILED(hr))
   {
-    Log_ErrorPrintf("Failed to create fence: %08X", hr);
+    Error::SetHResult(error, "Failed to create fence: ", hr);
     return false;
   }
 
   m_fence_event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
   if (m_fence_event == NULL)
   {
-    Log_ErrorPrintf("Failed to create fence event: %08X", GetLastError());
+    Error::SetWin32(error, "Failed to create fence event: ", GetLastError());
     return false;
   }
 
   SetFeatures(disabled_features);
 
   if (!CreateCommandLists() || !CreateDescriptorHeaps())
+  {
+    Error::SetStringView(error, "Failed to create command lists/descriptor heaps.");
     return false;
+  }
 
   if (!m_window_info.IsSurfaceless() && !CreateSwapChain())
+  {
+    Error::SetStringView(error, "Failed to create swap chain.");
     return false;
+  }
 
   if (!CreateRootSignatures() || !CreateBuffers())
+  {
+    Error::SetStringView(error, "Failed to create root signature/buffers.");
     return false;
+  }
 
   CreateTimestampQuery();
   return true;
@@ -747,7 +758,7 @@ GPUDevice::AdapterAndModeList D3D12Device::StaticGetAdapterAndModeList()
   }
   else
   {
-    ComPtr<IDXGIFactory5> factory = D3DCommon::CreateFactory(false);
+    ComPtr<IDXGIFactory5> factory = D3DCommon::CreateFactory(false, nullptr);
     if (factory)
       GetAdapterAndModeList(&ret, factory.Get());
   }
@@ -1267,6 +1278,8 @@ void D3D12Device::CopyTextureRegion(GPUTexture* dst, u32 dst_x, u32 dst_y, u32 d
     D->CommitClear();
   }
 
+  s_stats.num_copies++;
+
   // *now* we can do a normal image copy.
   if (InRenderPass())
     EndRenderPass();
@@ -1307,6 +1320,8 @@ void D3D12Device::ResolveTextureRegion(GPUTexture* dst, u32 dst_x, u32 dst_y, u3
 
   if (InRenderPass())
     EndRenderPass();
+
+  s_stats.num_copies++;
 
   D3D12Texture* D = static_cast<D3D12Texture*>(dst);
   D3D12Texture* S = static_cast<D3D12Texture*>(src);
@@ -1412,7 +1427,9 @@ void D3D12Device::MapVertexBuffer(u32 vertex_size, u32 vertex_count, void** map_
 
 void D3D12Device::UnmapVertexBuffer(u32 vertex_size, u32 vertex_count)
 {
-  m_vertex_buffer.CommitMemory(vertex_size * vertex_count);
+  const u32 upload_size = vertex_size * vertex_count;
+  s_stats.buffer_streamed += upload_size;
+  m_vertex_buffer.CommitMemory(upload_size);
 }
 
 void D3D12Device::MapIndexBuffer(u32 index_count, DrawIndex** map_ptr, u32* map_space, u32* map_base_index)
@@ -1432,7 +1449,9 @@ void D3D12Device::MapIndexBuffer(u32 index_count, DrawIndex** map_ptr, u32* map_
 
 void D3D12Device::UnmapIndexBuffer(u32 used_index_count)
 {
-  m_index_buffer.CommitMemory(sizeof(DrawIndex) * used_index_count);
+  const u32 upload_size = sizeof(DrawIndex) * used_index_count;
+  s_stats.buffer_streamed += upload_size;
+  m_index_buffer.CommitMemory(upload_size);
 }
 
 void D3D12Device::PushUniformBuffer(const void* data, u32 data_size)
@@ -1452,6 +1471,7 @@ void D3D12Device::PushUniformBuffer(const void* data, u32 data_size)
     UpdateRootSignature();
   }
 
+  s_stats.buffer_streamed += data_size;
   GetCommandList()->SetGraphicsRoot32BitConstants(push_parameter[static_cast<u8>(m_current_pipeline_layout)],
                                                   data_size / 4u, data, 0);
 }
@@ -1473,6 +1493,7 @@ void* D3D12Device::MapUniformBuffer(u32 size)
 
 void D3D12Device::UnmapUniformBuffer(u32 size)
 {
+  s_stats.buffer_streamed += size;
   m_uniform_buffer_position = m_uniform_buffer.GetCurrentOffset();
   m_uniform_buffer.CommitMemory(size);
   m_dirty_flags |= DIRTY_FLAG_CONSTANT_BUFFER;
@@ -1692,6 +1713,7 @@ void D3D12Device::BeginRenderPass()
 
   // TODO: Stats
   m_in_render_pass = true;
+  s_stats.num_render_passes++;
 
   // If this is a new command buffer, bind the pipeline and such.
   if (m_dirty_flags & DIRTY_FLAG_INITIAL)
@@ -1726,6 +1748,7 @@ void D3D12Device::BeginSwapChainRenderPass()
   m_num_current_render_targets = 0;
   m_current_depth_target = nullptr;
   m_in_render_pass = true;
+  s_stats.num_render_passes++;
 
   // Clear pipeline, it's likely incompatible.
   m_current_pipeline = nullptr;
@@ -2130,11 +2153,13 @@ bool D3D12Device::UpdateRootParameters(u32 dirty)
 void D3D12Device::Draw(u32 vertex_count, u32 base_vertex)
 {
   PreDrawCheck();
+  s_stats.num_draws++;
   GetCommandList()->DrawInstanced(vertex_count, 1, base_vertex, 0);
 }
 
 void D3D12Device::DrawIndexed(u32 index_count, u32 base_index, u32 base_vertex)
 {
   PreDrawCheck();
+  s_stats.num_draws++;
   GetCommandList()->DrawIndexedInstanced(index_count, 1, base_index, base_vertex, 0);
 }

@@ -190,6 +190,7 @@ void Settings::Load(SettingsInterface& si)
   gpu_use_software_renderer_for_readbacks = si.GetBoolValue("GPU", "UseSoftwareRendererForReadbacks", false);
   gpu_threaded_presentation = si.GetBoolValue("GPU", "ThreadedPresentation", true);
   gpu_true_color = si.GetBoolValue("GPU", "TrueColor", true);
+  gpu_debanding = si.GetBoolValue("GPU", "Debanding", false);
   gpu_scaled_dithering = si.GetBoolValue("GPU", "ScaledDithering", true);
   gpu_texture_filter =
     ParseTextureFilterName(
@@ -252,9 +253,10 @@ void Settings::Load(SettingsInterface& si)
   display_show_osd_messages = si.GetBoolValue("Display", "ShowOSDMessages", true);
   display_show_fps = si.GetBoolValue("Display", "ShowFPS", false);
   display_show_speed = si.GetBoolValue("Display", "ShowSpeed", false);
+  display_show_gpu_stats = si.GetBoolValue("Display", "ShowGPUStatistics", false);
   display_show_resolution = si.GetBoolValue("Display", "ShowResolution", false);
-  display_show_cpu = si.GetBoolValue("Display", "ShowCPU", false);
-  display_show_gpu = si.GetBoolValue("Display", "ShowGPU", false);
+  display_show_cpu_usage = si.GetBoolValue("Display", "ShowCPU", false);
+  display_show_gpu_usage = si.GetBoolValue("Display", "ShowGPU", false);
   display_show_frame_times = si.GetBoolValue("Display", "ShowFrameTimes", false);
   display_show_status_indicators = si.GetBoolValue("Display", "ShowStatusIndicators", true);
   display_show_inputs = si.GetBoolValue("Display", "ShowInputs", false);
@@ -456,6 +458,7 @@ void Settings::Save(SettingsInterface& si) const
   si.SetBoolValue("GPU", "ThreadedPresentation", gpu_threaded_presentation);
   si.SetBoolValue("GPU", "UseSoftwareRendererForReadbacks", gpu_use_software_renderer_for_readbacks);
   si.SetBoolValue("GPU", "TrueColor", gpu_true_color);
+  si.SetBoolValue("GPU", "Debanding", gpu_debanding);
   si.SetBoolValue("GPU", "ScaledDithering", gpu_scaled_dithering);
   si.SetStringValue("GPU", "TextureFilter", GetTextureFilterName(gpu_texture_filter));
   si.SetStringValue("GPU", "DownsampleMode", GetDownsampleModeName(gpu_downsample_mode));
@@ -493,8 +496,9 @@ void Settings::Save(SettingsInterface& si) const
   si.SetBoolValue("Display", "ShowFPS", display_show_fps);
   si.SetBoolValue("Display", "ShowSpeed", display_show_speed);
   si.SetBoolValue("Display", "ShowResolution", display_show_resolution);
-  si.SetBoolValue("Display", "ShowCPU", display_show_cpu);
-  si.SetBoolValue("Display", "ShowGPU", display_show_gpu);
+  si.SetBoolValue("Display", "ShowGPUStatistics", display_show_gpu_stats);
+  si.SetBoolValue("Display", "ShowCPU", display_show_cpu_usage);
+  si.SetBoolValue("Display", "ShowGPU", display_show_gpu_usage);
   si.SetBoolValue("Display", "ShowFrameTimes", display_show_frame_times);
   si.SetBoolValue("Display", "ShowStatusIndicators", display_show_status_indicators);
   si.SetBoolValue("Display", "ShowInputs", display_show_inputs);
@@ -614,6 +618,7 @@ void Settings::FixIncompatibleSettings(bool display_osd_messages)
     g_settings.gpu_multisamples = 1;
     g_settings.gpu_per_sample_shading = false;
     g_settings.gpu_true_color = false;
+    g_settings.gpu_debanding = false;
     g_settings.gpu_scaled_dithering = false;
     g_settings.gpu_texture_filter = GPUTextureFilter::Nearest;
     g_settings.gpu_disable_interlacing = false;
@@ -1124,9 +1129,15 @@ const char* Settings::GetDisplayCropModeDisplayName(DisplayCropMode crop_mode)
 }
 
 static constexpr const std::array s_display_aspect_ratio_names = {
+#ifndef __ANDROID__
   TRANSLATE_NOOP("DisplayAspectRatio", "Auto (Game Native)"),
   TRANSLATE_NOOP("DisplayAspectRatio", "Stretch To Fill"),
   TRANSLATE_NOOP("DisplayAspectRatio", "Custom"),
+#else
+  "Auto (Game Native)",
+  "Auto (Match Window)",
+  "Custom",
+#endif
   "4:3",
   "16:9",
   "19:9",

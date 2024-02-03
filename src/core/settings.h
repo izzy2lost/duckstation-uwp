@@ -111,6 +111,7 @@ struct Settings
   bool gpu_disable_texture_copy_to_self = false;
   bool gpu_per_sample_shading = false;
   bool gpu_true_color = true;
+  bool gpu_debanding = false;
   bool gpu_scaled_dithering = true;
   GPUTextureFilter gpu_texture_filter = DEFAULT_GPU_TEXTURE_FILTER;
   GPUDownsampleMode gpu_downsample_mode = DEFAULT_GPU_DOWNSAMPLE_MODE;
@@ -143,9 +144,10 @@ struct Settings
   bool display_show_osd_messages = true;
   bool display_show_fps = false;
   bool display_show_speed = false;
+  bool display_show_gpu_stats = false;
   bool display_show_resolution = false;
-  bool display_show_cpu = false;
-  bool display_show_gpu = false;
+  bool display_show_cpu_usage = false;
+  bool display_show_gpu_usage = false;
   bool display_show_frame_times = false;
   bool display_show_status_indicators = true;
   bool display_show_inputs = false;
