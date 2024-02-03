@@ -414,6 +414,13 @@
 	    </AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories); $(RootBuildDir); $(VCInstallDir)\lib\store\amd64; $(VCInstallDir)\lib\amd64</AdditionalLibraryDirectories>
     </Link>
+    <PreBuildEvent>
+      <Command>
+            mkdir resources
+            robocopy "..\..\data\resources\." "resources\." /E /R:0 /W:0
+            EXIT 0
+      </Command>
+    </PreBuildEvent>
     <ClCompile>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)pch.pch</PrecompiledHeaderOutputFile>
