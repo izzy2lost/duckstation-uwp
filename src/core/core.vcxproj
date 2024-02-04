@@ -224,6 +224,7 @@
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseLTCG|x64'">stdcpp20</LanguageStandard>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseLTCG-Clang|x64'">stdcpp20</LanguageStandard>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">stdcpp20</LanguageStandard>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">_UWP;XBYAK_NO_EXCEPTION=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
   <Import Project="..\..\dep\msvc\vsprops\Targets.props" />

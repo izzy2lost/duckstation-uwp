@@ -3749,6 +3749,7 @@ void FullscreenUI::DrawDisplaySettingsPage()
   std::optional<std::string> adapter(
     bsi->GetOptionalStringValue("GPU", "Adapter", game_settings ? std::nullopt : std::optional<const char*>("")));
 
+#ifndef _UWP
   if (MenuButtonWithValue(FSUI_CSTR("GPU Adapter"), FSUI_CSTR("Selects the GPU to use for rendering."),
                           adapter.has_value() ? (adapter->empty() ? FSUI_CSTR("Default") : adapter->c_str()) :
                                                 FSUI_CSTR("Use Global Setting")))
@@ -3789,10 +3790,12 @@ void FullscreenUI::DrawDisplaySettingsPage()
     };
     OpenChoiceDialog(FSUI_ICONSTR(ICON_FA_TV, "GPU Adapter"), false, std::move(options), std::move(callback));
   }
+#endif
 
   std::optional<std::string> fsmode(bsi->GetOptionalStringValue(
     "GPU", "FullscreenMode", game_settings ? std::nullopt : std::optional<const char*>("")));
 
+#ifndef _UWP
   if (MenuButtonWithValue(
         FSUI_CSTR("Fullscreen Resolution"), FSUI_CSTR("Selects the resolution to use in fullscreen modes."),
         fsmode.has_value() ? (fsmode->empty() ? FSUI_CSTR("Borderless Fullscreen") : fsmode->c_str()) :
@@ -3834,6 +3837,7 @@ void FullscreenUI::DrawDisplaySettingsPage()
     };
     OpenChoiceDialog(FSUI_ICONSTR(ICON_FA_TV, "Fullscreen Resolution"), false, std::move(options), std::move(callback));
   }
+#endif
 
   switch (renderer)
   {
