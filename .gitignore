@@ -46,5 +46,6 @@ __pycache__
 # UWP crap
 Generated Files
 /packages
-
+/AppPackages
 x64/*
+*.pfx

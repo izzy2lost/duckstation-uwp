@@ -235,11 +235,12 @@
     <GenerateAppInstallerFile>False</GenerateAppInstallerFile>
     <AppxAutoIncrementPackageRevision>False</AppxAutoIncrementPackageRevision>
     <GenerateTestArtifacts>True</GenerateTestArtifacts>
-    <AppxBundle>Always</AppxBundle>
+    <AppxBundle>Never</AppxBundle>
     <AppxBundlePlatforms>x64</AppxBundlePlatforms>
     <HoursBetweenUpdateChecks>0</HoursBetweenUpdateChecks>
     <PackageCertificateKeyFile>duckstation-uwp_TemporaryKey.pfx</PackageCertificateKeyFile>
     <AppxPackageSigningTimestampDigestAlgorithm>SHA256</AppxPackageSigningTimestampDigestAlgorithm>
+    <AppxSymbolPackageEnabled>False</AppxSymbolPackageEnabled>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
     <OutDir>$(SolutionDir)bin\</OutDir>
@@ -393,25 +394,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
     <Link>
       <GenerateWindowsMetadata>false</GenerateWindowsMetadata>
-      <AdditionalDependencies>
-			    $(RootBuildDir)common\common.lib;
-			    $(RootBuildDir)core\core.lib;
-			    $(RootBuildDir)util\util.lib;
-			    $(RootBuildDir)d3d12ma\d3d12ma.lib;
-			    $(RootBuildDir)fmt\fmt.lib;
-			    $(RootBuildDir)imgui\imgui.lib;
-			    $(RootBuildDir)libchdr\libchdr.lib;
-			    $(RootBuildDir)lzma\lzma.lib;
-			    $(RootBuildDir)rcheevos\rcheevos.lib;
-			    $(RootBuildDir)reshadefx\reshadefx.lib;
-			    $(RootBuildDir)scmversion\scmversion.lib;
-			    $(RootBuildDir)soundtouch\soundtouch.lib;
-			    $(RootBuildDir)stb\stb.lib;
-			    $(RootBuildDir)xxhash\xxhash.lib;
-			    $(RootBuildDir)zlib\zlib.lib;
-			    $(RootBuildDir)zstd\zstd.lib;
-			    %(AdditionalDependencies)
-	    </AdditionalDependencies>
+      <AdditionalDependencies>$(RootBuildDir)common\common.lib;$(RootBuildDir)core\core.lib;$(RootBuildDir)util\util.lib;$(RootBuildDir)d3d12ma\d3d12ma.lib;$(RootBuildDir)fmt\fmt.lib;$(RootBuildDir)imgui\imgui.lib;$(RootBuildDir)libchdr\libchdr.lib;$(RootBuildDir)lzma\lzma.lib;$(RootBuildDir)rcheevos\rcheevos.lib;$(RootBuildDir)reshadefx\reshadefx.lib;$(RootBuildDir)scmversion\scmversion.lib;$(RootBuildDir)soundtouch\soundtouch.lib;$(RootBuildDir)stb\stb.lib;$(RootBuildDir)xxhash\xxhash.lib;$(RootBuildDir)zlib\zlib.lib;$(RootBuildDir)zstd\zstd.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories); $(RootBuildDir); $(VCInstallDir)\lib\store\amd64; $(VCInstallDir)\lib\amd64</AdditionalLibraryDirectories>
     </Link>
     <PreBuildEvent>
@@ -437,12 +420,42 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <Image Include="Assets\LockScreenLogo.scale-200.png" />
+    <Image Include="Assets\SplashScreen.scale-100.png">
+      <DeploymentContent>true</DeploymentContent>
+    </Image>
     <Image Include="Assets\SplashScreen.scale-200.png" />
-    <Image Include="Assets\Square150x150Logo.scale-200.png" />
+    <Image Include="Assets\Square150x150Logo.scale-100.png">
+      <DeploymentContent>true</DeploymentContent>
+    </Image>
+    <Image Include="Assets\Square150x150Logo.scale-200.png">
+      <DeploymentContent>true</DeploymentContent>
+    </Image>
+    <Image Include="Assets\Square310x310Logo.scale-100.png">
+      <DeploymentContent>true</DeploymentContent>
+    </Image>
+    <Image Include="Assets\Square310x310Logo.scale-200.png">
+      <DeploymentContent>true</DeploymentContent>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.scale-100.png">
+      <DeploymentContent>true</DeploymentContent>
+    </Image>
     <Image Include="Assets\Square44x44Logo.scale-200.png" />
-    <Image Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" />
+    <Image Include="Assets\Square44x44Logo.scale-400.png">
+      <DeploymentContent>true</DeploymentContent>
+    </Image>
+    <Image Include="Assets\Square71x71Logo.scale-100.png">
+      <DeploymentContent>true</DeploymentContent>
+    </Image>
+    <Image Include="Assets\Square71x71Logo.scale-200.png">
+      <DeploymentContent>true</DeploymentContent>
+    </Image>
     <Image Include="Assets\StoreLogo.png" />
-    <Image Include="Assets\Wide310x150Logo.scale-200.png" />
+    <Image Include="Assets\Wide310x150Logo.scale-100.png">
+      <DeploymentContent>true</DeploymentContent>
+    </Image>
+    <Image Include="Assets\Wide310x150Logo.scale-200.png">
+      <DeploymentContent>true</DeploymentContent>
+    </Image>
     <Image Include="resources\fullscreenui\address-book-new.png" />
     <Image Include="resources\fullscreenui\applications-system.png" />
     <Image Include="resources\fullscreenui\media-cdrom.png" />

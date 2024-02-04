@@ -17,9 +17,6 @@
     <Image Include="Assets\Square44x44Logo.scale-200.png">
       <Filter>Assets</Filter>
     </Image>
-    <Image Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png">
-      <Filter>Assets</Filter>
-    </Image>
     <Image Include="Assets\StoreLogo.png">
       <Filter>Assets</Filter>
     </Image>
@@ -36,8 +33,143 @@
     <ClInclude Include="pch.h" />
     <ClInclude Include="winrt_nogui_platform.h" />
     <ClInclude Include="UWPUtils.h" />
+    <ClInclude Include="win32_key_names.h" />
   </ItemGroup>
   <ItemGroup>
     <AppxManifest Include="Package.appxmanifest" />
+  </ItemGroup>
+  <ItemGroup>
+    <Media Include="resources\sounds\achievements\lbsubmit.wav" />
+    <Media Include="resources\sounds\achievements\message.wav" />
+    <Media Include="resources\sounds\achievements\unlock.wav" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="resources\fullscreenui\address-book-new.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\fullscreenui\applications-system.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\fullscreenui\media-cdrom.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\fullscreenui\multimedia-player.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\fullscreenui\NTSC-J.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\fullscreenui\NTSC-U.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\fullscreenui\PAL.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\fullscreenui\star-0.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\fullscreenui\star-1.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\fullscreenui\star-2.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\fullscreenui\star-3.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\fullscreenui\star-4.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\fullscreenui\star-5.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\images\cover-placeholder.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\images\crosshair.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\images\duck.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\images\placeholder.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\no-save.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\shaders\reshade\Textures\crt-newpixie\crtframe.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\shaders\reshade\Textures\FontAtlas.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="resources\shaders\reshade\Textures\lut.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\SplashScreen.scale-100.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Wide310x150Logo.scale-100.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.scale-100.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.scale-400.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square310x310Logo.scale-100.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square310x310Logo.scale-200.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square150x150Logo.scale-100.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square71x71Logo.scale-100.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square71x71Logo.scale-200.png">
+      <Filter>Assets</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <Font Include="resources\fonts\fa-solid-900.ttf" />
+    <Font Include="resources\fonts\promptfont.otf" />
+    <Font Include="resources\fonts\Roboto-Regular.ttf" />
+    <Font Include="resources\fonts\RobotoMono-Medium.ttf" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="duckstation-uwp_TemporaryKey.pfx" />
+    <None Include="resources\gamedb.json" />
+    <None Include="resources\shaders\Cccalibrator.glsl" />
+    <None Include="resources\shaders\crt-lottes.glsl" />
+    <None Include="resources\shaders\reshade\Shaders\Blending.fxh" />
+    <None Include="resources\shaders\reshade\Shaders\DrawText.fxh" />
+    <None Include="resources\shaders\reshade\Shaders\Macros.fxh" />
+    <None Include="resources\shaders\reshade\Shaders\ReShade.fxh" />
+    <None Include="resources\shaders\reshade\Shaders\ReShadeUI.fxh" />
+    <None Include="resources\shaders\reshade\Shaders\TriDither.fxh" />
+    <None Include="resources\shaders\simple-brightness.glsl" />
+    <None Include="resources\shaders\simple-flip.glsl" />
+    <None Include="resources\shaders\simple-gamma.glsl" />
+    <None Include="resources\shaders\simple-sharpen.glsl" />
+    <None Include="resources\shaders\reshade\Shaders\CRT-NewPixie.fx" />
+    <None Include="resources\shaders\reshade\Shaders\CRTLottes2.fx" />
+    <None Include="resources\shaders\reshade\Shaders\Daltonize.fx" />
+    <None Include="resources\shaders\reshade\Shaders\Deband.fx" />
+    <None Include="resources\shaders\reshade\Shaders\FilmGrain2.fx" />
+    <None Include="resources\shaders\reshade\Shaders\LUT.fx" />
+    <None Include="resources\shaders\reshade\Shaders\scanlines-abs.fx" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="resources\chtdb.txt" />
+    <Text Include="resources\fonts\LICENSE.txt" />
+    <Text Include="resources\gamecontrollerdb.txt" />
+    <Text Include="resources\images\sources.txt" />
+    <Text Include="resources\shaders\reshade\source.txt" />
+    <Text Include="resources\sounds\achievements\README.txt" />
   </ItemGroup>
 </Project>

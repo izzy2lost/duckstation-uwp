@@ -148,7 +148,6 @@ static u32 s_blocking_cpu_events_pending = 0; // TODO: Token system would work b
 static std::mutex s_async_op_mutex;
 static std::thread s_async_op_thread;
 static std::string s_uwpPath;
-static FullscreenUI::ProgressCallback* s_async_op_progress = nullptr;
 static AsyncOpProgressCallback* s_async_op_progress = nullptr;
 } // namespace NoGUIHost
 

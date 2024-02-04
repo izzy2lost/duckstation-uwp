@@ -44,6 +44,7 @@
 // Entrypoint into the emulator
 #include "duckstation-nogui/nogui_host.h"
 #include "winrt_nogui_platform.h"
+#include <util/imgui_fullscreen.h>
 
 Log_SetChannel(App);
 
@@ -60,34 +61,44 @@ using namespace winrt::Windows::UI::Composition;
 static constexpr u32 SETTINGS_VERSION = 3;
 static constexpr auto CPU_THREAD_POLL_INTERVAL = std::chrono::milliseconds(8); // how often we'll poll controllers when paused
 
-
-
-//////////////////////////////////////////////////////////////////////////
-// Local variable declarations
-//////////////////////////////////////////////////////////////////////////
-static winrt::Windows::UI::Core::CoreWindow* s_corewind = NULL;
-
-static std::unique_ptr<INISettingsInterface> s_base_settings_interface;
-static bool s_batch_mode = false;
-static bool s_is_fullscreen = false;
-static bool s_was_paused_by_focus_loss = false;
-
-static Threading::Thread s_cpu_thread;
-static Threading::KernelSemaphore s_platform_window_updated;
-static std::atomic_bool s_running{false};
-static std::mutex s_cpu_thread_events_mutex;
-static std::condition_variable s_cpu_thread_event_done;
-static std::condition_variable s_cpu_thread_event_posted;
-static std::deque<std::pair<std::function<void()>, bool>> s_cpu_thread_events;
-static u32 s_blocking_cpu_events_pending = 0; // TODO: Token system would work better here.
-
-static std::mutex s_async_op_mutex;
-static std::thread s_async_op_thread;
-static std::string s_uwpPath;
-static FullscreenUI::ProgressCallback* s_async_op_progress = nullptr;
-
-
 namespace WinRTHost {
+// this sucks. a necessary evil, i suppose...
+// why couldn't they have just stuck with fullscreen.h?
+class AsyncOpProgressCallback final : public BaseProgressCallback
+{
+public:
+  AsyncOpProgressCallback(std::string name);
+  ~AsyncOpProgressCallback() override;
+
+  ALWAYS_INLINE const std::string& GetName() const { return m_name; }
+
+  void PushState() override;
+  void PopState() override;
+
+  void SetCancellable(bool cancellable) override;
+  void SetTitle(const char* title) override;
+  void SetStatusText(const char* text) override;
+  void SetProgressRange(u32 range) override;
+  void SetProgressValue(u32 value) override;
+
+  void DisplayError(const char* message) override;
+  void DisplayWarning(const char* message) override;
+  void DisplayInformation(const char* message) override;
+  void DisplayDebugMessage(const char* message) override;
+
+  void ModalError(const char* message) override;
+  bool ModalConfirmation(const char* message) override;
+  void ModalInformation(const char* message) override;
+
+  void SetCancelled();
+
+private:
+  void Redraw(bool force);
+
+  std::string m_name;
+  int m_last_progress_percent = -1;
+};
+
   static bool InitializeConfig();
   static bool InBatchMode();
   static std::optional<WindowInfo> GetPlatformWindowInfo();
@@ -104,6 +115,30 @@ namespace WinRTHost {
   static void ProcessCPUThreadEvents(bool block);
   static void SaveSettings(); 
   static void SetupXboxController(INISettingsInterface& si);
+
+  //////////////////////////////////////////////////////////////////////////
+  // Local variable declarations
+  //////////////////////////////////////////////////////////////////////////
+  static winrt::Windows::UI::Core::CoreWindow* s_corewind = NULL;
+
+  static std::unique_ptr<INISettingsInterface> s_base_settings_interface;
+  static bool s_batch_mode = false;
+  static bool s_is_fullscreen = false;
+  static bool s_was_paused_by_focus_loss = false;
+
+  static Threading::Thread s_cpu_thread;
+  static Threading::KernelSemaphore s_platform_window_updated;
+  static std::atomic_bool s_running{false};
+  static std::mutex s_cpu_thread_events_mutex;
+  static std::condition_variable s_cpu_thread_event_done;
+  static std::condition_variable s_cpu_thread_event_posted;
+  static std::deque<std::pair<std::function<void()>, bool>> s_cpu_thread_events;
+  static u32 s_blocking_cpu_events_pending = 0; // TODO: Token system would work better here.
+
+  static std::mutex s_async_op_mutex;
+  static std::thread s_async_op_thread;
+  static std::string s_uwpPath;
+  static AsyncOpProgressCallback* s_async_op_progress = nullptr;
   } // namespace WinRTHost
 
 void WinRTHost::SetupXboxController(INISettingsInterface& si)
@@ -193,6 +228,8 @@ bool WinRTHost::InitializeConfig()
   {
     Log::SetConsoleOutputParams(true, s_base_settings_interface->GetBoolValue("Logging", "LogTimestamps", true));
   }
+
+  return true;
 }
 
 bool WinRTHost::InBatchMode()
@@ -372,7 +409,7 @@ void WinRTHost::AsyncOpThreadEntryPoint(std::function<void(ProgressCallback*)> c
 {
     Threading::SetNameOfCurrentThread("Async Op");
 
-    FullscreenUI::ProgressCallback fs_callback("async_op");
+    AsyncOpProgressCallback fs_callback("async_op");
     std::unique_lock lock(s_async_op_mutex);
     s_async_op_progress = &fs_callback;
 
@@ -391,11 +428,11 @@ ALWAYS_INLINE std::string WinRTHost::GetResourcePath(std::string_view filename, 
 
 void Host::RunOnCPUThread(std::function<void()> function, bool block /* = false */)
 {
-    std::unique_lock lock(s_cpu_thread_events_mutex);
-    s_cpu_thread_events.emplace_back(std::move(function), block);
-    s_cpu_thread_event_posted.notify_one();
+    std::unique_lock lock(WinRTHost::s_cpu_thread_events_mutex);
+    WinRTHost::s_cpu_thread_events.emplace_back(std::move(function), block);
+    WinRTHost::s_cpu_thread_event_posted.notify_one();
     if (block)
-      s_cpu_thread_event_done.wait(lock, []() { return s_blocking_cpu_events_pending == 0; });
+      WinRTHost::s_cpu_thread_event_done.wait(lock, []() { return WinRTHost::s_blocking_cpu_events_pending == 0; });
 }
 
 
@@ -641,6 +678,10 @@ void Host::CommitBaseSettingChanges()
   WinRTHost::SaveSettings();
 }
 
+void Host::OnCoverDownloaderOpenRequested()
+{
+    // no-op
+}
 
 std::optional<WindowInfo> Host::GetTopLevelWindowInfo()
 {
@@ -655,7 +696,7 @@ void Host::RequestExit(bool allow_confirm)
   }
 
   // clear the running flag, this'll break out of the main CPU loop once the VM is shutdown.
-  s_running.store(false, std::memory_order_release);
+  WinRTHost::s_running.store(false, std::memory_order_release);
 }
 
 void Host::RequestSystemShutdown(bool allow_confirm, bool save_state)
@@ -683,6 +724,119 @@ std::optional<std::string> InputManager::ConvertHostKeyboardCodeToString(u32 cod
 const char* InputManager::ConvertHostKeyboardCodeToIcon(u32 code)
 {
   return nullptr;
+}
+
+WinRTHost::AsyncOpProgressCallback::AsyncOpProgressCallback(std::string name)
+  : BaseProgressCallback(), m_name(std::move(name))
+{
+  ImGuiFullscreen::OpenBackgroundProgressDialog(m_name.c_str(), "", 0, 100, 0);
+}
+
+WinRTHost::AsyncOpProgressCallback::~AsyncOpProgressCallback()
+{
+  ImGuiFullscreen::CloseBackgroundProgressDialog(m_name.c_str());
+}
+
+void WinRTHost::AsyncOpProgressCallback::PushState()
+{
+  BaseProgressCallback::PushState();
+}
+
+void WinRTHost::AsyncOpProgressCallback::PopState()
+{
+  BaseProgressCallback::PopState();
+  Redraw(true);
+}
+
+void WinRTHost::AsyncOpProgressCallback::SetCancellable(bool cancellable)
+{
+  BaseProgressCallback::SetCancellable(cancellable);
+  Redraw(true);
+}
+
+void WinRTHost::AsyncOpProgressCallback::SetTitle(const char* title)
+{
+  // todo?
+}
+
+void WinRTHost::AsyncOpProgressCallback::SetStatusText(const char* text)
+{
+  BaseProgressCallback::SetStatusText(text);
+  Redraw(true);
+}
+
+void WinRTHost::AsyncOpProgressCallback::SetProgressRange(u32 range)
+{
+  u32 last_range = m_progress_range;
+
+  BaseProgressCallback::SetProgressRange(range);
+
+  if (m_progress_range != last_range)
+    Redraw(false);
+}
+
+void WinRTHost::AsyncOpProgressCallback::SetProgressValue(u32 value)
+{
+  u32 lastValue = m_progress_value;
+
+  BaseProgressCallback::SetProgressValue(value);
+
+  if (m_progress_value != lastValue)
+    Redraw(false);
+}
+
+void WinRTHost::AsyncOpProgressCallback::Redraw(bool force)
+{
+  const int percent =
+    static_cast<int>((static_cast<float>(m_progress_value) / static_cast<float>(m_progress_range)) * 100.0f);
+  if (percent == m_last_progress_percent && !force)
+    return;
+
+  m_last_progress_percent = percent;
+  ImGuiFullscreen::UpdateBackgroundProgressDialog(m_name.c_str(), m_status_text, 0, 100, percent);
+}
+
+void WinRTHost::AsyncOpProgressCallback::DisplayError(const char* message)
+{
+  Log_ErrorPrint(message);
+  Host::ReportErrorAsync("Error", message);
+}
+
+void WinRTHost::AsyncOpProgressCallback::DisplayWarning(const char* message)
+{
+  Log_WarningPrint(message);
+}
+
+void WinRTHost::AsyncOpProgressCallback::DisplayInformation(const char* message)
+{
+  Log_InfoPrint(message);
+}
+
+void WinRTHost::AsyncOpProgressCallback::DisplayDebugMessage(const char* message)
+{
+  Log_DebugPrint(message);
+}
+
+void WinRTHost::AsyncOpProgressCallback::ModalError(const char* message)
+{
+  Log_ErrorPrint(message);
+  Host::ReportErrorAsync("Error", message);
+}
+
+bool WinRTHost::AsyncOpProgressCallback::ModalConfirmation(const char* message)
+{
+  return false;
+}
+
+void WinRTHost::AsyncOpProgressCallback::ModalInformation(const char* message)
+{
+  Log_InfoPrint(message);
+}
+
+void WinRTHost::AsyncOpProgressCallback::SetCancelled()
+{
+  if (m_cancellable)
+    m_cancelled = true;
 }
 
 BEGIN_HOTKEY_LIST(g_host_hotkeys)
@@ -733,7 +887,7 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 
   void Run() { 
     CoreWindow window = CoreWindow::GetForCurrentThread();
-    s_corewind = &window;
+    WinRTHost::s_corewind = &window;
     window.Activate();
 
     auto navigation = winrt::Windows::UI::Core::SystemNavigationManager::GetForCurrentView();
@@ -754,7 +908,7 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
     });
 
 
-    while (s_running.load())
+    while (WinRTHost::s_running.load())
     {
         window.Dispatcher().ProcessEvents(CoreProcessEventsOption::ProcessAllIfPresent);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));

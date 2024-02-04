@@ -9,14 +9,14 @@
 
   <Identity
     Name="bb968db0-325f-4b61-8490-33630267b894"
-    Publisher="CN=danwo"
+    Publisher="CN=irixaligned"
     Version="1.0.0.0" />
 
   <mp:PhoneIdentity PhoneProductId="bb968db0-325f-4b61-8490-33630267b894" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
   <Properties>
-    <DisplayName>duckstation_uwp</DisplayName>
-    <PublisherDisplayName>danwo</PublisherDisplayName>
+    <DisplayName>DuckStation-UWP</DisplayName>
+    <PublisherDisplayName>irixaligned</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 
@@ -33,19 +33,25 @@
       Executable="$targetnametoken$.exe"
       EntryPoint="duckstation_uwp.App">
       <uap:VisualElements
-        DisplayName="duckstation_uwp"
+        DisplayName="DuckStation-UWP"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png"
-        Description="duckstation_uwp"
+        Description="A port of the PSX emulator DuckStation to Xbox and other UWP platforms"
         BackgroundColor="transparent">
-        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png"/>
-        <uap:SplashScreen Image="Assets\SplashScreen.png" />
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" Square310x310Logo="Assets\Square310x310Logo.png" Square71x71Logo="Assets\Square71x71Logo.png">
+          <uap:ShowNameOnTiles>
+            <uap:ShowOn Tile="square310x310Logo"/>
+          </uap:ShowNameOnTiles>
+        </uap:DefaultTile >
+        <uap:SplashScreen Image="Assets\SplashScreen.png"  BackgroundColor="#FFFFFF"/>
       </uap:VisualElements>
     </Application>
   </Applications>
 
   <Capabilities>
     <rescap:Capability Name="runFullTrust"/>
+    <!-- broadFileSystemAccess is a no-op on Xbox, i think -->
+    <!-- if it ain't broke, don't fix it i figure, but it is strange -->
     <rescap:Capability Name="broadFileSystemAccess" />
     <rescap:Capability Name="expandedResources" />
     <Capability Name="internetClient" />
