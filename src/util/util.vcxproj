@@ -320,6 +320,7 @@
       <ForcedIncludeFiles>pch.h</ForcedIncludeFiles>
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">stdcpp20</LanguageStandard>
       <CompileAsWinRT Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">false</CompileAsWinRT>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">_UWP;%(PreprocessorDefinitions);SOUNDTOUCH_FLOAT_SAMPLES;SOUNDTOUCH_ALLOW_SSE;ST_NO_EXCEPTION_HANDLING=1</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
   <Import Project="..\..\dep\msvc\vsprops\Targets.props" />

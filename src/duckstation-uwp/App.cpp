@@ -114,7 +114,7 @@ private:
   static void AsyncOpThreadEntryPoint(std::function<void(ProgressCallback*)> callback);
   static void ProcessCPUThreadEvents(bool block);
   static void SaveSettings(); 
-  static void SetupXboxController(INISettingsInterface& si);
+  static void SetXboxSettings(INISettingsInterface& si);
 
   //////////////////////////////////////////////////////////////////////////
   // Local variable declarations
@@ -139,11 +139,14 @@ private:
   static std::thread s_async_op_thread;
   static std::string s_uwpPath;
   static AsyncOpProgressCallback* s_async_op_progress = nullptr;
+
+  static bool is_running_on_xbox;
   } // namespace WinRTHost
 
-void WinRTHost::SetupXboxController(INISettingsInterface& si)
+// if the program is running on an Xbox console, set Xbox specific options
+void WinRTHost::SetXboxSettings(INISettingsInterface& si)
 {
-  // TODO: Investigate DX12 black screen
+  if (!is_running_on_xbox) { return; };
   si.SetStringValue("GPU", "Renderer", "D3D12");
 
   si.SetBoolValue("Main", "SyncToHostRefreshRate", true);
@@ -155,38 +158,42 @@ void WinRTHost::SetupXboxController(INISettingsInterface& si)
   si.SetStringValue("Main", "ControllerBackend", "XInput");
 
   // Set up an analog controller in port 1.
-  si.SetStringValue("Controller1", "Type", "AnalogController");
-  si.SetStringValue("Controller1", "ButtonUp", "Controller0/Button11");
-  si.SetStringValue("Controller1", "ButtonDown", "Controller0/Button12");
-  si.SetStringValue("Controller1", "ButtonLeft", "Controller0/Button13");
-  si.SetStringValue("Controller1", "ButtonRight", "Controller0/Button14");
-  si.SetStringValue("Controller1", "ButtonStart", "Controller0/Button6");
-  si.SetStringValue("Controller1", "ButtonTriangle", "Controller0/Button3");
-  si.SetStringValue("Controller1", "ButtonCross", "Controller0/Button0");
-  si.SetStringValue("Controller1", "ButtonCircle", "Controller0/Button1");
-  si.SetStringValue("Controller1", "ButtonSquare", "Controller0/Button2");
-  si.SetStringValue("Controller1", "ButtonL1", "Controller0/Button9");
-  si.SetStringValue("Controller1", "ButtonL2", "Controller0/+Axis4");
-  si.SetStringValue("Controller1", "ButtonR1", "Controller0/Button10");
-  si.SetStringValue("Controller1", "ButtonR2", "Controller0/+Axis5");
-  si.SetStringValue("Controller1", "ButtonL3", "Controller0/Button7");
-  si.SetStringValue("Controller1", "ButtonR3", "Controller0/Button8");
-  si.SetStringValue("Controller1", "AxisLeftX", "Controller0/Axis0");
-  si.SetStringValue("Controller1", "AxisLeftY", "Controller0/Axis1");
-  si.SetStringValue("Controller1", "AxisRightX", "Controller0/Axis2");
-  si.SetStringValue("Controller1", "AxisRightY", "Controller0/Axis3");
-  si.SetStringValue("Controller1", "Rumble", "Controller0");
-  si.SetStringValue("Controller1", "ForceAnalogOnReset", "true");
-  si.SetStringValue("Controller1", "AnalogDPadInDigitalMode", "true");
+  si.SetStringValue("Pad1", "Type",       "AnalogController");
+  si.SetStringValue("Pad1", "Up",         "XInput-0/DPadUp");
+  si.SetStringValue("Pad1", "Down",       "XInput-0/DPadDown");
+  si.SetStringValue("Pad1", "Left",       "XInput-0/DPadLeft");
+  si.SetStringValue("Pad1", "Right",      "XInput-0/DPadRight");
+  si.SetStringValue("Pad1", "Back", "XInput-0/Start");
+  si.SetStringValue("Pad1", "Start",      "XInput-0/Start");
+  si.SetStringValue("Pad1", "Triangle",   "XInput-0/Y");
+  si.SetStringValue("Pad1", "Cross",      "XInput-0/A");
+  si.SetStringValue("Pad1", "Circle",     "XInput-0/B");
+  si.SetStringValue("Pad1", "Square",     "XInput-0/X");
+  si.SetStringValue("Pad1", "L1",         "XInput-0/LeftShoulder");
+  si.SetStringValue("Pad1", "L2",         "XInput-0/+LeftTrigger");
+  si.SetStringValue("Pad1", "R1",         "XInput-0/RightShoulder");
+  si.SetStringValue("Pad1", "R2",         "XInput-0/+RightTrigger");
+  si.SetStringValue("Pad1", "L3",         "XInput-0/LeftStick");
+  si.SetStringValue("Pad1", "R3",         "XInput-0/RightStick");
+  si.SetStringValue("Pad1", "LLeft",      "XInput-0/-LeftX");
+  si.SetStringValue("Pad1", "LRight",     "XInput-0/+LeftX");
+  si.SetStringValue("Pad1", "LDown",      "XInput-0/+LeftY");
+  si.SetStringValue("Pad1", "LUp",        "XInput-0/-LeftY");
+  si.SetStringValue("Pad1", "RLeft",      "XInput-0/-RightX");
+  si.SetStringValue("Pad1", "RRight",     "XInput-0/+RightX");
+  si.SetStringValue("Pad1", "RDown",      "XInput-0/+RightY");
+  si.SetStringValue("Pad1", "RUp",        "XInput-0/-RightY");
+  si.SetStringValue("Pad1", "Analog",     "XInput-0/Back & XInput-0/Start");
+  si.SetStringValue("Pad1", "SmallMotor", "XInput-0/SmallMotor");
+  si.SetStringValue("Pad1", "LargeMotor", "XInput-0/LargeMotor");
 
-  // Repurpose the select button to open the menu.
-  // Not ideal, but all we can do until we have chords.
-  si.SetStringValue("Hotkeys", "OpenQuickMenu", "Controller0/Button4");
+  // we have chords!
+  si.SetStringValue("Hotkeys", "OpenPauseMenu", "XInput-0/LeftStick & XInput-0/RightStick");
 }
 
 bool WinRTHost::InitializeConfig()
 {
-    // TODO: Might need thise
+  // TODO: Might need thise
   std::string settings_filename = Path::Combine(EmuFolders::DataRoot, "settings.ini");
 
   Log_InfoPrintf("Loading config from %s.", settings_filename.c_str());
@@ -212,9 +219,12 @@ bool WinRTHost::InitializeConfig()
     EmuFolders::Save(*s_base_settings_interface);
 
 	InputManager::SetDefaultSourceConfig(*s_base_settings_interface);
-    SetupXboxController(*s_base_settings_interface);
     Settings::SetDefaultControllerConfig(*s_base_settings_interface);
     Settings::SetDefaultHotkeyConfig(*s_base_settings_interface);
+
+    // set up xbox settings after we have done all this stuff
+    // otherwise, keyboard will override the Xbox controller, which sucks!
+    SetXboxSettings(*s_base_settings_interface);
   }
     
   s_base_settings_interface->Save();
@@ -245,9 +255,7 @@ std::optional<WindowInfo> WinRTHost::GetPlatformWindowInfo()
     {
       u32 width = 1920, height = 1080;
       float scale = 1.0;
-      GAMING_DEVICE_MODEL_INFORMATION info = {};
-      GetGamingDeviceModelInformation(&info);
-      if (info.vendorId == GAMING_DEVICE_VENDOR_ID_MICROSOFT)
+      if (is_running_on_xbox)
       {
         HdmiDisplayInformation hdi = HdmiDisplayInformation::GetForCurrentView();
         if (hdi)
@@ -288,8 +296,7 @@ void WinRTHost::StartCPUThread()
 
 void WinRTHost::StopCPUThread()
 {
-    if (!s_cpu_thread.Joinable())
-      return;
+    if (!s_cpu_thread.Joinable()) { return; }
 
     {
       std::unique_lock lock(s_cpu_thread_events_mutex);
@@ -893,6 +900,10 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
     auto navigation = winrt::Windows::UI::Core::SystemNavigationManager::GetForCurrentView();
     navigation.BackRequested([](const winrt::Windows::Foundation::IInspectable&,
                                 const winrt::Windows::UI::Core::BackRequestedEventArgs& args) { args.Handled(true); });
+
+    GAMING_DEVICE_MODEL_INFORMATION gaming_device_info = {};
+    GetGamingDeviceModelInformation(&gaming_device_info);
+    WinRTHost::is_running_on_xbox = (gaming_device_info.vendorId == GAMING_DEVICE_VENDOR_ID_MICROSOFT);
 
     CrashHandler::Install();
 

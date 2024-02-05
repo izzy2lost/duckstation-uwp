@@ -6,7 +6,7 @@
 #include "imgui_fullscreen.h"
 #include "gpu_device.h"
 #include "imgui_animated.h"
-
+#include "core/settings.h"
 #include "common/assert.h"
 #include "common/easing.h"
 #include "common/file_system.h"
@@ -1867,7 +1867,11 @@ void ImGuiFullscreen::OpenFileSelector(const char* title, bool select_directory,
   s_file_selector_filters = std::move(filters);
 
   if (initial_directory.empty() || !FileSystem::DirectoryExists(initial_directory.c_str()))
+#ifdef _UWP
+    initial_directory = EmuFolders::DataRoot;
+#else
     initial_directory = FileSystem::GetWorkingDirectory();
+#endif
   SetFileSelectorDirectory(std::move(initial_directory));
 }
 
