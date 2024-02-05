@@ -392,7 +392,6 @@ void WinRTHost::ProcessCPUThreadEvents(bool block)
     }
 }
 
-
 void WinRTHost::StartAsyncOp(std::function<void(ProgressCallback*)> callback)
 {
     CancelAsyncOp();
@@ -714,7 +713,6 @@ void Host::RequestSystemShutdown(bool allow_confirm, bool save_state)
   }
 }
 
-
 std::optional<u32> InputManager::ConvertHostKeyboardStringToCode(const std::string_view& str)
 {
   std::optional<DWORD> converted(Win32KeyNames::GetKeyCodeForName(str));
@@ -936,9 +934,11 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 
   void SetWindow(CoreWindow const& window) { window.CharacterReceived({this, &App::OnKeyInput}); }
 
+
   void OnKeyInput(const IInspectable&, const winrt::Windows::UI::Core::CharacterReceivedEventArgs& args)
   {
-    //NoGUIHost::ProcessPlatformKeyEvent(static_cast<s32>(args.KeyCode()), !args.KeyStatus().IsKeyReleased);
+    Log_InfoPrintf("%d", args.KeyCode());
+    ImGuiManager::AddCharacterInput(std::move(args.KeyCode()));
   }
 };
 

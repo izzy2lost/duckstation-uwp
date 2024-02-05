@@ -28,6 +28,11 @@
 #include <mutex>
 #include <unordered_map>
 
+#ifdef _UWP
+#include <winrt/Windows.UI.ViewManagement.Core.h>
+#endif
+#include <core/host.h>
+
 Log_SetChannel(ImGuiManager);
 
 namespace ImGuiManager {
@@ -94,6 +99,7 @@ static Common::Timer s_last_render_time;
 // cached copies of WantCaptureKeyboard/Mouse, used to know when to dispatch events
 static std::atomic_bool s_imgui_wants_keyboard{false};
 static std::atomic_bool s_imgui_wants_mouse{false};
+static std::atomic_bool s_imgui_wants_text{false};
 
 // mapping of host key -> imgui key
 static std::unordered_map<u32, ImGuiKey> s_imgui_key_map;
@@ -287,6 +293,17 @@ void ImGuiManager::NewFrame()
   ImGui::GetCurrentWindowRead()->Flags |= ImGuiWindowFlags_NoNavInputs;
   s_imgui_wants_keyboard.store(io.WantCaptureKeyboard, std::memory_order_relaxed);
   s_imgui_wants_mouse.store(io.WantCaptureMouse, std::memory_order_release);
+
+  const bool want_text_input = io.WantTextInput;
+  if (s_imgui_wants_text.load(std::memory_order_relaxed) != want_text_input)
+  {
+    s_imgui_wants_text.store(want_text_input, std::memory_order_release);
+    if (want_text_input)
+      Host::BeginTextInput();
+    else
+      Host::EndTextInput();
+  }
+
 }
 
 void ImGuiManager::SetStyle()
@@ -907,7 +924,7 @@ ImFont* ImGuiManager::GetLargeFont()
 
 bool ImGuiManager::WantsTextInput()
 {
-  return s_imgui_wants_keyboard.load(std::memory_order_acquire);
+  return s_imgui_wants_text.load(std::memory_order_acquire);
 }
 
 bool ImGuiManager::WantsMouseInput()
@@ -920,10 +937,23 @@ void ImGuiManager::AddTextInput(std::string str)
   if (!ImGui::GetCurrentContext())
     return;
 
-  if (!s_imgui_wants_keyboard.load(std::memory_order_acquire))
+  if (!s_imgui_wants_text.load(std::memory_order_acquire))
     return;
 
   ImGui::GetIO().AddInputCharactersUTF8(str.c_str());
+}
+
+void ImGuiManager::AddCharacterInput(int code)
+{
+  if (ImGuiManager::WantsTextInput)
+  {
+    Host::RunOnCPUThread([code = std::move(code)]() {
+      if (!ImGui::GetCurrentContext())
+        return;
+
+      ImGui::GetIO().AddInputCharacter(code);
+    });
+  }
 }
 
 void ImGuiManager::UpdateMousePosition(float x, float y)
@@ -1115,4 +1145,18 @@ void ImGuiManager::SetSoftwareCursorPosition(u32 index, float pos_x, float pos_y
   SoftwareCursor& sc = s_software_cursors[index];
   sc.pos.first = pos_x;
   sc.pos.second = pos_y;
+}
+
+void Host::BeginTextInput()
+{
+#ifdef _UWP
+  winrt::Windows::UI::ViewManagement::Core::CoreInputView::GetForCurrentView().TryShowPrimaryView();
+#endif
+}
+
+void Host::EndTextInput()
+{
+#ifdef _UWP
+  winrt::Windows::UI::ViewManagement::Core::CoreInputView::GetForCurrentView().TryHide();
+#endif
 }

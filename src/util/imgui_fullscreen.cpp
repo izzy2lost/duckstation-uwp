@@ -2152,16 +2152,12 @@ void ImGuiFullscreen::DrawInputDialog()
 
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + LayoutScale(10.0f));
 
-    if (!s_input_dialog_caption.empty())
-    {
-      const float prev = ImGui::GetCursorPosX();
-      ImGui::TextUnformatted(s_input_dialog_caption.c_str());
-      ImGui::SetNextItemWidth(ImGui::GetCursorPosX() - prev);
-    }
-    else
-    {
-      ImGui::SetNextItemWidth(ImGui::GetCurrentWindow()->WorkRect.GetWidth());
-    }
+    // if (!s_input_dialog_caption.empty())
+    // {
+    // ImGui::TextUnformatted(s_input_dialog_caption.c_str());
+    // }
+
+    ImGui::SetNextItemWidth(ImGui::GetCurrentWindow()->WorkRect.GetWidth());
     ImGui::InputText("##input", &s_input_dialog_text);
 
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + LayoutScale(10.0f));

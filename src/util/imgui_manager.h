@@ -77,6 +77,8 @@ bool WantsMouseInput();
 /// Called on the UI or CPU thread in response to a key press. String is UTF-8.
 void AddTextInput(std::string str);
 
+void AddCharacterInput(int code);
+
 /// Called on the UI or CPU thread in response to mouse movement.
 void UpdateMousePosition(float x, float y);
 
@@ -119,6 +121,8 @@ static constexpr float OSD_QUICK_DURATION = 2.5f;
 float GetOSDScale();
 
 /// Adds OSD messages, duration is in seconds.
+void BeginTextInput();
+void EndTextInput();
 void AddOSDMessage(std::string message, float duration = 2.0f);
 void AddKeyedOSDMessage(std::string key, std::string message, float duration = 2.0f);
 void AddIconOSDMessage(std::string key, const char* icon, std::string message, float duration = 2.0f);
