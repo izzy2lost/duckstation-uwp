@@ -156,7 +156,7 @@ struct Settings
   bool display_internal_resolution_screenshots = false;
   bool display_stretch_vertically = false;
   bool video_sync_enabled = DEFAULT_VSYNC_VALUE;
-  float display_osd_scale = 100.0f;
+  float display_osd_scale = 200.0f;
   float display_max_fps = DEFAULT_DISPLAY_MAX_FPS;
   float gpu_pgxp_tolerance = -1.0f;
   float gpu_pgxp_depth_clear_threshold = DEFAULT_GPU_PGXP_DEPTH_THRESHOLD / GPU_PGXP_DEPTH_THRESHOLD_SCALE;
@@ -409,7 +409,7 @@ struct Settings
   static const char* GetAudioBackendName(AudioBackend backend);
   static const char* GetAudioBackendDisplayName(AudioBackend backend);
 
-  static std::optional<ControllerType> ParseControllerTypeName(const char* str);
+  static std::optional<ControllerType> ParseControllerTypeName(std::string_view str);
   static const char* GetControllerTypeName(ControllerType type);
   static const char* GetControllerTypeDisplayName(ControllerType type);
 
@@ -466,7 +466,7 @@ struct Settings
   static constexpr DisplayScalingMode DEFAULT_DISPLAY_SCALING = DisplayScalingMode::BilinearSmooth;
   static constexpr DisplayExclusiveFullscreenControl DEFAULT_DISPLAY_EXCLUSIVE_FULLSCREEN_CONTROL =
     DisplayExclusiveFullscreenControl::Automatic;
-  static constexpr float DEFAULT_OSD_SCALE = 100.0f;
+  static constexpr float DEFAULT_OSD_SCALE = 200.0f;
 
   static constexpr u8 DEFAULT_CDROM_READAHEAD_SECTORS = 8;
   static constexpr CDROMMechaconVersion DEFAULT_CDROM_MECHACON_VERSION = CDROMMechaconVersion::VC1A;

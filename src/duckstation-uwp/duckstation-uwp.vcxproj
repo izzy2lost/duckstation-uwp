@@ -519,7 +519,10 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="duckstation-uwp_TemporaryKey.pfx" />
-    <None Include="resources\gamedb.json">
+    <None Include="resources\gamedb.yaml">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="resources\discdb.yaml">
       <DeploymentContent>true</DeploymentContent>
     </None>
     <None Include="resources\shaders\Cccalibrator.glsl">

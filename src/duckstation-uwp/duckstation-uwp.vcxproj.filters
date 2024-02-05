@@ -143,7 +143,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="duckstation-uwp_TemporaryKey.pfx" />
-    <None Include="resources\gamedb.json" />
+    <None Include="resources\gamedb.yaml" />
+    <None Include="resources\discdb.yaml" />
     <None Include="resources\shaders\Cccalibrator.glsl" />
     <None Include="resources\shaders\crt-lottes.glsl" />
     <None Include="resources\shaders\reshade\Shaders\Blending.fxh" />
