@@ -1497,7 +1497,11 @@ void EmuThread::run()
   m_started_semaphore.release();
 
   // input source setup must happen on emu thread
-  System::Internal::ProcessStartup();
+  if (!System::Internal::ProcessStartup())
+  {
+    moveToThread(m_ui_thread);
+    return;
+  }
 
   // bind buttons/axises
   createBackgroundControllerPollTimer();
@@ -1551,6 +1555,34 @@ void EmuThread::wakeThread()
     m_event_loop->quit();
   else
     QMetaObject::invokeMethod(m_event_loop, "quit", Qt::QueuedConnection);
+}
+
+void Host::ReportFatalError(const std::string_view& title, const std::string_view& message)
+{
+  auto cb = [title = QtUtils::StringViewToQString(title), message = QtUtils::StringViewToQString(message)]() {
+    QMessageBox::critical(g_main_window && g_main_window->isVisible() ? g_main_window : nullptr, title, message);
+#ifndef __APPLE__
+    std::quick_exit(EXIT_FAILURE);
+#else
+    _exit(EXIT_FAILURE);
+#endif
+  };
+
+  // https://stackoverflow.com/questions/34135624/how-to-properly-execute-gui-operations-in-qt-main-thread
+  QTimer* timer = new QTimer();
+  QThread* ui_thread = qApp->thread();
+  if (QThread::currentThread() == ui_thread)
+  {
+    // On UI thread, we can do it straight away.
+    cb();
+  }
+  else
+  {
+    timer->moveToThread(ui_thread);
+    timer->setSingleShot(true);
+    QObject::connect(timer, &QTimer::timeout, std::move(cb));
+    QMetaObject::invokeMethod(timer, "start", Qt::QueuedConnection, Q_ARG(int, 0));
+  }
 }
 
 void Host::ReportErrorAsync(const std::string_view& title, const std::string_view& message)

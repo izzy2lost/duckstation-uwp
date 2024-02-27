@@ -10,6 +10,8 @@ add_library(common
   crash_handler.cpp
   crash_handler.h
   dimensional_array.h
+  dynamic_library.cpp
+  dynamic_library.h
   error.cpp
   error.h
   fastjmp.cpp
@@ -103,7 +105,12 @@ if(ANDROID)
   target_link_libraries(common PRIVATE log)
 endif()
 
-if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+if(LINUX)
   # We need -lrt for shm_unlink
   target_link_libraries(common PRIVATE rt)
+endif()
+
+# If the host size was detected, we need to set it as a macro.
+if(HOST_PAGE_SIZE)
+  target_compile_definitions(common PUBLIC "-DOVERRIDE_HOST_PAGE_SIZE=${HOST_PAGE_SIZE}")
 endif()

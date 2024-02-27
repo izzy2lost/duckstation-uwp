@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2023 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "bus.h"
@@ -7,11 +7,13 @@
 #include "cpu_core_private.h"
 #include "cpu_disasm.h"
 #include "cpu_recompiler_types.h"
+#include "host.h"
 #include "settings.h"
 #include "system.h"
 #include "timing_event.h"
 
 #include "common/assert.h"
+#include "common/error.h"
 #include "common/intrin.h"
 #include "common/log.h"
 #include "common/memmap.h"
@@ -36,14 +38,14 @@ using PageProtectionArray = std::array<PageProtectionInfo, Bus::RAM_8MB_CODE_PAG
 using BlockInstructionInfoPair = std::pair<Instruction, InstructionInfo>;
 using BlockInstructionList = std::vector<BlockInstructionInfoPair>;
 
-// Switch to manual protection if we invalidate more than 4 times within 20 frames.
+// Switch to manual protection if we invalidate more than 4 times within 60 frames.
 // Fall blocks back to interpreter if we recompile more than 3 times within 15 frames.
 // The interpreter fallback is set before the manual protection switch, so that if it's just a single block
 // which is constantly getting mutated, we won't hurt the performance of the rest in the page.
 static constexpr u32 RECOMPILE_COUNT_FOR_INTERPRETER_FALLBACK = 3;
 static constexpr u32 RECOMPILE_FRAMES_FOR_INTERPRETER_FALLBACK = 15;
 static constexpr u32 INVALIDATE_COUNT_FOR_MANUAL_PROTECTION = 4;
-static constexpr u32 INVALIDATE_FRAMES_FOR_MANUAL_PROTECTION = 20;
+static constexpr u32 INVALIDATE_FRAMES_FOR_MANUAL_PROTECTION = 60;
 
 static CodeLUT DecodeCodeLUTPointer(u32 slot, CodeLUT ptr);
 static CodeLUT EncodeCodeLUTPointer(u32 slot, CodeLUT ptr);
@@ -133,7 +135,6 @@ static constexpr u32 RECOMPILER_FAR_CODE_CACHE_SIZE = 16 * 1024 * 1024;
 #endif
 
 #ifdef USE_STATIC_CODE_BUFFER
-static constexpr u32 RECOMPILER_GUARD_SIZE = 4096;
 alignas(HOST_PAGE_SIZE) static u8 s_code_storage[RECOMPILER_CODE_CACHE_SIZE + RECOMPILER_FAR_CODE_CACHE_SIZE];
 #endif
 
@@ -162,25 +163,31 @@ bool CPU::CodeCache::IsUsingFastmem()
   return IsUsingAnyRecompiler() && g_settings.cpu_fastmem_mode != CPUFastmemMode::Disabled;
 }
 
-void CPU::CodeCache::ProcessStartup()
+bool CPU::CodeCache::ProcessStartup()
 {
   AllocateLUTs();
 
 #ifdef ENABLE_RECOMPILER_SUPPORT
 #ifdef USE_STATIC_CODE_BUFFER
-  const bool has_buffer = s_code_buffer.Initialize(s_code_storage, sizeof(s_code_storage),
-                                                   RECOMPILER_FAR_CODE_CACHE_SIZE, RECOMPILER_GUARD_SIZE);
+  const bool has_buffer =
+    s_code_buffer.Initialize(s_code_storage, sizeof(s_code_storage), RECOMPILER_FAR_CODE_CACHE_SIZE, HOST_PAGE_SIZE);
 #else
   const bool has_buffer = false;
 #endif
   if (!has_buffer && !s_code_buffer.Allocate(RECOMPILER_CODE_CACHE_SIZE, RECOMPILER_FAR_CODE_CACHE_SIZE))
   {
-    Panic("Failed to initialize code space");
+    Host::ReportFatalError("Error", "Failed to initialize code space");
+    return false;
   }
 #endif
 
   if (!Common::PageFaultHandler::InstallHandler(ExceptionHandler))
-    Panic("Failed to install page fault handler");
+  {
+    Host::ReportFatalError("Error", "Failed to install page fault handler");
+    return false;
+  }
+
+  return true;
 }
 
 void CPU::CodeCache::ProcessShutdown()

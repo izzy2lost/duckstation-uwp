@@ -54,12 +54,6 @@
     <ClInclude Include="gpu_shader_cache.h" />
     <ClInclude Include="gpu_texture.h" />
     <ClInclude Include="metal_device.h" />
-    <ClInclude Include="gl\context_wgl.h">
-      <Filter>gl</Filter>
-    </ClInclude>
-    <ClInclude Include="gl\context.h">
-      <Filter>gl</Filter>
-    </ClInclude>
     <ClInclude Include="postprocessing_shader_glsl.h" />
     <ClInclude Include="d3d11_pipeline.h" />
     <ClInclude Include="d3d11_stream_buffer.h" />
@@ -73,6 +67,12 @@
     <ClInclude Include="imgui_animated.h" />
     <ClInclude Include="http_downloader_uwp.h" />
     <ClInclude Include="http_downloader_winhttp.h" />
+    <ClInclude Include="opengl_context.h" />
+    <ClInclude Include="opengl_context_agl.h" />
+    <ClInclude Include="opengl_context_egl.h" />
+    <ClInclude Include="opengl_context_egl_wayland.h" />
+    <ClInclude Include="opengl_context_egl_x11.h" />
+    <ClInclude Include="opengl_context_wgl.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="jit_code_buffer.cpp" />
@@ -122,12 +122,6 @@
     <ClCompile Include="gpu_device.cpp" />
     <ClCompile Include="gpu_shader_cache.cpp" />
     <ClCompile Include="gpu_texture.cpp" />
-    <ClCompile Include="gl\context_wgl.cpp">
-      <Filter>gl</Filter>
-    </ClCompile>
-    <ClCompile Include="gl\context.cpp">
-      <Filter>gl</Filter>
-    </ClCompile>
     <ClCompile Include="postprocessing_shader_glsl.cpp" />
     <ClCompile Include="d3d11_pipeline.cpp" />
     <ClCompile Include="d3d11_stream_buffer.cpp" />
@@ -156,6 +150,11 @@
     <ClCompile Include="vulkan_swap_chain.cpp" />
     <ClCompile Include="vulkan_texture.cpp" />
     <ClCompile Include="zstd_byte_stream.cpp" />
+    <ClCompile Include="opengl_context.cpp" />
+    <ClCompile Include="opengl_context_egl.cpp" />
+    <ClCompile Include="opengl_context_egl_wayland.cpp" />
+    <ClCompile Include="opengl_context_egl_x11.cpp" />
+    <ClCompile Include="opengl_context_wgl.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="gl">
@@ -164,5 +163,6 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="metal_shaders.metal" />
+    <None Include="opengl_context_agl.mm" />
   </ItemGroup>
 </Project>

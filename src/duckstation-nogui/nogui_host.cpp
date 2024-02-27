@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "nogui_host.h"
@@ -30,6 +30,7 @@
 #include "common/assert.h"
 #include "common/byte_stream.h"
 #include "common/crash_handler.h"
+#include "common/error.h"
 #include "common/file_system.h"
 #include "common/log.h"
 #include "common/path.h"
@@ -328,6 +329,12 @@ void NoGUIHost::SetDefaultSettings(SettingsInterface& si, bool system, bool cont
   }
 
   g_nogui_window->SetDefaultConfig(si);
+}
+
+void Host::ReportFatalError(const std::string_view& title, const std::string_view& message)
+{
+  Log_ErrorPrintf("ReportFatalError: %.*s", static_cast<int>(message.size()), message.data());
+  abort();
 }
 
 void Host::ReportErrorAsync(const std::string_view& title, const std::string_view& message)
@@ -673,7 +680,11 @@ void NoGUIHost::CPUThreadEntryPoint()
   Threading::SetNameOfCurrentThread("CPU Thread");
 
   // input source setup must happen on emu thread
-  System::Internal::ProcessStartup();
+  if (!System::Internal::ProcessStartup())
+  {
+    g_nogui_window->QuitMessageLoop();
+    return;
+  }
 
   // start the fullscreen UI and get it going
   if (Host::CreateGPUDevice(Settings::GetRenderAPIForRenderer(g_settings.gpu_renderer)) && FullscreenUI::Initialize())

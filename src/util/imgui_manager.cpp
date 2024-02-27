@@ -62,6 +62,7 @@ struct OSDMessage
 
 } // namespace
 
+static void UpdateScale();
 static void SetStyle();
 static void SetKeyMap();
 static bool LoadFontData();
@@ -111,7 +112,7 @@ static std::deque<OSDMessage> s_osd_active_messages;
 static std::deque<OSDMessage> s_osd_posted_messages;
 static std::mutex s_osd_messages_lock;
 static bool s_show_osd_messages = true;
-static bool s_global_prescale_changed = false;
+static bool s_scale_changed = false;
 
 static std::array<ImGuiManager::SoftwareCursor, InputManager::MAX_SOFTWARE_CURSORS> s_software_cursors = {};
 } // namespace ImGuiManager
@@ -148,7 +149,7 @@ void ImGuiManager::SetGlobalScale(float global_scale)
     return;
 
   s_global_prescale = global_scale;
-  s_global_prescale_changed = true;
+  s_scale_changed = true;
 }
 
 void ImGuiManager::SetShowOSDMessages(bool enable)
@@ -171,6 +172,7 @@ bool ImGuiManager::Initialize(float global_scale, bool show_osd_messages, Error*
 
   s_global_prescale = global_scale;
   s_global_scale = std::max(g_gpu_device->GetWindowScale() * global_scale, 1.0f);
+  s_scale_changed = false;
   s_show_osd_messages = show_osd_messages;
 
   ImGui::CreateContext();
@@ -245,12 +247,14 @@ void ImGuiManager::WindowResized()
   s_window_height = static_cast<float>(new_height);
   ImGui::GetIO().DisplaySize = ImVec2(s_window_width, s_window_height);
 
-  // restart imgui frame on the new window size to pick it up, otherwise we draw to the old size
-  ImGui::EndFrame();
+  // Scale might have changed as a result of window resize.
+  RequestScaleUpdate();
+}
 
-  UpdateScale();
-
-  NewFrame();
+void ImGuiManager::RequestScaleUpdate()
+{
+  // Might need to update the scale.
+  s_scale_changed = true;
 }
 
 void ImGuiManager::UpdateScale()
@@ -280,9 +284,9 @@ void ImGuiManager::NewFrame()
   ImGuiIO& io = ImGui::GetIO();
   io.DeltaTime = static_cast<float>(s_last_render_time.GetTimeSecondsAndReset());
 
-  if (s_global_prescale_changed)
+  if (s_scale_changed)
   {
-    s_global_prescale_changed = false;
+    s_scale_changed = false;
     UpdateScale();
   }
 
@@ -584,13 +588,13 @@ bool ImGuiManager::AddIconFonts(float size)
     0xf1f8, 0xf1f8, 0xf1fc, 0xf1fc, 0xf242, 0xf242, 0xf245, 0xf245, 0xf26c, 0xf26c, 0xf279, 0xf279, 0xf2d0, 0xf2d0,
     0xf2db, 0xf2db, 0xf2f2, 0xf2f2, 0xf2f5, 0xf2f5, 0xf3c1, 0xf3c1, 0xf410, 0xf410, 0xf466, 0xf466, 0xf500, 0xf500,
     0xf51f, 0xf51f, 0xf545, 0xf545, 0xf547, 0xf548, 0xf552, 0xf552, 0xf57a, 0xf57a, 0xf5a2, 0xf5a2, 0xf5aa, 0xf5aa,
-    0xf5e7, 0xf5e7, 0xf65d, 0xf65e, 0xf6a9, 0xf6a9, 0xf7c2, 0xf7c2, 0xf807, 0xf807, 0xf815, 0xf815, 0xf818, 0xf818,
-    0xf84c, 0xf84c, 0xf8cc, 0xf8cc, 0x0,    0x0};
-  static constexpr ImWchar range_pf[] = {0x2196, 0x2199, 0x219e, 0x21a1, 0x21b0, 0x21b3, 0x21ba, 0x21c3, 0x21c7, 0x21ca,
-                                         0x21d0, 0x21d4, 0x21dc, 0x21dd, 0x21e0, 0x21e3, 0x21ed, 0x21ee, 0x21f7, 0x21f8,
-                                         0x21fa, 0x21fb, 0x227a, 0x227d, 0x23b2, 0x23b4, 0x23f4, 0x23f7, 0x2427, 0x243a,
-                                         0x243c, 0x243c, 0x243e, 0x243e, 0x2460, 0x246b, 0x24f5, 0x24fd, 0x24ff, 0x24ff,
-                                         0x278a, 0x278e, 0x27fc, 0x27fc, 0xe001, 0xe001, 0xff21, 0xff3a, 0x0,    0x0};
+    0xf5e7, 0xf5e7, 0xf65d, 0xf65e, 0xf6a9, 0xf6a9, 0xf6cf, 0xf6cf, 0xf794, 0xf794, 0xf7c2, 0xf7c2, 0xf807, 0xf807,
+    0xf815, 0xf815, 0xf818, 0xf818, 0xf84c, 0xf84c, 0xf8cc, 0xf8cc, 0x0,    0x0};
+  static constexpr ImWchar range_pf[] = {
+    0x2196, 0x2199, 0x219e, 0x21a1, 0x21b0, 0x21b3, 0x21ba, 0x21c3, 0x21c7, 0x21ca, 0x21d0, 0x21d4, 0x21dc, 0x21dd,
+    0x21e0, 0x21e3, 0x21ed, 0x21ee, 0x21f7, 0x21f8, 0x21fa, 0x21fb, 0x227a, 0x227d, 0x235e, 0x235e, 0x2360, 0x2361,
+    0x2364, 0x2366, 0x23b2, 0x23b4, 0x23f4, 0x23f7, 0x2427, 0x243a, 0x243c, 0x243c, 0x243e, 0x243e, 0x2460, 0x246b,
+    0x24f5, 0x24fd, 0x24ff, 0x24ff, 0x278a, 0x278e, 0x27fc, 0x27fc, 0xe001, 0xe001, 0xff21, 0xff3a, 0x0,    0x0};
 
   {
     ImFontConfig cfg;

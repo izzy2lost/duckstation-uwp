@@ -17,6 +17,7 @@
 
 #include "common/assert.h"
 #include "common/crash_handler.h"
+#include "common/error.h"
 #include "common/file_system.h"
 #include "common/log.h"
 #include "common/memory_settings_interface.h"
@@ -112,6 +113,12 @@ bool RegTestHost::InitializeConfig()
   EmuFolders::EnsureFoldersExist();
 
   return true;
+}
+
+void Host::ReportFatalError(const std::string_view& title, const std::string_view& message)
+{
+  Log_ErrorPrintf("ReportFatalError: %.*s", static_cast<int>(message.size()), message.data());
+  abort();
 }
 
 void Host::ReportErrorAsync(const std::string_view& title, const std::string_view& message)
@@ -641,18 +648,20 @@ int main(int argc, char* argv[])
 
   if (!autoboot || autoboot->filename.empty())
   {
-    Log_ErrorPrintf("No boot path specified.");
+    Log_ErrorPrint("No boot path specified.");
     return EXIT_FAILURE;
   }
 
-  System::Internal::ProcessStartup();
+  if (!System::Internal::ProcessStartup())
+    return EXIT_FAILURE;
+
   RegTestHost::HookSignals();
 
   int result = -1;
   Log_InfoPrintf("Trying to boot '%s'...", autoboot->filename.c_str());
   if (!System::BootSystem(std::move(autoboot.value())))
   {
-    Log_ErrorPrintf("Failed to boot system.");
+    Log_ErrorPrint("Failed to boot system.");
     goto cleanup;
   }
 
