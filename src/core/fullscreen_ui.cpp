@@ -230,6 +230,7 @@ static bool s_tried_to_initialize = false;
 static bool s_pause_menu_was_open = false;
 static bool s_was_paused_on_quick_menu_open = false;
 static bool s_about_window_open = false;
+static bool s_achievements_login_window_open = false;
 
 //////////////////////////////////////////////////////////////////////////
 // Resources
@@ -289,6 +290,8 @@ static void DrawMemoryCardSettingsPage();
 static void DrawControllerSettingsPage();
 static void DrawHotkeySettingsPage();
 static void DrawAchievementsSettingsPage();
+static void DrawAchievementsLoginWindow();
+static void OpenAchievementsLoginWindow();
 static void DrawAdvancedSettingsPage();
 
 static bool IsEditingGameSettings(SettingsInterface* bsi);
@@ -398,7 +401,6 @@ static std::string s_input_binding_display_name;
 static std::vector<InputBindingKey> s_input_binding_new_bindings;
 static std::vector<std::pair<InputBindingKey, std::pair<float, float>>> s_input_binding_value_ranges;
 static Common::Timer s_input_binding_timer;
-
 //////////////////////////////////////////////////////////////////////////
 // Save State List
 //////////////////////////////////////////////////////////////////////////
@@ -724,6 +726,9 @@ void FullscreenUI::Render()
 
   if (s_about_window_open)
     DrawAboutWindow();
+
+  if (s_achievements_login_window_open)
+    DrawAchievementsLoginWindow();
 
   if (s_input_binding_type != InputBindingInfo::Type::Unknown)
     DrawInputBindingWindow();
@@ -4585,7 +4590,8 @@ void FullscreenUI::DrawAchievementsSettingsPage()
                    ImGuiFullscreen::LAYOUT_MENU_BUTTON_HEIGHT_NO_SUMMARY);
 
       if (MenuButton(FSUI_ICONSTR(ICON_FA_KEY, "Login"), FSUI_CSTR("Logs in to RetroAchievements.")))
-        Host::OnAchievementsLoginRequested(Achievements::LoginRequestReason::UserInitiated);
+        // Host::OnAchievementsLoginRequested(Achievements::LoginRequestReason::UserInitiated);
+        OpenAchievementsLoginWindow();
     }
 
     MenuHeading(FSUI_CSTR("Current Game"));
@@ -6320,6 +6326,84 @@ GPUTexture* FullscreenUI::GetCoverForCurrentGame()
   return GetGameListCover(entry);
 }
 
+void FullscreenUI::DrawAchievementsLoginWindow()
+{
+  ImGui::SetNextWindowSize(LayoutScale(700.0f, 0.0f));
+  ImGui::SetNextWindowPos(ImGui::GetIO().DisplaySize * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::OpenPopup("Achievements Login");
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, LayoutScale(10.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, LayoutScale(20.0f, 20.0f));
+  ImGui::PushFont(g_large_font);
+
+  if (ImGui::BeginPopupModal("Achievements Login", &s_achievements_login_window_open, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize))
+  {
+    ImGui::TextWrapped("RetroAchievements is unavailable in this release as it is currently non-functional and will be fixed in a later release.");
+    ImGui::NewLine();
+    ImGui::TextWrapped("There is currently no workaround; please do not ask for support with RetroAchievements in this release.");
+    ImGui::NewLine();
+    ImGui::TextWrapped("");
+    BeginMenuButtons();
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + LayoutScale(10.0f));
+    if (MenuButtonWithoutSummary(FSUI_CSTR("OK"), true, LAYOUT_MENU_BUTTON_HEIGHT_NO_SUMMARY, g_large_font,
+                                 ImVec2(0.5f, 0.0f)))
+    {
+      s_achievements_login_window_open = false;
+      ImGui::CloseCurrentPopup();
+    }
+    EndMenuButtons();
+
+    ImGui::EndPopup();
+    /* RetroAchievements are stubbed out here due to them not actually working properly
+    ImGui::TextWrapped("Please enter your user name and password for retroachievements.org.");
+    ImGui::NewLine();
+    ImGui::TextWrapped("Your password will not be saved in DuckStation-UWP, an access token will be generated and used instead.");
+
+    ImGui::NewLine();
+
+    static char username[256] = {};
+    static char password[256] = {};
+    ImGui::Text("User Name: ");
+    ImGui::SameLine(LayoutScale(200.0f));
+    ImGui::InputText("##username", username, sizeof(username));
+
+    ImGui::Text("Password: ");
+    ImGui::SameLine(LayoutScale(200.0f));
+    ImGui::InputText("##password", password, sizeof(password), ImGuiInputTextFlags_Password);
+
+    ImGui::NewLine();
+
+    BeginMenuButtons();
+
+    const bool login_enabled = (std::strlen(username) > 0 && std::strlen(password) > 0);
+
+    if (ActiveButton(ICON_FA_KEY "  Login", false, login_enabled))
+    {
+      Error error;
+      const bool result = Achievements::Login(username, password, &error);
+      std::memset(username, 0, sizeof(username));
+      std::memset(password, 0, sizeof(password));
+      s_achievements_login_window_open = false;
+      ImGui::CloseCurrentPopup();
+    }
+
+    if (ActiveButton(ICON_FA_TIMES "  Cancel", false))
+    {
+      std::memset(username, 0, sizeof(username));
+      std::memset(password, 0, sizeof(password));
+      s_achievements_login_window_open = false;
+      ImGui::CloseCurrentPopup();
+    }
+
+    EndMenuButtons();
+
+    ImGui::EndPopup();
+    */
+  }
+
+  ImGui::PopFont();
+  ImGui::PopStyleVar(2);
+}
+
 //////////////////////////////////////////////////////////////////////////
 // Overlays
 //////////////////////////////////////////////////////////////////////////
@@ -6351,24 +6435,28 @@ void FullscreenUI::DrawAboutWindow()
 {
   ImGui::SetNextWindowSize(LayoutScale(1000.0f, 510.0f));
   ImGui::SetNextWindowPos(ImGui::GetIO().DisplaySize * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-  ImGui::OpenPopup(FSUI_CSTR("About DuckStation"));
+  ImGui::OpenPopup("About DuckStation-UWP");
 
   ImGui::PushFont(g_large_font);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, LayoutScale(10.0f));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, LayoutScale(10.0f, 10.0f));
 
-  if (ImGui::BeginPopupModal(FSUI_CSTR("About DuckStation"), &s_about_window_open,
+  if (ImGui::BeginPopupModal("About DuckStation-UWP", &s_about_window_open,
                              ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize))
   {
     ImGui::TextWrapped("%s",
                        FSUI_CSTR("DuckStation is a free and open-source simulator/emulator of the Sony PlayStation(TM) "
                                  "console, focusing on playability, speed, and long-term maintainability."));
     ImGui::NewLine();
+    ImGui::TextWrapped("DuckStation-UWP is a modification of DuckStation to allow for Xbox & UWP support.");
+    ImGui::NewLine();
     ImGui::TextWrapped(
       "%s", FSUI_CSTR("Contributor List: https://github.com/stenzek/duckstation/blob/master/CONTRIBUTORS.md"));
     ImGui::NewLine();
     ImGui::TextWrapped(
       "%s", FSUI_CSTR("Duck icon by icons8 (https://icons8.com/icon/74847/platforms.undefined.short-title)"));
+    ImGui::NewLine();
+    ImGui::TextWrapped("UWP modification of Duck icon done by irixaligned");
     ImGui::NewLine();
     ImGui::TextWrapped(
       "%s", FSUI_CSTR("\"PlayStation\" and \"PSX\" are registered trademarks of Sony Interactive Entertainment Europe "
@@ -6378,11 +6466,11 @@ void FullscreenUI::DrawAboutWindow()
 
     BeginMenuButtons();
     if (ActiveButton(FSUI_ICONSTR(ICON_FA_GLOBE, "GitHub Repository"), false))
-      ExitFullscreenAndOpenURL("https://github.com/stenzek/duckstation/");
+      ExitFullscreenAndOpenURL("https://github.com/irixaligned/duckstation-uwp/");
     if (ActiveButton(FSUI_ICONSTR(ICON_FA_BUG, "Issue Tracker"), false))
-      ExitFullscreenAndOpenURL("https://github.com/stenzek/duckstation/issues");
+      ExitFullscreenAndOpenURL("https://github.com/irixaligned/duckstation-uwp/issues");
     if (ActiveButton(FSUI_ICONSTR(ICON_FA_COMMENT, "Discord Server"), false))
-      ExitFullscreenAndOpenURL("https://discord.gg/Buktv3t");
+      ExitFullscreenAndOpenURL("https://discord.gg/xboxemus");
 
     if (ActiveButton(FSUI_ICONSTR(ICON_FA_WINDOW_CLOSE, "Close"), false))
     {
@@ -6458,6 +6546,11 @@ void FullscreenUI::OpenLeaderboardsWindow()
 bool FullscreenUI::IsLeaderboardsWindowOpen()
 {
   return (s_current_main_window == MainWindowType::Leaderboards);
+}
+
+void FullscreenUI::OpenAchievementsLoginWindow()
+{
+  s_achievements_login_window_open = true;
 }
 
 #endif // __ANDROID__

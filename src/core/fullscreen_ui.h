@@ -34,6 +34,7 @@ void OpenLeaderboardsWindow();
 bool IsLeaderboardsWindowOpen();
 void ReturnToMainWindow();
 void ReturnToPreviousWindow();
+void DrawAchievementsLoginWindow();
 #endif
 
 void Shutdown();

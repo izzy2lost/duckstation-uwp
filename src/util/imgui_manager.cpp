@@ -197,6 +197,10 @@ bool ImGuiManager::Initialize(float global_scale, bool show_osd_messages, Error*
 
   SetKeyMap();
   SetStyle();
+#ifdef _UWP
+  io.KeyMap[ImGuiKey_Backspace] = '\b';
+  io.KeyMap[ImGuiKey_Enter] = '\r';
+#endif
 
   if (!AddImGuiFonts(false) || !g_gpu_device->UpdateImGuiFontTexture())
   {
@@ -954,8 +958,33 @@ void ImGuiManager::AddCharacterInput(int code)
     Host::RunOnCPUThread([code = std::move(code)]() {
       if (!ImGui::GetCurrentContext())
         return;
+      ImGuiIO& io = ImGui::GetIO();
 
-      ImGui::GetIO().AddInputCharacter(code);
+
+      switch (code)
+      {
+        case '\b': // backspace
+          io.AddKeyEvent(ImGuiKey_Backspace, true);
+          break;
+        case '\r': // enter
+          io.AddKeyEvent(ImGuiKey_Enter, true);
+          break;
+        /* in a perfect world this shit would work.
+         * the world is imperfect.
+        case '\x25': // left arrow
+          io.AddKeyEvent(ImGuiKey_LeftArrow, true);
+          break;
+        case '\x27': // right arrow
+          io.AddKeyEvent(ImGuiKey_RightArrow, true);
+          break;
+        */
+        default:
+          io.AddInputCharacter(code);
+          break;
+      }
+
+      io.AddKeyEvent(ImGuiKey_Backspace, false);
+      io.AddKeyEvent(ImGuiKey_Enter, false);
     });
   }
 }

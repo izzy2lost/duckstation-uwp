@@ -24,6 +24,7 @@
 #include "core/settings.h"
 #include "core/system.h"
 #include "common/crash_handler.h"
+#include "common/error.h"
 #include "common/file_system.h"
 #include "common/log.h"
 #include "common/path.h"
@@ -453,9 +454,13 @@ void Host::CancelGameListRefresh()
     WinRTHost::CancelAsyncOp();
 }
 
-
-
 // Host impls
+void Host::ReportFatalError(const std::string_view& title, const std::string_view& message)
+{
+  Log_ErrorPrintf("ReportFatalError: %.*s", static_cast<int>(message.size()), message.data());
+  abort();
+}
+
 void Host::ReportErrorAsync(const std::string_view& title, const std::string_view& message)
 {
   if (!title.empty() && !message.empty())
@@ -632,7 +637,8 @@ void Host::OnGameChanged(const std::string& disc_path, const std::string& game_s
 
 void Host::OnAchievementsLoginRequested(Achievements::LoginRequestReason reason)
 {
-  // noop
+  //ImGui::OpenPopup("Achievements Login");
+  //FullscreenUI::DrawAchievementsLoginWindow();
 }
 
 void Host::OnAchievementsLoginSuccess(const char* username, u32 points, u32 sc_points, u32 unread_messages)
