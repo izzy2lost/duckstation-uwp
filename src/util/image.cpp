@@ -1,0 +1,608 @@
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
+
+#include "image.h"
+
+#include "common/bitutils.h"
+#include "common/byte_stream.h"
+#include "common/file_system.h"
+#include "common/log.h"
+#include "common/path.h"
+#include "common/scoped_guard.h"
+#include "common/string_util.h"
+
+#include <jpeglib.h>
+#include <png.h>
+
+// clang-format off
+#ifdef _MSC_VER
+#pragma warning(disable : 4611) // warning C4611: interaction between '_setjmp' and C++ object destruction is non-portable
+#pragma warning(disable : 4324) // warning C4324: '`anonymous-namespace'::JPEGErrorHandler': structure was padded due to alignment specifier
+#endif
+// clang-format on
+
+Log_SetChannel(Image);
+
+static bool PNGBufferLoader(RGBA8Image* image, const void* buffer, size_t buffer_size);
+static bool PNGBufferSaver(const RGBA8Image& image, std::vector<u8>* buffer, u8 quality);
+static bool PNGFileLoader(RGBA8Image* image, const char* filename, std::FILE* fp);
+static bool PNGFileSaver(const RGBA8Image& image, const char* filename, std::FILE* fp, u8 quality);
+
+static bool JPEGBufferLoader(RGBA8Image* image, const void* buffer, size_t buffer_size);
+static bool JPEGBufferSaver(const RGBA8Image& image, std::vector<u8>* buffer, u8 quality);
+static bool JPEGFileLoader(RGBA8Image* image, const char* filename, std::FILE* fp);
+static bool JPEGFileSaver(const RGBA8Image& image, const char* filename, std::FILE* fp, u8 quality);
+
+struct FormatHandler
+{
+  const char* extension;
+  bool (*buffer_loader)(RGBA8Image*, const void*, size_t);
+  bool (*buffer_saver)(const RGBA8Image&, std::vector<u8>*, u8);
+  bool (*file_loader)(RGBA8Image*, const char*, std::FILE*);
+  bool (*file_saver)(const RGBA8Image&, const char*, std::FILE*, u8);
+};
+
+static constexpr FormatHandler s_format_handlers[] = {
+  {"png", PNGBufferLoader, PNGBufferSaver, PNGFileLoader, PNGFileSaver},
+  {"jpg", JPEGBufferLoader, JPEGBufferSaver, JPEGFileLoader, JPEGFileSaver},
+  {"jpeg", JPEGBufferLoader, JPEGBufferSaver, JPEGFileLoader, JPEGFileSaver},
+};
+
+static const FormatHandler* GetFormatHandler(const std::string_view& extension)
+{
+  for (const FormatHandler& handler : s_format_handlers)
+  {
+    if (StringUtil::Strncasecmp(extension.data(), handler.extension, extension.size()) == 0)
+      return &handler;
+  }
+
+  return nullptr;
+}
+
+RGBA8Image::RGBA8Image() = default;
+
+RGBA8Image::RGBA8Image(const RGBA8Image& copy) : Image(copy)
+{
+}
+
+RGBA8Image::RGBA8Image(u32 width, u32 height, const u32* pixels) : Image(width, height, pixels)
+{
+}
+
+RGBA8Image::RGBA8Image(RGBA8Image&& move) : Image(move)
+{
+}
+
+RGBA8Image::RGBA8Image(u32 width, u32 height) : Image(width, height)
+{
+}
+
+RGBA8Image::RGBA8Image(u32 width, u32 height, std::vector<u32> pixels) : Image(width, height, std::move(pixels))
+{
+}
+
+RGBA8Image& RGBA8Image::operator=(const RGBA8Image& copy)
+{
+  Image<u32>::operator=(copy);
+  return *this;
+}
+
+RGBA8Image& RGBA8Image::operator=(RGBA8Image&& move)
+{
+  Image<u32>::operator=(move);
+  return *this;
+}
+
+bool RGBA8Image::LoadFromFile(const char* filename)
+{
+  auto fp = FileSystem::OpenManagedCFile(filename, "rb");
+  if (!fp)
+    return false;
+
+  return LoadFromFile(filename, fp.get());
+}
+
+bool RGBA8Image::SaveToFile(const char* filename, u8 quality) const
+{
+  auto fp = FileSystem::OpenManagedCFile(filename, "wb");
+  if (!fp)
+    return false;
+
+  if (SaveToFile(filename, fp.get(), quality))
+    return true;
+
+  // save failed
+  fp.reset();
+  FileSystem::DeleteFile(filename);
+  return false;
+}
+
+bool RGBA8Image::LoadFromFile(const char* filename, std::FILE* fp)
+{
+  const std::string_view extension(Path::GetExtension(filename));
+  const FormatHandler* handler = GetFormatHandler(extension);
+  if (!handler || !handler->file_loader)
+  {
+    Log_ErrorPrintf("Unknown extension '%.*s'", static_cast<int>(extension.size()), extension.data());
+    return false;
+  }
+
+  return handler->file_loader(this, filename, fp);
+}
+
+bool RGBA8Image::LoadFromBuffer(const char* filename, const void* buffer, size_t buffer_size)
+{
+  const std::string_view extension(Path::GetExtension(filename));
+  const FormatHandler* handler = GetFormatHandler(extension);
+  if (!handler || !handler->buffer_loader)
+  {
+    Log_ErrorPrintf("Unknown extension '%.*s'", static_cast<int>(extension.size()), extension.data());
+    return false;
+  }
+
+  return handler->buffer_loader(this, buffer, buffer_size);
+}
+
+bool RGBA8Image::SaveToFile(const char* filename, std::FILE* fp, u8 quality) const
+{
+  const std::string_view extension(Path::GetExtension(filename));
+  const FormatHandler* handler = GetFormatHandler(extension);
+  if (!handler || !handler->file_saver)
+  {
+    Log_ErrorPrintf("Unknown extension '%.*s'", static_cast<int>(extension.size()), extension.data());
+    return false;
+  }
+
+  if (!handler->file_saver(*this, filename, fp, quality))
+    return false;
+
+  return (std::fflush(fp) == 0);
+}
+
+std::optional<std::vector<u8>> RGBA8Image::SaveToBuffer(const char* filename, u8 quality) const
+{
+  std::optional<std::vector<u8>> ret;
+
+  const std::string_view extension(Path::GetExtension(filename));
+  const FormatHandler* handler = GetFormatHandler(extension);
+  if (!handler || !handler->file_saver)
+  {
+    Log_ErrorPrintf("Unknown extension '%.*s'", static_cast<int>(extension.size()), extension.data());
+    return ret;
+  }
+
+  ret = std::vector<u8>();
+  if (!handler->buffer_saver(*this, &ret.value(), quality))
+    ret.reset();
+
+  return ret;
+}
+
+#if 0
+
+void RGBA8Image::Resize(u32 new_width, u32 new_height)
+{
+  if (m_width == new_width && m_height == new_height)
+    return;
+
+  std::vector<u32> resized_texture_data(new_width * new_height);
+  u32 resized_texture_stride = sizeof(u32) * new_width;
+  if (!stbir_resize_uint8(reinterpret_cast<u8*>(m_pixels.data()), m_width, m_height, GetPitch(),
+                          reinterpret_cast<u8*>(resized_texture_data.data()), new_width, new_height,
+                          resized_texture_stride, 4))
+  {
+    Panic("stbir_resize_uint8 failed");
+    return;
+  }
+
+  SetPixels(new_width, new_height, std::move(resized_texture_data));
+}
+
+void RGBA8Image::Resize(const RGBA8Image* src_image, u32 new_width, u32 new_height)
+{
+  if (src_image->m_width == new_width && src_image->m_height == new_height)
+  {
+    SetPixels(src_image->m_width, src_image->m_height, src_image->m_pixels.data());
+    return;
+  }
+
+  SetSize(new_width, new_height);
+  if (!stbir_resize_uint8(reinterpret_cast<const u8*>(src_image->m_pixels.data()), src_image->m_width,
+                          src_image->m_height, src_image->GetPitch(), reinterpret_cast<u8*>(m_pixels.data()), new_width,
+                          new_height, GetPitch(), 4))
+  {
+    Panic("stbir_resize_uint8 failed");
+    return;
+  }
+}
+
+#endif
+
+static bool PNGCommonLoader(RGBA8Image* image, png_structp png_ptr, png_infop info_ptr, std::vector<u32>& new_data,
+                            std::vector<png_bytep>& row_pointers)
+{
+  png_read_info(png_ptr, info_ptr);
+
+  const u32 width = png_get_image_width(png_ptr, info_ptr);
+  const u32 height = png_get_image_height(png_ptr, info_ptr);
+  const png_byte color_type = png_get_color_type(png_ptr, info_ptr);
+  const png_byte bit_depth = png_get_bit_depth(png_ptr, info_ptr);
+
+  // Read any color_type into 8bit depth, RGBA format.
+  // See http://www.libpng.org/pub/png/libpng-manual.txt
+
+  if (bit_depth == 16)
+    png_set_strip_16(png_ptr);
+
+  if (color_type == PNG_COLOR_TYPE_PALETTE)
+    png_set_palette_to_rgb(png_ptr);
+
+  // PNG_COLOR_TYPE_GRAY_ALPHA is always 8 or 16bit depth.
+  if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)
+    png_set_expand_gray_1_2_4_to_8(png_ptr);
+
+  if (png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS))
+    png_set_tRNS_to_alpha(png_ptr);
+
+  // These color_type don't have an alpha channel then fill it with 0xff.
+  if (color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_PALETTE)
+    png_set_filler(png_ptr, 0xFF, PNG_FILLER_AFTER);
+
+  if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
+    png_set_gray_to_rgb(png_ptr);
+
+  png_read_update_info(png_ptr, info_ptr);
+
+  new_data.resize(width * height);
+  row_pointers.reserve(height);
+  for (u32 y = 0; y < height; y++)
+    row_pointers.push_back(reinterpret_cast<png_bytep>(new_data.data() + y * width));
+
+  png_read_image(png_ptr, row_pointers.data());
+  image->SetPixels(width, height, std::move(new_data));
+  return true;
+}
+
+bool PNGFileLoader(RGBA8Image* image, const char* filename, std::FILE* fp)
+{
+  png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+  if (!png_ptr)
+    return false;
+
+  png_infop info_ptr = png_create_info_struct(png_ptr);
+  if (!info_ptr)
+  {
+    png_destroy_read_struct(&png_ptr, nullptr, nullptr);
+    return false;
+  }
+
+  ScopedGuard cleanup([&png_ptr, &info_ptr]() { png_destroy_read_struct(&png_ptr, &info_ptr, nullptr); });
+
+  std::vector<u32> new_data;
+  std::vector<png_bytep> row_pointers;
+
+  if (setjmp(png_jmpbuf(png_ptr)))
+    return false;
+
+  png_init_io(png_ptr, fp);
+  return PNGCommonLoader(image, png_ptr, info_ptr, new_data, row_pointers);
+}
+
+bool PNGBufferLoader(RGBA8Image* image, const void* buffer, size_t buffer_size)
+{
+  png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+  if (!png_ptr)
+    return false;
+
+  png_infop info_ptr = png_create_info_struct(png_ptr);
+  if (!info_ptr)
+  {
+    png_destroy_read_struct(&png_ptr, nullptr, nullptr);
+    return false;
+  }
+
+  ScopedGuard cleanup([&png_ptr, &info_ptr]() { png_destroy_read_struct(&png_ptr, &info_ptr, nullptr); });
+
+  std::vector<u32> new_data;
+  std::vector<png_bytep> row_pointers;
+
+  if (setjmp(png_jmpbuf(png_ptr)))
+    return false;
+
+  struct IOData
+  {
+    const u8* buffer;
+    size_t buffer_size;
+    size_t buffer_pos;
+  };
+  IOData data = {static_cast<const u8*>(buffer), buffer_size, 0};
+
+  png_set_read_fn(png_ptr, &data, [](png_structp png_ptr, png_bytep data_ptr, png_size_t size) {
+    IOData* data = static_cast<IOData*>(png_get_io_ptr(png_ptr));
+    const size_t read_size = std::min<size_t>(data->buffer_size - data->buffer_pos, size);
+    if (read_size > 0)
+    {
+      std::memcpy(data_ptr, data->buffer + data->buffer_pos, read_size);
+      data->buffer_pos += read_size;
+    }
+  });
+
+  return PNGCommonLoader(image, png_ptr, info_ptr, new_data, row_pointers);
+}
+
+static void PNGSaveCommon(const RGBA8Image& image, png_structp png_ptr, png_infop info_ptr, u8 quality)
+{
+  png_set_compression_level(png_ptr, std::clamp(quality / 10, 0, 9));
+  png_set_IHDR(png_ptr, info_ptr, image.GetWidth(), image.GetHeight(), 8, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
+               PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+  png_write_info(png_ptr, info_ptr);
+
+  for (u32 y = 0; y < image.GetHeight(); ++y)
+    png_write_row(png_ptr, (png_bytep)image.GetRowPixels(y));
+
+  png_write_end(png_ptr, nullptr);
+}
+
+bool PNGFileSaver(const RGBA8Image& image, const char* filename, std::FILE* fp, u8 quality)
+{
+  png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+  png_infop info_ptr = nullptr;
+  if (!png_ptr)
+    return false;
+
+  ScopedGuard cleanup([&png_ptr, &info_ptr]() {
+    if (png_ptr)
+      png_destroy_write_struct(&png_ptr, info_ptr ? &info_ptr : nullptr);
+  });
+
+  info_ptr = png_create_info_struct(png_ptr);
+  if (!info_ptr)
+    return false;
+
+  if (setjmp(png_jmpbuf(png_ptr)))
+    return false;
+
+  png_set_write_fn(
+    png_ptr, fp,
+    [](png_structp png_ptr, png_bytep data_ptr, png_size_t size) {
+      if (std::fwrite(data_ptr, size, 1, static_cast<std::FILE*>(png_get_io_ptr(png_ptr))) != 1)
+        png_error(png_ptr, "file write error");
+    },
+    [](png_structp png_ptr) {});
+
+  PNGSaveCommon(image, png_ptr, info_ptr, quality);
+  return true;
+}
+
+bool PNGBufferSaver(const RGBA8Image& image, std::vector<u8>* buffer, u8 quality)
+{
+  png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+  png_infop info_ptr = nullptr;
+  if (!png_ptr)
+    return false;
+
+  ScopedGuard cleanup([&png_ptr, &info_ptr]() {
+    if (png_ptr)
+      png_destroy_write_struct(&png_ptr, info_ptr ? &info_ptr : nullptr);
+  });
+
+  info_ptr = png_create_info_struct(png_ptr);
+  if (!info_ptr)
+    return false;
+
+  buffer->reserve(image.GetWidth() * image.GetHeight() * 2);
+
+  if (setjmp(png_jmpbuf(png_ptr)))
+    return false;
+
+  png_set_write_fn(
+    png_ptr, buffer,
+    [](png_structp png_ptr, png_bytep data_ptr, png_size_t size) {
+      std::vector<u8>* buffer = static_cast<std::vector<u8>*>(png_get_io_ptr(png_ptr));
+      const size_t old_pos = buffer->size();
+      buffer->resize(old_pos + size);
+      std::memcpy(buffer->data() + old_pos, data_ptr, size);
+    },
+    [](png_structp png_ptr) {});
+
+  PNGSaveCommon(image, png_ptr, info_ptr, quality);
+  return true;
+}
+
+namespace {
+struct JPEGErrorHandler
+{
+  jpeg_error_mgr err;
+  jmp_buf jbuf;
+};
+} // namespace
+
+static bool HandleJPEGError(JPEGErrorHandler* eh)
+{
+  jpeg_std_error(&eh->err);
+
+  eh->err.error_exit = [](j_common_ptr cinfo) {
+    JPEGErrorHandler* eh = (JPEGErrorHandler*)cinfo->err;
+    char msg[JMSG_LENGTH_MAX];
+    eh->err.format_message(cinfo, msg);
+    Log_ErrorFmt("libjpeg fatal error: {}", msg);
+    longjmp(eh->jbuf, 1);
+  };
+
+  if (setjmp(eh->jbuf) == 0)
+    return true;
+
+  return false;
+}
+
+template<typename T>
+static bool WrapJPEGDecompress(RGBA8Image* image, T setup_func)
+{
+  std::vector<u8> scanline;
+
+  JPEGErrorHandler err;
+  if (!HandleJPEGError(&err))
+    return false;
+
+  jpeg_decompress_struct info;
+  info.err = &err.err;
+  jpeg_create_decompress(&info);
+  setup_func(info);
+
+  const int herr = jpeg_read_header(&info, TRUE);
+  if (herr != JPEG_HEADER_OK)
+  {
+    Log_ErrorFmt("jpeg_read_header() returned {}", herr);
+    return false;
+  }
+
+  if (info.image_width == 0 || info.image_height == 0 || info.num_components < 3)
+  {
+    Log_ErrorFmt("Invalid image dimensions: {}x{}x{}", info.image_width, info.image_height, info.num_components);
+    return false;
+  }
+
+  info.out_color_space = JCS_RGB;
+  info.out_color_components = 3;
+
+  if (!jpeg_start_decompress(&info))
+  {
+    Log_ErrorFmt("jpeg_start_decompress() returned failure");
+    return false;
+  }
+
+  image->SetSize(info.image_width, info.image_height);
+  scanline.resize(info.image_width * 3);
+
+  u8* scanline_buffer[1] = {scanline.data()};
+  bool result = true;
+  for (u32 y = 0; y < info.image_height; y++)
+  {
+    if (jpeg_read_scanlines(&info, scanline_buffer, 1) != 1)
+    {
+      Log_ErrorFmt("jpeg_read_scanlines() failed at row {}", y);
+      result = false;
+      break;
+    }
+
+    // RGB -> RGBA
+    const u8* src_ptr = scanline.data();
+    u32* dst_ptr = image->GetRowPixels(y);
+    for (u32 x = 0; x < info.image_width; x++)
+    {
+      *(dst_ptr) =
+        (ZeroExtend32(src_ptr[0]) | (ZeroExtend32(src_ptr[1]) << 8) | (ZeroExtend32(src_ptr[2]) << 16) | 0xFF000000u);
+    }
+  }
+
+  jpeg_finish_decompress(&info);
+  jpeg_destroy_decompress(&info);
+  return result;
+}
+
+bool JPEGBufferLoader(RGBA8Image* image, const void* buffer, size_t buffer_size)
+{
+  return WrapJPEGDecompress(image, [buffer, buffer_size](jpeg_decompress_struct& info) {
+    jpeg_mem_src(&info, static_cast<const unsigned char*>(buffer), buffer_size);
+  });
+}
+
+bool JPEGFileLoader(RGBA8Image* image, const char* filename, std::FILE* fp)
+{
+  return WrapJPEGDecompress(image, [fp](jpeg_decompress_struct& info) { jpeg_stdio_src(&info, fp); });
+}
+
+template<typename T>
+static bool WrapJPEGCompress(const RGBA8Image& image, u8 quality, T setup_func)
+{
+  std::vector<u8> scanline;
+
+  JPEGErrorHandler err;
+  if (!HandleJPEGError(&err))
+    return false;
+
+  jpeg_compress_struct info;
+  info.err = &err.err;
+  jpeg_create_compress(&info);
+  setup_func(info);
+
+  info.image_width = image.GetWidth();
+  info.image_height = image.GetHeight();
+  info.in_color_space = JCS_RGB;
+  info.input_components = 3;
+
+  jpeg_set_defaults(&info);
+  jpeg_set_quality(&info, quality, TRUE);
+  jpeg_start_compress(&info, TRUE);
+
+  scanline.resize(image.GetWidth() * 3);
+  u8* scanline_buffer[1] = {scanline.data()};
+  bool result = true;
+  for (u32 y = 0; y < info.image_height; y++)
+  {
+    // RGBA -> RGB
+    u8* dst_ptr = scanline.data();
+    const u32* src_ptr = image.GetRowPixels(y);
+    for (u32 x = 0; x < info.image_width; x++)
+    {
+      const u32 rgba = *(src_ptr++);
+      *(dst_ptr++) = Truncate8(rgba);
+      *(dst_ptr++) = Truncate8(rgba >> 8);
+      *(dst_ptr++) = Truncate8(rgba >> 16);
+    }
+
+    if (jpeg_write_scanlines(&info, scanline_buffer, 1) != 1)
+    {
+      Log_ErrorFmt("jpeg_write_scanlines() failed at row {}", y);
+      result = false;
+      break;
+    }
+  }
+
+  jpeg_finish_compress(&info);
+  jpeg_destroy_compress(&info);
+  return result;
+}
+
+bool JPEGBufferSaver(const RGBA8Image& image, std::vector<u8>* buffer, u8 quality)
+{
+  // give enough space to avoid reallocs
+  buffer->resize(image.GetWidth() * image.GetHeight() * 2);
+
+  struct MemCallback
+  {
+    jpeg_destination_mgr mgr;
+    std::vector<u8>* buffer;
+    size_t buffer_used;
+  };
+
+  MemCallback cb;
+  cb.buffer = buffer;
+  cb.buffer_used = 0;
+  cb.mgr.next_output_byte = buffer->data();
+  cb.mgr.free_in_buffer = buffer->size();
+  cb.mgr.init_destination = [](j_compress_ptr cinfo) {};
+  cb.mgr.empty_output_buffer = [](j_compress_ptr cinfo) -> boolean {
+    MemCallback* cb = (MemCallback*)cinfo->dest;
+
+    // double size
+    cb->buffer_used = cb->buffer->size();
+    cb->buffer->resize(cb->buffer->size() * 2);
+    cb->mgr.next_output_byte = cb->buffer->data() + cb->buffer_used;
+    cb->mgr.free_in_buffer = cb->buffer->size() - cb->buffer_used;
+    return TRUE;
+  };
+  cb.mgr.term_destination = [](j_compress_ptr cinfo) {
+    MemCallback* cb = (MemCallback*)cinfo->dest;
+
+    // get final size
+    cb->buffer->resize(cb->buffer->size() - cb->mgr.free_in_buffer);
+  };
+
+  return WrapJPEGCompress(image, quality, [&cb](jpeg_compress_struct& info) { info.dest = &cb.mgr; });
+}
+
+bool JPEGFileSaver(const RGBA8Image& image, const char* filename, std::FILE* fp, u8 quality)
+{
+  return WrapJPEGCompress(image, quality, [fp](jpeg_compress_struct& info) { jpeg_stdio_dest(&info, fp); });
+}

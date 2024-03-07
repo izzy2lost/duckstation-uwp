@@ -192,7 +192,6 @@ public Q_SLOTS:
   void setFullscreen(bool fullscreen, bool allow_render_to_main);
   void setSurfaceless(bool surfaceless);
   void requestDisplaySize(float scale);
-  void loadCheatList(const QString& filename);
   void setCheatEnabled(quint32 index, bool enabled);
   void applyCheat(quint32 index);
   void reloadPostProcessingShaders();
@@ -285,6 +284,9 @@ bool DownloadFileFromZip(QWidget* parent, const QString& title, std::string url,
 
 /// Thread-safe settings access.
 void QueueSettingsSave();
+
+/// Returns true if the debug menu and functionality should be shown.
+bool ShouldShowDebugOptions();
 
 /// VM state, safe to access on UI thread.
 bool IsSystemValid();

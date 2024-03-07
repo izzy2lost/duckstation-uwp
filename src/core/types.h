@@ -105,6 +105,15 @@ enum class GPUWireframeMode : u8
   Count,
 };
 
+enum class GPULineDetectMode : u8
+{
+  Disabled,
+  Quads,
+  BasicTriangles,
+  AggressiveTriangles,
+  Count
+};
+
 enum class DisplayCropMode : u8
 {
   None,
@@ -148,6 +157,21 @@ enum class DisplayExclusiveFullscreenControl : u8
   Automatic,
   Disallowed,
   Allowed,
+  Count
+};
+
+enum class DisplayScreenshotMode : u8
+{
+  ScreenResolution,
+  InternalResolution,
+  UncorrectedInternalResolution,
+  Count
+};
+
+enum class DisplayScreenshotFormat : u8
+{
+  PNG,
+  JPEG,
   Count
 };
 

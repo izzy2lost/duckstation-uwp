@@ -5,6 +5,7 @@
 
 #include "gpu_shader_cache.h"
 #include "gpu_texture.h"
+#include "gpu_types.h"
 #include "window_info.h"
 
 #include "common/bitfield.h"
@@ -24,17 +25,6 @@
 #include <vector>
 
 class Error;
-
-enum class RenderAPI : u32
-{
-  None,
-  D3D11,
-  D3D12,
-  Vulkan,
-  OpenGL,
-  OpenGLES,
-  Metal
-};
 
 class GPUSampler
 {
@@ -439,6 +429,7 @@ public:
     FEATURE_MASK_TEXTURE_BUFFERS = (1 << 2),
     FEATURE_MASK_GEOMETRY_SHADERS = (1 << 3),
     FEATURE_MASK_TEXTURE_COPY_TO_SELF = (1 << 4),
+    FEATURE_MASK_MEMORY_IMPORT = (1 << 5),
   };
 
   struct Features
@@ -452,6 +443,7 @@ public:
     bool texture_buffers_emulated_with_ssbo : 1;
     bool geometry_shaders : 1;
     bool partial_msaa_resolve : 1;
+    bool memory_import : 1;
     bool gpu_timing : 1;
     bool shader_cache : 1;
     bool pipeline_cache : 1;
@@ -549,7 +541,7 @@ public:
   virtual RenderAPI GetRenderAPI() const = 0;
 
   bool Create(const std::string_view& adapter, const std::string_view& shader_cache_path, u32 shader_cache_version,
-              bool debug_device, bool vsync, bool threaded_presentation,
+              bool debug_device, DisplaySyncMode sync_mode, bool threaded_presentation,
               std::optional<bool> exclusive_fullscreen_control, FeatureMask disabled_features, Error* error);
   void Destroy();
 
@@ -583,8 +575,12 @@ public:
   void RecycleTexture(std::unique_ptr<GPUTexture> texture);
   void PurgeTexturePool();
 
-  virtual bool DownloadTexture(GPUTexture* texture, u32 x, u32 y, u32 width, u32 height, void* out_data,
-                               u32 out_data_stride) = 0;
+  virtual std::unique_ptr<GPUDownloadTexture> CreateDownloadTexture(u32 width, u32 height,
+                                                                    GPUTexture::Format format) = 0;
+  virtual std::unique_ptr<GPUDownloadTexture> CreateDownloadTexture(u32 width, u32 height, GPUTexture::Format format,
+                                                                    void* memory, size_t memory_size,
+                                                                    u32 memory_stride) = 0;
+
   virtual void CopyTextureRegion(GPUTexture* dst, u32 dst_x, u32 dst_y, u32 dst_layer, u32 dst_level, GPUTexture* src,
                                  u32 src_x, u32 src_y, u32 src_layer, u32 src_level, u32 width, u32 height) = 0;
   virtual void ResolveTextureRegion(GPUTexture* dst, u32 dst_x, u32 dst_y, u32 dst_layer, u32 dst_level,
@@ -640,8 +636,12 @@ public:
   /// Renders ImGui screen elements. Call before EndPresent().
   void RenderImGui();
 
-  ALWAYS_INLINE bool IsVsyncEnabled() const { return m_vsync_enabled; }
-  virtual void SetVSync(bool enabled) = 0;
+  ALWAYS_INLINE DisplaySyncMode GetSyncMode() const { return m_sync_mode; }
+  ALWAYS_INLINE bool IsVSyncActive() const
+  {
+    return (m_sync_mode == DisplaySyncMode::VSync || m_sync_mode == DisplaySyncMode::VSyncRelaxed);
+  }
+  virtual void SetSyncMode(DisplaySyncMode mode);
 
   ALWAYS_INLINE bool IsDebugDevice() const { return m_debug_device; }
   ALWAYS_INLINE size_t GetVRAMUsage() const { return s_total_vram_usage; }
@@ -754,8 +754,8 @@ private:
 protected:
   static Statistics s_stats;
 
+  DisplaySyncMode m_sync_mode = DisplaySyncMode::Disabled;
   bool m_gpu_timing_enabled = false;
-  bool m_vsync_enabled = false;
   bool m_debug_device = false;
 };
 

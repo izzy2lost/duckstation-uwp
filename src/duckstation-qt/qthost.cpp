@@ -1086,17 +1086,6 @@ void EmuThread::changeDiscFromPlaylist(quint32 index)
     Host::ReportFormattedErrorAsync("Error", "Failed to switch to subimage %u", index);
 }
 
-void EmuThread::loadCheatList(const QString& filename)
-{
-  if (!isOnThread())
-  {
-    QMetaObject::invokeMethod(this, "loadCheatList", Qt::QueuedConnection, Q_ARG(const QString&, filename));
-    return;
-  }
-
-  System::LoadCheatList(filename.toUtf8().constData());
-}
-
 void EmuThread::setCheatEnabled(quint32 index, bool enabled)
 {
   if (!isOnThread())
@@ -1106,7 +1095,7 @@ void EmuThread::setCheatEnabled(quint32 index, bool enabled)
     return;
   }
 
-  System::SetCheatCodeState(index, enabled, g_settings.auto_load_cheats);
+  System::SetCheatCodeState(index, enabled);
   emit cheatEnabled(index, enabled);
 }
 
@@ -1373,7 +1362,7 @@ void EmuThread::saveScreenshot()
     return;
   }
 
-  System::SaveScreenshot(nullptr, true, true);
+  System::SaveScreenshot();
 }
 
 void Host::OnAchievementsLoginRequested(Achievements::LoginRequestReason reason)
@@ -1529,7 +1518,7 @@ void EmuThread::run()
       if (g_gpu_device)
       {
         System::PresentDisplay(false);
-        if (!g_gpu_device->IsVsyncEnabled())
+        if (!g_gpu_device->IsVSyncActive())
           g_gpu_device->ThrottlePresentation();
       }
     }
@@ -1828,6 +1817,11 @@ void QtHost::QueueSettingsSave()
   s_settings_save_timer->connect(s_settings_save_timer.get(), &QTimer::timeout, SaveSettings);
   s_settings_save_timer->setSingleShot(true);
   s_settings_save_timer->start(SETTINGS_SAVE_DELAY);
+}
+
+bool QtHost::ShouldShowDebugOptions()
+{
+  return Host::GetBaseBoolSettingValue("Main", "ShowDebugMenu", false);
 }
 
 void Host::RequestSystemShutdown(bool allow_confirm, bool save_state)

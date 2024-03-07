@@ -28,10 +28,13 @@ add_library(util
   gpu_shader_cache.h
   gpu_texture.cpp
   gpu_texture.h
+  gpu_types.h
   host.cpp
   host.h
   http_downloader.cpp
   http_downloader.h
+  image.cpp
+  image.h
   imgui_fullscreen.cpp
   imgui_fullscreen.h
   imgui_manager.cpp
@@ -74,7 +77,7 @@ target_precompile_headers(util PRIVATE "pch.h")
 target_include_directories(util PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_include_directories(util PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(util PUBLIC common simpleini imgui)
-target_link_libraries(util PRIVATE stb libchdr ZLIB::ZLIB soundtouch xxhash Zstd::Zstd reshadefx)
+target_link_libraries(util PRIVATE libchdr JPEG::JPEG PNG::PNG ZLIB::ZLIB soundtouch xxhash Zstd::Zstd reshadefx)
 
 if(ENABLE_CUBEB)
   target_sources(util PRIVATE
@@ -276,6 +279,10 @@ elseif(NOT ANDROID)
   pkg_check_modules(DBUS REQUIRED dbus-1)
   target_include_directories(util PRIVATE ${DBUS_INCLUDE_DIRS})
   target_link_libraries(util PRIVATE ${DBUS_LINK_LIBRARIES})
+
+  if(LINUX)
+    target_link_libraries(util PRIVATE UDEV::UDEV)
+  endif()
 endif()
 
 if(NOT WIN32 AND NOT ANDROID)

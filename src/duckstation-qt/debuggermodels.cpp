@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "debuggermodels.h"
@@ -13,6 +13,8 @@
 #include <QtGui/QIcon>
 #include <QtGui/QPalette>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QMessageBox>
+#include <QtWidgets/QPushButton>
 
 static constexpr int NUM_COLUMNS = 5;
 static constexpr int STACK_RANGE = 128;
@@ -333,11 +335,11 @@ QVariant DebuggerRegistersModel::data(const QModelIndex& index, int role /*= Qt:
     {
       if (role == Qt::DisplayRole)
       {
-        return QString::asprintf("0x%08X", *CPU::g_debugger_register_list[reg_index].value_ptr);
+        return QString::asprintf("0x%08X", m_reg_values[reg_index]);
       }
       else if (role == Qt::ForegroundRole)
       {
-        if (*CPU::g_debugger_register_list[reg_index].value_ptr != m_old_reg_values[reg_index])
+        if (m_reg_values[reg_index] != m_old_reg_values[reg_index])
           return QColor(255, 50, 50);
       }
     }
@@ -370,16 +372,19 @@ QVariant DebuggerRegistersModel::headerData(int section, Qt::Orientation orienta
   }
 }
 
-void DebuggerRegistersModel::invalidateView()
+void DebuggerRegistersModel::updateValues()
 {
   beginResetModel();
+
+  for (u32 i = 0; i < CPU::NUM_DEBUGGER_REGISTER_LIST_ENTRIES; i++)
+    m_reg_values[i] = *CPU::g_debugger_register_list[i].value_ptr;
+
   endResetModel();
 }
 
 void DebuggerRegistersModel::saveCurrentValues()
 {
-  for (u32 i = 0; i < static_cast<u32>(CPU::Reg::count); i++)
-    m_old_reg_values[i] = CPU::g_state.regs.r[i];
+  m_old_reg_values = m_reg_values;
 }
 
 DebuggerStackModel::DebuggerStackModel(QObject* parent /*= nullptr*/) : QAbstractListModel(parent)
@@ -445,4 +450,45 @@ void DebuggerStackModel::invalidateView()
 {
   beginResetModel();
   endResetModel();
+}
+
+DebuggerAddBreakpointDialog::DebuggerAddBreakpointDialog(QWidget* parent /*= nullptr*/) : QDialog(parent)
+{
+  m_ui.setupUi(this);
+  connect(m_ui.buttonBox->button(QDialogButtonBox::Ok), &QAbstractButton::clicked, this,
+          &DebuggerAddBreakpointDialog::okClicked);
+}
+
+DebuggerAddBreakpointDialog::~DebuggerAddBreakpointDialog() = default;
+
+void DebuggerAddBreakpointDialog::okClicked()
+{
+  const QString address_str = m_ui.address->text();
+  m_address = 0;
+  bool ok = false;
+
+  if (!address_str.isEmpty())
+  {
+    if (address_str.startsWith("0x"))
+      m_address = address_str.mid(2).toUInt(&ok, 16);
+    else
+      m_address = address_str.toUInt(&ok, 16);
+
+    if (!ok)
+    {
+      QMessageBox::critical(
+        this, qApp->translate("DebuggerWindow", "Error"),
+        qApp->translate("DebuggerWindow", "Invalid address. It should be in hex (0x12345678 or 12345678)"));
+      return;
+    }
+
+    if (m_ui.read->isChecked())
+      m_type = CPU::BreakpointType::Read;
+    else if (m_ui.write->isChecked())
+      m_type = CPU::BreakpointType::Write;
+    else
+      m_type = CPU::BreakpointType::Execute;
+
+    accept();
+  }
 }

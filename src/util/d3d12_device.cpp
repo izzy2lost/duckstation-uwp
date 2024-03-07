@@ -261,7 +261,6 @@ void D3D12Device::DestroyDevice()
   WaitForGPUIdle();
 
   DestroyDeferredObjects(m_current_fence_value);
-  DestroyDownloadBuffer();
   DestroySamplers();
   DestroyTimestampQuery();
   DestroyBuffers();
@@ -1082,11 +1081,6 @@ std::string D3D12Device::GetDriverInfo() const
   return ret;
 }
 
-void D3D12Device::SetVSync(bool enabled)
-{
-  m_vsync_enabled = enabled;
-}
-
 bool D3D12Device::BeginPresent(bool frame_skip)
 {
   if (InRenderPass())
@@ -1134,10 +1128,13 @@ void D3D12Device::EndPresent()
 
   SubmitCommandList(false);
 
-  if (!m_vsync_enabled && m_using_allow_tearing)
+  // DirectX has no concept of tear-or-sync. I guess if we measured times ourselves, we could implement it.
+  if (m_sync_mode == DisplaySyncMode::VSync || m_sync_mode == DisplaySyncMode::VSyncRelaxed)
+    m_swap_chain->Present(BoolToUInt32(1), 0);
+  else if (m_using_allow_tearing) // Disabled or VRR, VRR requires the allow tearing flag :/
     m_swap_chain->Present(0, DXGI_PRESENT_ALLOW_TEARING);
   else
-    m_swap_chain->Present(static_cast<UINT>(m_vsync_enabled), 0);
+    m_swap_chain->Present(0, 0);
 
   TrimTexturePool();
 }
@@ -1216,6 +1213,7 @@ void D3D12Device::SetFeatures(FeatureMask disabled_features)
   m_features.texture_buffers_emulated_with_ssbo = false;
   m_features.geometry_shaders = !(disabled_features & FEATURE_MASK_GEOMETRY_SHADERS);
   m_features.partial_msaa_resolve = true;
+  m_features.memory_import = false;
   m_features.gpu_timing = true;
   m_features.shader_cache = true;
   m_features.pipeline_cache = true;

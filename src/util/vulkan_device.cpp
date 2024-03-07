@@ -393,6 +393,8 @@ bool VulkanDevice::SelectDeviceExtensions(ExtensionList* extension_list, bool en
     SupportsExtension(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME, false) &&
     SupportsExtension(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, false);
   m_optional_extensions.vk_khr_push_descriptor = SupportsExtension(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME, false);
+  m_optional_extensions.vk_ext_external_memory_host =
+    SupportsExtension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME, false);
 
 #ifdef _WIN32
   m_optional_extensions.vk_ext_full_screen_exclusive =
@@ -632,6 +634,8 @@ void VulkanDevice::ProcessDeviceExtensions()
   VkPhysicalDeviceProperties2 properties2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, nullptr, {}};
   VkPhysicalDevicePushDescriptorPropertiesKHR push_descriptor_properties = {
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PUSH_DESCRIPTOR_PROPERTIES_KHR, nullptr, 0u};
+  VkPhysicalDeviceExternalMemoryHostPropertiesEXT external_memory_host_properties = {
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT, nullptr, 0};
 
   if (m_optional_extensions.vk_khr_driver_properties)
   {
@@ -641,11 +645,18 @@ void VulkanDevice::ProcessDeviceExtensions()
   if (m_optional_extensions.vk_khr_push_descriptor)
     Vulkan::AddPointerToChain(&properties2, &push_descriptor_properties);
 
+  if (m_optional_extensions.vk_ext_external_memory_host)
+    Vulkan::AddPointerToChain(&properties2, &external_memory_host_properties);
+
   // don't bother querying if we're not actually looking at any features
   if (vkGetPhysicalDeviceProperties2 && properties2.pNext)
     vkGetPhysicalDeviceProperties2(m_physical_device, &properties2);
 
   m_optional_extensions.vk_khr_push_descriptor &= (push_descriptor_properties.maxPushDescriptors >= 1);
+
+  // vk_ext_external_memory_host is only used if the import alignment is the same as the system's page size
+  m_optional_extensions.vk_ext_external_memory_host &=
+    (external_memory_host_properties.minImportedHostPointerAlignment == HOST_PAGE_SIZE);
 
   if (IsBrokenMobileDriver())
   {
@@ -680,6 +691,8 @@ void VulkanDevice::ProcessDeviceExtensions()
                  m_optional_extensions.vk_khr_dynamic_rendering ? "supported" : "NOT supported");
   Log_InfoPrintf("VK_KHR_push_descriptor is %s",
                  m_optional_extensions.vk_khr_push_descriptor ? "supported" : "NOT supported");
+  Log_InfoPrintf("VK_EXT_external_memory_host is %s",
+                 m_optional_extensions.vk_ext_external_memory_host ? "supported" : "NOT supported");
 }
 
 bool VulkanDevice::CreateAllocator()
@@ -1259,7 +1272,7 @@ void VulkanDevice::SubmitCommandBuffer(VulkanSwapChain* present_swap_chain /* = 
   {
     DoSubmitCommandBuffer(m_current_frame, present_swap_chain);
     if (present_swap_chain)
-      DoPresent(present_swap_chain);
+      DoPresent(present_swap_chain, false);
     return;
   }
 
@@ -1304,7 +1317,7 @@ void VulkanDevice::DoSubmitCommandBuffer(u32 index, VulkanSwapChain* present_swa
   }
 }
 
-void VulkanDevice::DoPresent(VulkanSwapChain* present_swap_chain)
+void VulkanDevice::DoPresent(VulkanSwapChain* present_swap_chain, bool acquire_next)
 {
   const VkPresentInfoKHR present_info = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
                                          nullptr,
@@ -1331,7 +1344,8 @@ void VulkanDevice::DoPresent(VulkanSwapChain* present_swap_chain)
   // Grab the next image as soon as possible, that way we spend less time blocked on the next
   // submission. Don't care if it fails, we'll deal with that at the presentation call site.
   // Credit to dxvk for the idea.
-  present_swap_chain->AcquireNextImage();
+  if (acquire_next)
+    present_swap_chain->AcquireNextImage();
 }
 
 void VulkanDevice::WaitForPresentComplete()
@@ -1365,7 +1379,7 @@ void VulkanDevice::PresentThread()
 
     DoSubmitCommandBuffer(m_queued_present.command_buffer_index, m_queued_present.swap_chain);
     if (m_queued_present.swap_chain)
-      DoPresent(m_queued_present.swap_chain);
+      DoPresent(m_queued_present.swap_chain, true);
     m_present_done.store(true, std::memory_order_release);
     m_present_done_cv.notify_one();
   }
@@ -1500,6 +1514,14 @@ void VulkanDevice::DeferBufferDestruction(VkBuffer object, VmaAllocation allocat
 {
   m_cleanup_objects.emplace_back(GetCurrentFenceCounter(),
                                  [this, object, allocation]() { vmaDestroyBuffer(m_allocator, object, allocation); });
+}
+
+void VulkanDevice::DeferBufferDestruction(VkBuffer object, VkDeviceMemory memory)
+{
+  m_cleanup_objects.emplace_back(GetCurrentFenceCounter(), [this, object, memory]() {
+    vkDestroyBuffer(m_device, object, nullptr);
+    vkFreeMemory(m_device, memory, nullptr);
+  });
 }
 
 void VulkanDevice::DeferFramebufferDestruction(VkFramebuffer object)
@@ -2000,7 +2022,7 @@ bool VulkanDevice::CreateDevice(const std::string_view& adapter, bool threaded_p
 
   if (surface != VK_NULL_HANDLE)
   {
-    m_swap_chain = VulkanSwapChain::Create(m_window_info, surface, m_vsync_enabled, m_exclusive_fullscreen_control);
+    m_swap_chain = VulkanSwapChain::Create(m_window_info, surface, m_sync_mode, m_exclusive_fullscreen_control);
     if (!m_swap_chain)
     {
       Error::SetStringView(error, "Failed to create swap chain");
@@ -2054,7 +2076,6 @@ void VulkanDevice::DestroyDevice()
   for (auto& it : m_cleanup_objects)
     it.second();
   m_cleanup_objects.clear();
-  DestroyDownloadBuffer();
   DestroyPersistentDescriptorSets();
   DestroyBuffers();
   DestroySamplers();
@@ -2222,7 +2243,7 @@ bool VulkanDevice::UpdateWindow()
     return false;
   }
 
-  m_swap_chain = VulkanSwapChain::Create(m_window_info, surface, m_vsync_enabled, m_exclusive_fullscreen_control);
+  m_swap_chain = VulkanSwapChain::Create(m_window_info, surface, m_sync_mode, m_exclusive_fullscreen_control);
   if (!m_swap_chain)
   {
     Log_ErrorPrintf("Failed to create swap chain");
@@ -2298,24 +2319,27 @@ std::string VulkanDevice::GetDriverInfo() const
   return ret;
 }
 
-void VulkanDevice::SetVSync(bool enabled)
+void VulkanDevice::SetSyncMode(DisplaySyncMode mode)
 {
-  if (!m_swap_chain || m_vsync_enabled == enabled)
+  if (m_sync_mode == mode)
+    return;
+
+  const DisplaySyncMode prev_mode = m_sync_mode;
+  m_sync_mode = mode;
+  if (!m_swap_chain)
     return;
 
   // This swap chain should not be used by the current buffer, thus safe to destroy.
   WaitForGPUIdle();
-  if (!m_swap_chain->SetVSync(enabled))
+  if (!m_swap_chain->SetSyncMode(mode))
   {
     // Try switching back to the old mode..
-    if (!m_swap_chain->SetVSync(m_vsync_enabled))
+    if (!m_swap_chain->SetSyncMode(prev_mode))
     {
       Panic("Failed to reset old vsync mode after failure");
       m_swap_chain.reset();
     }
   }
-
-  m_vsync_enabled = enabled;
 }
 
 bool VulkanDevice::BeginPresent(bool frame_skip)
@@ -2515,6 +2539,7 @@ bool VulkanDevice::CheckFeatures(FeatureMask disabled_features)
     !(disabled_features & FEATURE_MASK_GEOMETRY_SHADERS) && m_device_features.geometryShader;
 
   m_features.partial_msaa_resolve = true;
+  m_features.memory_import = m_optional_extensions.vk_ext_external_memory_host;
   m_features.shader_cache = true;
   m_features.pipeline_cache = true;
   m_features.prefer_unused_textures = true;
@@ -2966,6 +2991,93 @@ void VulkanDevice::RenderBlankFrame()
   MoveToNextCommandBuffer();
 
   InvalidateCachedState();
+}
+
+bool VulkanDevice::TryImportHostMemory(void* data, size_t data_size, VkBufferUsageFlags buffer_usage,
+                                       VkDeviceMemory* out_memory, VkBuffer* out_buffer, VkDeviceSize* out_offset)
+{
+  if (!m_optional_extensions.vk_ext_external_memory_host)
+    return false;
+
+  // Align to the nearest page
+  void* data_aligned =
+    reinterpret_cast<void*>(Common::AlignDownPow2(reinterpret_cast<uintptr_t>(data), HOST_PAGE_SIZE));
+
+  // Offset to the start of the data within the page
+  const size_t data_offset = reinterpret_cast<uintptr_t>(data) & static_cast<uintptr_t>(HOST_PAGE_MASK);
+
+  // Full amount of data that must be imported, including the pages
+  const size_t data_size_aligned = Common::AlignUpPow2(data_offset + data_size, HOST_PAGE_SIZE);
+
+  VkMemoryHostPointerPropertiesEXT pointer_properties = {VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT, nullptr,
+                                                         0};
+  VkResult res = vkGetMemoryHostPointerPropertiesEXT(m_device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+                                                     data_aligned, &pointer_properties);
+  if (res != VK_SUCCESS || pointer_properties.memoryTypeBits == 0)
+  {
+    LOG_VULKAN_ERROR(res, "vkGetMemoryHostPointerPropertiesEXT() failed: ");
+    return false;
+  }
+
+  VmaAllocationCreateInfo vma_alloc_info = {};
+  vma_alloc_info.preferredFlags =
+    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+  vma_alloc_info.memoryTypeBits = pointer_properties.memoryTypeBits;
+
+  u32 memory_index = 0;
+  res = vmaFindMemoryTypeIndex(m_allocator, pointer_properties.memoryTypeBits, &vma_alloc_info, &memory_index);
+  if (res != VK_SUCCESS)
+  {
+    LOG_VULKAN_ERROR(res, "vmaFindMemoryTypeIndex() failed: ");
+    return false;
+  }
+
+  const VkImportMemoryHostPointerInfoEXT import_info = {VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT, nullptr,
+                                                        VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+                                                        const_cast<void*>(data_aligned)};
+
+  const VkMemoryAllocateInfo alloc_info = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, &import_info, data_size_aligned,
+                                           memory_index};
+
+  VkDeviceMemory imported_memory = VK_NULL_HANDLE;
+
+  res = vkAllocateMemory(m_device, &alloc_info, nullptr, &imported_memory);
+  if (res != VK_SUCCESS)
+  {
+    LOG_VULKAN_ERROR(res, "vkAllocateMemory() failed: ");
+    return false;
+  }
+
+  const VkExternalMemoryBufferCreateInfo external_info = {VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO, nullptr,
+                                                          VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT};
+
+  const VkBufferCreateInfo buffer_info = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                          &external_info,
+                                          0,
+                                          data_size_aligned,
+                                          buffer_usage,
+                                          VK_SHARING_MODE_EXCLUSIVE,
+                                          0,
+                                          nullptr};
+
+  VkBuffer imported_buffer = VK_NULL_HANDLE;
+  res = vkCreateBuffer(m_device, &buffer_info, nullptr, &imported_buffer);
+  if (res != VK_SUCCESS)
+  {
+    LOG_VULKAN_ERROR(res, "vkCreateBuffer() failed: ");
+    if (imported_memory != VK_NULL_HANDLE)
+      vkFreeMemory(m_device, imported_memory, nullptr);
+
+    return false;
+  }
+
+  vkBindBufferMemory(m_device, imported_buffer, imported_memory, 0);
+
+  *out_memory = imported_memory;
+  *out_buffer = imported_buffer;
+  *out_offset = data_offset;
+  Log_DevFmt("Imported {} byte buffer covering {} bytes at {}", data_size, data_size_aligned, data);
+  return true;
 }
 
 void VulkanDevice::SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds)

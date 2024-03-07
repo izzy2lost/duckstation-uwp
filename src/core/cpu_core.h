@@ -1,11 +1,14 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #pragma once
-#include "common/bitfield.h"
+
 #include "cpu_types.h"
 #include "gte_types.h"
 #include "types.h"
+
+#include "common/bitfield.h"
+
 #include <array>
 #include <optional>
 #include <string>
@@ -127,7 +130,6 @@ void ExecutionModeChanged();
 
 /// Executes interpreter loop.
 void Execute();
-void SingleStep();
 
 // Forces an early exit from the CPU dispatcher.
 void ExitExecution();
@@ -189,8 +191,17 @@ bool IsTraceEnabled();
 void StartTrace();
 void StopTrace();
 
+// Breakpoint types - execute => breakpoint, read/write => watchpoints
+enum class BreakpointType : u8
+{
+  Execute,
+  Read,
+  Write,
+  Count
+};
+
 // Breakpoint callback - if the callback returns false, the breakpoint will be removed.
-using BreakpointCallback = bool (*)(VirtualMemoryAddress address);
+using BreakpointCallback = bool (*)(BreakpointType type, VirtualMemoryAddress pc, VirtualMemoryAddress memaddr);
 
 struct Breakpoint
 {
@@ -198,6 +209,7 @@ struct Breakpoint
   BreakpointCallback callback;
   u32 number;
   u32 hit_count;
+  BreakpointType type;
   bool auto_clear;
   bool enabled;
 };
@@ -205,15 +217,17 @@ struct Breakpoint
 using BreakpointList = std::vector<Breakpoint>;
 
 // Breakpoints
+const char* GetBreakpointTypeName(BreakpointType type);
 bool HasAnyBreakpoints();
-bool HasBreakpointAtAddress(VirtualMemoryAddress address);
-BreakpointList GetBreakpointList(bool include_auto_clear = false, bool include_callbacks = false);
-bool AddBreakpoint(VirtualMemoryAddress address, bool auto_clear = false, bool enabled = true);
-bool AddBreakpointWithCallback(VirtualMemoryAddress address, BreakpointCallback callback);
-bool RemoveBreakpoint(VirtualMemoryAddress address);
+bool HasBreakpointAtAddress(BreakpointType type, VirtualMemoryAddress address);
+BreakpointList CopyBreakpointList(bool include_auto_clear = false, bool include_callbacks = false);
+bool AddBreakpoint(BreakpointType type, VirtualMemoryAddress address, bool auto_clear = false, bool enabled = true);
+bool AddBreakpointWithCallback(BreakpointType type, VirtualMemoryAddress address, BreakpointCallback callback);
+bool RemoveBreakpoint(BreakpointType type, VirtualMemoryAddress address);
 void ClearBreakpoints();
 bool AddStepOverBreakpoint();
 bool AddStepOutBreakpoint(u32 max_instructions_to_search = 1000);
+void SetSingleStepFlag();
 
 extern bool TRACE_EXECUTION;
 
@@ -224,7 +238,7 @@ struct DebuggerRegisterListEntry
   u32* value_ptr;
 };
 
-static constexpr u32 NUM_DEBUGGER_REGISTER_LIST_ENTRIES = 104;
+static constexpr u32 NUM_DEBUGGER_REGISTER_LIST_ENTRIES = 103;
 extern const std::array<DebuggerRegisterListEntry, NUM_DEBUGGER_REGISTER_LIST_ENTRIES> g_debugger_register_list;
 
 } // namespace CPU

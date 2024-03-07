@@ -265,7 +265,7 @@ bool System::Internal::ProcessStartup()
     InitializeDiscordPresence();
 #endif
 
-return true;
+  return true;
 }
 
 void System::Internal::ProcessShutdown()
@@ -937,11 +937,21 @@ void System::LoadSettings(bool display_osd_messages)
   InputManager::ReloadBindings(si, *Host::GetSettingsInterfaceForBindings());
 
   // apply compatibility settings
-  if (g_settings.apply_compatibility_settings && !s_running_game_serial.empty())
+  if (g_settings.apply_compatibility_settings)
   {
-    const GameDatabase::Entry* entry = GameDatabase::GetEntryForSerial(s_running_game_serial);
-    if (entry)
-      entry->ApplySettings(g_settings, display_osd_messages);
+    if (!s_running_game_serial.empty())
+    {
+      const GameDatabase::Entry* entry = GameDatabase::GetEntryForSerial(s_running_game_serial);
+      if (entry)
+        entry->ApplySettings(g_settings, display_osd_messages);
+    }
+  }
+  else
+  {
+    Host::AddIconOSDMessage(
+      "compatibility_settings_disabled", ICON_FA_GAMEPAD,
+      TRANSLATE_STR("System", "Compatibility settings are not enabled. Some games may not function correctly."),
+      Host::OSD_WARNING_DURATION);
   }
 
   g_settings.FixIncompatibleSettings(display_osd_messages);
@@ -1110,6 +1120,9 @@ void System::PauseSystem(bool paused)
 
   if (paused)
   {
+    // Make sure the GPU is flushed, otherwise the VB might still be mapped.
+    g_gpu->FlushRender();
+
     FullscreenUI::OnSystemPaused();
 
     InputManager::PauseVibration();
@@ -1187,7 +1200,10 @@ bool System::LoadState(const char* filename)
 
   ResetPerformanceCounters();
   ResetThrottler();
-  InvalidateDisplay();
+
+  if (IsPaused())
+    InvalidateDisplay();
+
   Log_VerbosePrintf("Loading state took %.2f msec", load_timer.GetTimeMilliseconds());
   return true;
 }
@@ -1833,6 +1849,12 @@ void System::FrameDone()
     SaveRunaheadState();
   }
 
+  // TODO: Kick cmdbuffer early
+  const DisplaySyncMode sync_mode = g_gpu_device->GetSyncMode();
+  const bool throttle_after_present = (sync_mode == DisplaySyncMode::Disabled);
+  if (!throttle_after_present && s_throttler_enabled && !IsExecutionInterrupted())
+    Throttle();
+
   const Common::Timer::Value current_time = Common::Timer::GetCurrentValue();
   if (current_time < s_next_frame_time || s_display_all_frames || s_last_frame_skipped)
   {
@@ -1844,7 +1866,7 @@ void System::FrameDone()
     s_last_frame_skipped = true;
   }
 
-  if (s_throttler_enabled && !IsExecutionInterrupted())
+  if (throttle_after_present && s_throttler_enabled && !IsExecutionInterrupted())
     Throttle();
 
   // Input poll already done above
@@ -1932,19 +1954,11 @@ void System::Throttle()
 
 void System::SingleStepCPU()
 {
-  s_frame_timer.Reset();
-  s_system_executing = true;
+  CPU::SetSingleStepFlag();
 
-  g_gpu->RestoreDeviceContext();
-
-  CPU::SingleStep();
-
-  g_gpu->FlushRender();
-  SPU::GeneratePendingSamples();
-
-  InvalidateDisplay();
-
-  s_system_executing = false;
+  // If this gets called when the system is executing, we're not going to end up here..
+  if (IsPaused())
+    PauseSystem(false);
 }
 
 void System::IncrementInternalFrameNumber()
@@ -1982,7 +1996,6 @@ void System::RecreateSystem()
 
   ResetPerformanceCounters();
   ResetThrottler();
-  InvalidateDisplay();
 
   if (was_paused)
     PauseSystem(true);
@@ -2451,13 +2464,14 @@ bool System::SaveStateToStream(ByteStream* state, u32 screenshot_size /* = 256 *
       {
         if (g_gpu_device->UsesLowerLeftOrigin())
         {
-          GPUTexture::FlipTextureDataRGBA8(screenshot_width, screenshot_height, screenshot_buffer, screenshot_stride);
+          GPUTexture::FlipTextureDataRGBA8(screenshot_width, screenshot_height,
+                                           reinterpret_cast<u8*>(screenshot_buffer.data()), screenshot_stride);
         }
 
         header.offset_to_screenshot = static_cast<u32>(state->GetPosition());
         header.screenshot_width = screenshot_width;
         header.screenshot_height = screenshot_height;
-        header.screenshot_size = static_cast<u32>(screenshot_buffer.size() * sizeof(u32));
+        header.screenshot_size = static_cast<u32>(screenshot_buffer.size());
         if (!state->Write2(screenshot_buffer.data(), header.screenshot_size))
           return false;
       }
@@ -2631,10 +2645,14 @@ void System::UpdateSpeedLimiterState()
   }
 
   // When syncing to host and using vsync, we don't need to sleep.
-  if (s_syncing_to_host && ShouldUseVSync() && s_display_all_frames)
+  if (s_syncing_to_host && s_display_all_frames)
   {
-    Log_InfoPrintf("Using host vsync for throttling.");
-    s_throttler_enabled = false;
+    const DisplaySyncMode effective_sync_mode = GetEffectiveDisplaySyncMode();
+    if (effective_sync_mode == DisplaySyncMode::VSync || effective_sync_mode == DisplaySyncMode::VSyncRelaxed)
+    {
+      Log_InfoPrintf("Using host vsync for throttling.");
+      s_throttler_enabled = false;
+    }
   }
 
   Log_VerbosePrintf("Target speed: %f%%", s_target_speed * 100.0f);
@@ -2667,21 +2685,25 @@ void System::UpdateSpeedLimiterState()
 
 void System::UpdateDisplaySync()
 {
-  const bool video_sync_enabled = ShouldUseVSync();
-  const bool syncing_to_host_vsync = (s_syncing_to_host && video_sync_enabled && s_display_all_frames);
+  const DisplaySyncMode display_sync_mode = GetEffectiveDisplaySyncMode();
+  const bool syncing_to_host_vsync =
+    (s_syncing_to_host &&
+     (display_sync_mode == DisplaySyncMode::VSync || display_sync_mode == DisplaySyncMode::VSyncRelaxed) &&
+     s_display_all_frames);
   const float max_display_fps = (s_throttler_enabled || s_syncing_to_host) ? 0.0f : g_settings.display_max_fps;
-  Log_VerbosePrintf("Using vsync: %s%s", video_sync_enabled ? "YES" : "NO",
+  Log_VerbosePrintf("Display sync: %s%s", Settings::GetDisplaySyncModeDisplayName(display_sync_mode),
                     syncing_to_host_vsync ? " (for throttling)" : "");
   Log_VerbosePrintf("Max display fps: %f (%s)", max_display_fps,
                     s_display_all_frames ? "displaying all frames" : "skipping displaying frames when needed");
 
   g_gpu_device->SetDisplayMaxFPS(max_display_fps);
-  g_gpu_device->SetVSync(video_sync_enabled);
+  g_gpu_device->SetSyncMode(display_sync_mode);
 }
 
-bool System::ShouldUseVSync()
+DisplaySyncMode System::GetEffectiveDisplaySyncMode()
 {
-  return g_settings.video_sync_enabled && !IsRunningAtNonStandardSpeed();
+  // Disable vsync if running outside 100%.
+  return (IsValid() && IsRunningAtNonStandardSpeed()) ? DisplaySyncMode::Disabled : g_settings.display_sync_mode;
 }
 
 bool System::IsFastForwardEnabled()
@@ -3379,8 +3401,8 @@ void System::UpdateRunningGame(const char* path, CDImage* image, bool booting)
   ApplySettings(true);
 
   s_cheat_list.reset();
-  if (g_settings.auto_load_cheats && !Achievements::IsHardcoreModeActive())
-    LoadCheatListFromGameTitle();
+  if (g_settings.enable_cheats)
+    LoadCheatList();
 
   if (s_running_game_serial != prev_serial)
     UpdateSessionTime(prev_serial);
@@ -3634,6 +3656,14 @@ void System::CheckForSettingsChanges(const Settings& old_settings)
         CPU::ClearICache();
     }
 
+    if (g_settings.enable_cheats != old_settings.enable_cheats)
+    {
+      if (g_settings.enable_cheats)
+        LoadCheatList();
+      else
+        s_cheat_list.reset();
+    }
+
     SPU::GetOutputStream()->SetOutputVolume(GetAudioOutputVolume());
 
     if (g_settings.gpu_resolution_scale != old_settings.gpu_resolution_scale ||
@@ -3647,6 +3677,7 @@ void System::CheckForSettingsChanges(const Settings& old_settings)
         g_settings.gpu_debanding != old_settings.gpu_debanding ||
         g_settings.gpu_scaled_dithering != old_settings.gpu_scaled_dithering ||
         g_settings.gpu_texture_filter != old_settings.gpu_texture_filter ||
+        g_settings.gpu_line_detect_mode != old_settings.gpu_line_detect_mode ||
         g_settings.gpu_disable_interlacing != old_settings.gpu_disable_interlacing ||
         g_settings.gpu_force_ntsc_timings != old_settings.gpu_force_ntsc_timings ||
         g_settings.gpu_24bit_chroma_smoothing != old_settings.gpu_24bit_chroma_smoothing ||
@@ -3670,7 +3701,8 @@ void System::CheckForSettingsChanges(const Settings& old_settings)
         g_settings.runahead_frames != old_settings.runahead_frames)
     {
       g_gpu->UpdateSettings(old_settings);
-      InvalidateDisplay();
+      if (!IsPaused())
+        InvalidateDisplay();
     }
 
     if (g_settings.gpu_widescreen_hack != old_settings.gpu_widescreen_hack ||
@@ -3728,7 +3760,7 @@ void System::CheckForSettingsChanges(const Settings& old_settings)
     DMA::SetHaltTicks(g_settings.dma_halt_ticks);
 
     if (g_settings.audio_backend != old_settings.audio_backend ||
-        g_settings.video_sync_enabled != old_settings.video_sync_enabled ||
+        g_settings.display_sync_mode != old_settings.display_sync_mode ||
         g_settings.increase_timer_resolution != old_settings.increase_timer_resolution ||
         g_settings.emulation_speed != old_settings.emulation_speed ||
         g_settings.fast_forward_speed != old_settings.fast_forward_speed ||
@@ -3882,7 +3914,7 @@ void System::LogUnsafeSettingsToConsole(const std::string& messages)
 
 void System::CalculateRewindMemoryUsage(u32 num_saves, u32 resolution_scale, u64* ram_usage, u64* vram_usage)
 {
-  const u64 real_resolution_scale = static_cast<u64>(std::max(g_settings.gpu_resolution_scale, 1u));
+  const u64 real_resolution_scale = std::max<u64>(g_settings.gpu_resolution_scale, 1u);
   *ram_usage = MAX_SAVE_STATE_SIZE * static_cast<u64>(num_saves);
   *vram_usage = ((VRAM_WIDTH * real_resolution_scale) * (VRAM_HEIGHT * real_resolution_scale) * 4) *
                 static_cast<u64>(g_settings.gpu_multisamples) * static_cast<u64>(num_saves);
@@ -4307,8 +4339,8 @@ void System::StopDumpingAudio()
   Host::AddOSDMessage(TRANSLATE_STR("OSDMessage", "Stopped dumping audio."), 5.0f);
 }
 
-bool System::SaveScreenshot(const char* filename /* = nullptr */, bool full_resolution /* = true */,
-                            bool apply_aspect_ratio /* = true */, bool compress_on_thread /* = true */)
+bool System::SaveScreenshot(const char* filename, DisplayScreenshotMode mode, DisplayScreenshotFormat format,
+                            u8 quality, bool compress_on_thread)
 {
   if (!System::IsValid())
     return false;
@@ -4317,7 +4349,7 @@ bool System::SaveScreenshot(const char* filename /* = nullptr */, bool full_reso
   if (!filename)
   {
     const auto& code = System::GetGameSerial();
-    const char* extension = "png";
+    const char* extension = Settings::GetDisplayScreenshotFormatExtension(format);
     if (code.empty())
     {
       auto_filename =
@@ -4338,10 +4370,7 @@ bool System::SaveScreenshot(const char* filename /* = nullptr */, bool full_reso
     return false;
   }
 
-  const bool screenshot_saved =
-    g_gpu->RenderScreenshotToFile(filename, g_settings.display_internal_resolution_screenshots, compress_on_thread);
-
-  if (!screenshot_saved)
+  if (!g_gpu->RenderScreenshotToFile(filename, mode, quality, compress_on_thread))
   {
     Host::AddFormattedOSDMessage(10.0f, TRANSLATE("OSDMessage", "Failed to save screenshot to '%s'"), filename);
     return false;
@@ -4514,15 +4543,20 @@ std::string System::GetCheatFileName()
   return ret;
 }
 
-bool System::LoadCheatList(const char* filename)
+bool System::LoadCheatList()
 {
-  if (System::IsShutdown())
+  // Called when booting, needs to test for shutdown.
+  if (IsShutdown() || !g_settings.enable_cheats)
+    return false;
+
+  const std::string filename(GetCheatFileName());
+  if (filename.empty() || !FileSystem::FileExists(filename.c_str()))
     return false;
 
   std::unique_ptr<CheatList> cl = std::make_unique<CheatList>();
-  if (!cl->LoadFromFile(filename, CheatList::Format::Autodetect))
+  if (!cl->LoadFromFile(filename.c_str(), CheatList::Format::Autodetect))
   {
-    Host::AddFormattedOSDMessage(15.0f, TRANSLATE("OSDMessage", "Failed to load cheats from '%s'."), filename);
+    Host::AddFormattedOSDMessage(15.0f, TRANSLATE("OSDMessage", "Failed to load cheats from '%s'."), filename.c_str());
     return false;
   }
 
@@ -4536,19 +4570,6 @@ bool System::LoadCheatList(const char* filename)
 
   System::SetCheatList(std::move(cl));
   return true;
-}
-
-bool System::LoadCheatListFromGameTitle()
-{
-  // Called when booting, needs to test for shutdown.
-  if (IsShutdown() || Achievements::IsHardcoreModeActive())
-    return false;
-
-  const std::string filename(GetCheatFileName());
-  if (filename.empty() || !FileSystem::FileExists(filename.c_str()))
-    return false;
-
-  return LoadCheatList(filename.c_str());
 }
 
 bool System::LoadCheatListFromDatabase()
@@ -4630,7 +4651,7 @@ void System::ClearCheatList(bool save_to_file)
     SaveCheatList();
 }
 
-void System::SetCheatCodeState(u32 index, bool enabled, bool save_to_file)
+void System::SetCheatCodeState(u32 index, bool enabled)
 {
   if (!System::IsValid() || !System::HasCheatList())
     return;
@@ -4656,8 +4677,7 @@ void System::SetCheatCodeState(u32 index, bool enabled, bool save_to_file)
     Host::AddFormattedOSDMessage(5.0f, TRANSLATE("OSDMessage", "Cheat '%s' disabled."), cc.description.c_str());
   }
 
-  if (save_to_file)
-    SaveCheatList();
+  SaveCheatList();
 }
 
 void System::ApplyCheatCode(u32 index)

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2023 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #define IMGUI_DEFINE_MATH_OPERATORS
@@ -1038,7 +1038,7 @@ void FullscreenUI::DoCheatsMenu()
     if (cc.activation == CheatCode::Activation::Manual)
       cl->ApplyCode(static_cast<u32>(index));
     else
-      System::SetCheatCodeState(static_cast<u32>(index), checked, true);
+      System::SetCheatCodeState(static_cast<u32>(index), checked);
   };
   OpenChoiceDialog(FSUI_ICONSTR(ICON_FA_FROWN, "Cheat List"), true, std::move(options), std::move(callback));
 }
@@ -2472,13 +2472,12 @@ void FullscreenUI::DrawSettingsWindow()
     static constexpr float ITEM_WIDTH = 25.0f;
 
     static constexpr const char* global_icons[] = {
-      ICON_FA_TV, ICON_FA_DICE_D20,          ICON_FA_COGS,  ICON_PF_MICROCHIP,
-      ICON_PF_PICTURE,           ICON_FA_MAGIC, ICON_PF_SOUND, ICON_PF_GAMEPAD_ALT,
-      ICON_PF_KEYBOARD_ALT,        ICON_PF_MEMORY_CARD,      ICON_FA_TROPHY,     ICON_FA_EXCLAMATION_TRIANGLE};
-    static constexpr const char* per_game_icons[] = {
-      ICON_FA_PARAGRAPH, ICON_FA_HDD,        ICON_FA_COGS,
-      ICON_PF_PICTURE,     ICON_PF_SOUND, ICON_PF_GAMEPAD_ALT,
-      ICON_PF_MEMORY_CARD,   ICON_FA_TROPHY,     ICON_FA_EXCLAMATION_TRIANGLE};
+      ICON_FA_TV,           ICON_FA_DICE_D20,    ICON_FA_COGS,   ICON_PF_MICROCHIP,
+      ICON_PF_PICTURE,      ICON_FA_MAGIC,       ICON_PF_SOUND,  ICON_PF_GAMEPAD_ALT,
+      ICON_PF_KEYBOARD_ALT, ICON_PF_MEMORY_CARD, ICON_FA_TROPHY, ICON_FA_EXCLAMATION_TRIANGLE};
+    static constexpr const char* per_game_icons[] = {ICON_FA_PARAGRAPH,   ICON_FA_HDD,    ICON_FA_COGS,
+                                                     ICON_PF_PICTURE,     ICON_PF_SOUND,  ICON_PF_GAMEPAD_ALT,
+                                                     ICON_PF_MEMORY_CARD, ICON_FA_TROPHY, ICON_FA_EXCLAMATION_TRIANGLE};
     static constexpr SettingsPage global_pages[] = {
       SettingsPage::Interface, SettingsPage::Console,        SettingsPage::Emulation,    SettingsPage::BIOS,
       SettingsPage::Display,   SettingsPage::PostProcessing, SettingsPage::Audio,        SettingsPage::Controller,
@@ -2490,7 +2489,7 @@ void FullscreenUI::DrawSettingsWindow()
     static constexpr std::array<const char*, static_cast<u32>(SettingsPage::Count)> titles = {
       {FSUI_NSTR("Summary"), FSUI_NSTR("Interface Settings"), FSUI_NSTR("Console Settings"),
        FSUI_NSTR("Emulation Settings"), FSUI_NSTR("BIOS Settings"), FSUI_NSTR("Controller Settings"),
-       FSUI_NSTR("Hotkey Settings"), FSUI_NSTR("Memory Card Settings"), FSUI_NSTR("Display Settings"),
+       FSUI_NSTR("Hotkey Settings"), FSUI_NSTR("Memory Card Settings"), FSUI_NSTR("Graphics Settings"),
        FSUI_NSTR("Post-Processing Settings"), FSUI_NSTR("Audio Settings"), FSUI_NSTR("Achievements Settings"),
        FSUI_NSTR("Advanced Settings")}};
 
@@ -2716,15 +2715,9 @@ void FullscreenUI::DrawInterfaceSettingsPage()
     FSUI_CSTR("Prevents the screen saver from activating and the host from sleeping while emulation is running."),
     "Main", "InhibitScreensaver", true);
   DrawToggleSetting(
-    bsi, FSUI_ICONSTR(ICON_FA_GAMEPAD, "Load Devices From Save States"),
-    FSUI_CSTR("When enabled, memory cards and controllers will be overwritten when save states are loaded."), "Main",
-    "LoadDevicesFromSaveStates", false);
-  DrawToggleSetting(
     bsi, FSUI_ICONSTR(ICON_FA_COGS, "Apply Per-Game Settings"),
     FSUI_CSTR("When enabled, per-game settings will be applied, and incompatible enhancements will be disabled."),
     "Main", "ApplyGameSettings", true);
-  DrawToggleSetting(bsi, FSUI_ICONSTR(ICON_FA_FROWN, "Automatically Load Cheats"),
-                    FSUI_CSTR("Automatically loads and applies cheats on game start."), "Main", "AutoLoadCheats", true);
   if (DrawToggleSetting(bsi, FSUI_ICONSTR(ICON_FA_PAINT_BRUSH, "Use Light Theme"),
                         FSUI_CSTR("Uses a light coloured theme instead of the default dark theme."), "Main",
                         "UseLightFullscreenUITheme", false))
@@ -2909,22 +2902,30 @@ void FullscreenUI::DrawConsoleSettingsPage()
 
   MenuHeading(FSUI_CSTR("Console Settings"));
 
-  DrawEnumSetting(bsi, FSUI_CSTR("Region"), FSUI_CSTR("Determines the emulated hardware type."), "Console", "Region",
-                  Settings::DEFAULT_CONSOLE_REGION, &Settings::ParseConsoleRegionName, &Settings::GetConsoleRegionName,
-                  &Settings::GetConsoleRegionDisplayName, ConsoleRegion::Count);
+  DrawEnumSetting(bsi, FSUI_ICONSTR(ICON_FA_GLOBE, "Region"), FSUI_CSTR("Determines the emulated hardware type."),
+                  "Console", "Region", Settings::DEFAULT_CONSOLE_REGION, &Settings::ParseConsoleRegionName,
+                  &Settings::GetConsoleRegionName, &Settings::GetConsoleRegionDisplayName, ConsoleRegion::Count);
   DrawToggleSetting(
-    bsi, FSUI_CSTR("Enable 8MB RAM"),
+    bsi, FSUI_ICONSTR(ICON_FA_MEMORY, "Enable 8MB RAM"),
     FSUI_CSTR("Enables an additional 6MB of RAM to obtain a total of 2+6 = 8MB, usually present on dev consoles."),
     "Console", "Enable8MBRAM", false);
+  DrawToggleSetting(bsi, FSUI_ICONSTR(ICON_FA_MAGIC, "Disable All Enhancements"),
+                    FSUI_CSTR("Temporarily disables all enhancements, useful when testing."), "Main",
+                    "DisableAllEnhancements", false);
+  DrawToggleSetting(
+    bsi, FSUI_ICONSTR(ICON_FA_FROWN, "Enable Cheats"),
+    FSUI_CSTR("Automatically loads and applies cheats on game start. Cheats can break games and saves."), "Console",
+    "EnableCheats", false);
 
   MenuHeading(FSUI_CSTR("CPU Emulation"));
 
-  DrawEnumSetting(bsi, FSUI_CSTR("Execution Mode"), FSUI_CSTR("Determines how the emulated CPU executes instructions."),
-                  "CPU", "ExecutionMode", Settings::DEFAULT_CPU_EXECUTION_MODE, &Settings::ParseCPUExecutionMode,
+  DrawEnumSetting(bsi, FSUI_ICONSTR(ICON_FA_BOLT, "Execution Mode"),
+                  FSUI_CSTR("Determines how the emulated CPU executes instructions."), "CPU", "ExecutionMode",
+                  Settings::DEFAULT_CPU_EXECUTION_MODE, &Settings::ParseCPUExecutionMode,
                   &Settings::GetCPUExecutionModeName, &Settings::GetCPUExecutionModeDisplayName,
                   CPUExecutionMode::Count);
 
-  DrawToggleSetting(bsi, FSUI_CSTR("Enable Overclocking"),
+  DrawToggleSetting(bsi, FSUI_ICONSTR(ICON_FA_TACHOMETER_ALT, "Enable Overclocking"),
                     FSUI_CSTR("When this option is chosen, the clock speed set below will be used."), "CPU",
                     "OverclockEnable", false);
 
@@ -2945,37 +2946,34 @@ void FullscreenUI::DrawConsoleSettingsPage()
     }
   }
 
-  DrawToggleSetting(bsi, FSUI_CSTR("Enable Recompiler ICache"),
+  DrawToggleSetting(bsi, FSUI_ICONSTR(ICON_FA_MICROCHIP, "Enable Recompiler ICache"),
                     FSUI_CSTR("Makes games run closer to their console framerate, at a small cost to performance."),
                     "CPU", "RecompilerICache", false);
 
   MenuHeading(FSUI_CSTR("CD-ROM Emulation"));
 
   DrawIntListSetting(
-    bsi, FSUI_CSTR("Read Speedup"),
+    bsi, FSUI_ICONSTR(ICON_FA_COMPACT_DISC, "Read Speedup"),
     FSUI_CSTR(
       "Speeds up CD-ROM reads by the specified factor. May improve loading speeds in some games, and break others."),
     "CDROM", "ReadSpeedup", 1, cdrom_read_speeds.data(), cdrom_read_speeds.size(), true, 1);
   DrawIntListSetting(
-    bsi, FSUI_CSTR("Seek Speedup"),
+    bsi, FSUI_ICONSTR(ICON_FA_SEARCH, "Seek Speedup"),
     FSUI_CSTR(
       "Speeds up CD-ROM seeks by the specified factor. May improve loading speeds in some games, and break others."),
     "CDROM", "SeekSpeedup", 1, cdrom_seek_speeds.data(), cdrom_seek_speeds.size(), true);
 
   DrawIntRangeSetting(
-    bsi, FSUI_CSTR("Readahead Sectors"),
+    bsi, FSUI_ICONSTR(ICON_FA_FAST_FORWARD, "Readahead Sectors"),
     FSUI_CSTR("Reduces hitches in emulation by reading/decompressing CD data asynchronously on a worker thread."),
     "CDROM", "ReadaheadSectors", Settings::DEFAULT_CDROM_READAHEAD_SECTORS, 0, 32, "%d sectors");
 
-  DrawToggleSetting(bsi, FSUI_CSTR("Enable Region Check"),
-                    FSUI_CSTR("Simulates the region check present in original, unmodified consoles."), "CDROM",
-                    "RegionCheck", false);
   DrawToggleSetting(
-    bsi, FSUI_CSTR("Preload Images to RAM"),
+    bsi, FSUI_ICONSTR(ICON_FA_DOWNLOAD, "Preload Images to RAM"),
     FSUI_CSTR("Loads the game image into RAM. Useful for network paths that may become unreliable during gameplay."),
     "CDROM", "LoadImageToRAM", false);
   DrawToggleSetting(
-    bsi, FSUI_CSTR("Apply Image Patches"),
+    bsi, FSUI_ICONSTR(ICON_FA_VEST_PATCHES, "Apply Image Patches"),
     FSUI_CSTR("Automatically applies patches to disc images when they are present, currently only PPF is supported."),
     "CDROM", "LoadImagePatches", false);
 
@@ -3889,10 +3887,11 @@ void FullscreenUI::DrawDisplaySettingsPage()
       "GPU", "UseSoftwareRendererForReadbacks", false);
   }
 
-  DrawToggleSetting(
-    bsi, FSUI_CSTR("Enable VSync"),
+  DrawEnumSetting(
+    bsi, FSUI_CSTR("VSync"),
     FSUI_CSTR("Synchronizes presentation of the console's frames to the host. Enable for smoother animations."),
-    "Display", "VSync", Settings::DEFAULT_VSYNC_VALUE);
+    "Display", "SyncMode", Settings::DEFAULT_DISPLAY_SYNC_MODE, &Settings::ParseDisplaySyncMode,
+    &Settings::GetDisplaySyncModeName, &Settings::GetDisplaySyncModeDisplayName, DisplaySyncMode::Count);
 
   DrawToggleSetting(
     bsi, FSUI_CSTR("Sync To Host Refresh Rate"),
@@ -3908,7 +3907,7 @@ void FullscreenUI::DrawDisplaySettingsPage()
   MenuHeading(FSUI_CSTR("Rendering"));
 
   DrawIntListSetting(
-    bsi, FSUI_CSTR("Internal Resolution Scale"),
+    bsi, FSUI_CSTR("Internal Resolution"),
     FSUI_CSTR("Scales internal VRAM resolution by the specified multiplier. Some games require 1x VRAM resolution."),
     "GPU", "ResolutionScale", 1, resolution_scales.data(), resolution_scales.size(), true, 0, is_hardware);
 
@@ -3916,6 +3915,13 @@ void FullscreenUI::DrawDisplaySettingsPage()
     bsi, FSUI_CSTR("Texture Filtering"), FSUI_CSTR("Smooths out the blockiness of magnified textures on 3D objects."),
     "GPU", "TextureFilter", Settings::DEFAULT_GPU_TEXTURE_FILTER, &Settings::ParseTextureFilterName,
     &Settings::GetTextureFilterName, &Settings::GetTextureFilterDisplayName, GPUTextureFilter::Count, is_hardware);
+
+  DrawEnumSetting(bsi, FSUI_CSTR("Line Detection"),
+                  FSUI_CSTR("Attempts to detect one pixel high/wide lines that rely on non-upscaled rasterization "
+                            "behavior, filling in gaps introduced by upscaling."),
+                  "GPU", "LineDetectMode", Settings::DEFAULT_GPU_LINE_DETECT_MODE, &Settings::ParseLineDetectModeName,
+                  &Settings::GetLineDetectModeName, &Settings::GetLineDetectModeDisplayName, GPULineDetectMode::Count,
+                  is_hardware);
 
   DrawToggleSetting(bsi, FSUI_CSTR("True Color Rendering"),
                     FSUI_CSTR("Disables dithering and uses the full 8 bits per channel of color information."), "GPU",
@@ -3978,9 +3984,19 @@ void FullscreenUI::DrawDisplaySettingsPage()
     "Display", "Scaling", Settings::DEFAULT_DISPLAY_SCALING, &Settings::ParseDisplayScaling,
     &Settings::GetDisplayScalingName, &Settings::GetDisplayScalingDisplayName, DisplayScalingMode::Count);
 
-  DrawToggleSetting(bsi, FSUI_CSTR("Internal Resolution Screenshots"),
-                    FSUI_CSTR("Saves screenshots at internal render resolution and without postprocessing."), "Display",
-                    "InternalResolutionScreenshots", false);
+  DrawEnumSetting(bsi, FSUI_CSTR("Screenshot Size"),
+                  FSUI_CSTR("Determines the size of screenshots created by DuckStation."), "Display", "ScreenshotMode",
+                  Settings::DEFAULT_DISPLAY_SCREENSHOT_MODE, &Settings::ParseDisplayScreenshotMode,
+                  &Settings::GetDisplayScreenshotModeName, &Settings::GetDisplayScreenshotModeDisplayName,
+                  DisplayScreenshotMode::Count);
+  DrawEnumSetting(bsi, FSUI_CSTR("Screenshot Format"),
+                  FSUI_CSTR("Determines the format that screenshots will be saved/compressed with."), "Display",
+                  "ScreenshotFormat", Settings::DEFAULT_DISPLAY_SCREENSHOT_FORMAT,
+                  &Settings::ParseDisplayScreenshotFormat, &Settings::GetDisplayScreenshotFormatName,
+                  &Settings::GetDisplayScreenshotFormatDisplayName, DisplayScreenshotFormat::Count);
+  DrawIntRangeSetting(bsi, FSUI_CSTR("Screenshot Quality"),
+                      FSUI_CSTR("Selects the quality at which screenshots will be compressed."), "Display",
+                      "ScreenshotQuality", Settings::DEFAULT_DISPLAY_SCREENSHOT_QUALITY, 1, 100, "%d%%");
 
   MenuHeading(FSUI_CSTR("Enhancements"));
   DrawToggleSetting(
@@ -4648,10 +4664,6 @@ void FullscreenUI::DrawAdvancedSettingsPage()
 
   MenuHeading(FSUI_CSTR("Debugging Settings"));
 
-  DrawToggleSetting(bsi, FSUI_CSTR("Disable All Enhancements"),
-                    FSUI_CSTR("Temporarily disables all enhancements, useful when testing."), "Main",
-                    "DisableAllEnhancements", false);
-
   DrawToggleSetting(bsi, FSUI_CSTR("Use Debug GPU Device"),
                     FSUI_CSTR("Enable debugging when supported by the host's renderer API. Only for developer use."),
                     "GPU", "UseDebugDevice", false);
@@ -4669,6 +4681,10 @@ void FullscreenUI::DrawAdvancedSettingsPage()
   DrawToggleSetting(bsi, FSUI_CSTR("Create Save State Backups"),
                     FSUI_CSTR("Renames existing save states when saving to a backup file."), "Main",
                     "CreateSaveStateBackups", false);
+  DrawToggleSetting(
+    bsi, FSUI_ICONSTR(ICON_FA_GAMEPAD, "Load Devices From Save States"),
+    FSUI_CSTR("When enabled, memory cards and controllers will be overwritten when save states are loaded."), "Main",
+    "LoadDevicesFromSaveStates", false);
 
   MenuHeading(FSUI_CSTR("Display Settings"));
   DrawToggleSetting(bsi, FSUI_CSTR("Show Status Indicators"),
@@ -4733,6 +4749,12 @@ void FullscreenUI::DrawAdvancedSettingsPage()
                   FSUI_CSTR("Avoids calls to C++ code, significantly speeding up the recompiler."), "CPU",
                   "FastmemMode", Settings::DEFAULT_CPU_FASTMEM_MODE, &Settings::ParseCPUFastmemMode,
                   &Settings::GetCPUFastmemModeName, &Settings::GetCPUFastmemModeDisplayName, CPUFastmemMode::Count);
+
+  MenuHeading(FSUI_CSTR("CD-ROM Emulation"));
+
+  DrawToggleSetting(bsi, FSUI_CSTR("Enable Region Check"),
+                    FSUI_CSTR("Simulates the region check present in original, unmodified consoles."), "CDROM",
+                    "RegionCheck", false);
 
   EndMenuButtons();
 }
@@ -4885,7 +4907,7 @@ void FullscreenUI::DrawPauseMenu()
         }
 
         if (ActiveButton(FSUI_ICONSTR(ICON_FA_FROWN_OPEN, "Cheat List"), false,
-                         !System::GetGameSerial().empty() && !Achievements::IsHardcoreModeActive()))
+                         !System::GetGameSerial().empty() && g_settings.enable_cheats))
         {
           s_current_main_window = MainWindowType::None;
           DoCheatsMenu();
@@ -6651,6 +6673,7 @@ TRANSLATE_NOOP("FullscreenUI", "Apply Image Patches");
 TRANSLATE_NOOP("FullscreenUI", "Apply Per-Game Settings");
 TRANSLATE_NOOP("FullscreenUI", "Are you sure you want to clear the current post-processing chain? All configuration will be lost.");
 TRANSLATE_NOOP("FullscreenUI", "Aspect Ratio");
+TRANSLATE_NOOP("FullscreenUI", "Attempts to detect one pixel high/wide lines that rely on non-upscaled rasterization behavior, filling in gaps introduced by upscaling.");
 TRANSLATE_NOOP("FullscreenUI", "Attempts to map the selected port to a chosen controller.");
 TRANSLATE_NOOP("FullscreenUI", "Audio Backend");
 TRANSLATE_NOOP("FullscreenUI", "Audio Control");
@@ -6661,9 +6684,8 @@ TRANSLATE_NOOP("FullscreenUI", "Automatic based on window size");
 TRANSLATE_NOOP("FullscreenUI", "Automatic mapping completed for {}.");
 TRANSLATE_NOOP("FullscreenUI", "Automatic mapping failed for {}.");
 TRANSLATE_NOOP("FullscreenUI", "Automatic mapping failed, no devices are available.");
-TRANSLATE_NOOP("FullscreenUI", "Automatically Load Cheats");
 TRANSLATE_NOOP("FullscreenUI", "Automatically applies patches to disc images when they are present, currently only PPF is supported.");
-TRANSLATE_NOOP("FullscreenUI", "Automatically loads and applies cheats on game start.");
+TRANSLATE_NOOP("FullscreenUI", "Automatically loads and applies cheats on game start. Cheats can break games and saves.");
 TRANSLATE_NOOP("FullscreenUI", "Automatically saves the emulator state when powering down or exiting. You can then resume directly from where you left off next time.");
 TRANSLATE_NOOP("FullscreenUI", "Automatically switches to fullscreen mode when the program is started.");
 TRANSLATE_NOOP("FullscreenUI", "Avoids calls to C++ code, significantly speeding up the recompiler.");
@@ -6748,7 +6770,9 @@ TRANSLATE_NOOP("FullscreenUI", "Determines quality of audio when not running at 
 TRANSLATE_NOOP("FullscreenUI", "Determines that field that the game list will be sorted by.");
 TRANSLATE_NOOP("FullscreenUI", "Determines the amount of audio buffered before being pulled by the host API.");
 TRANSLATE_NOOP("FullscreenUI", "Determines the emulated hardware type.");
+TRANSLATE_NOOP("FullscreenUI", "Determines the format that screenshots will be saved/compressed with.");
 TRANSLATE_NOOP("FullscreenUI", "Determines the position on the screen when black borders must be added.");
+TRANSLATE_NOOP("FullscreenUI", "Determines the size of screenshots created by DuckStation.");
 TRANSLATE_NOOP("FullscreenUI", "Determines whether a prompt will be displayed to confirm shutting down the emulator/game when the hotkey is pressed.");
 TRANSLATE_NOOP("FullscreenUI", "Device Settings");
 TRANSLATE_NOOP("FullscreenUI", "Disable All Enhancements");
@@ -6775,6 +6799,7 @@ TRANSLATE_NOOP("FullscreenUI", "Emulation Settings");
 TRANSLATE_NOOP("FullscreenUI", "Emulation Speed");
 TRANSLATE_NOOP("FullscreenUI", "Enable 8MB RAM");
 TRANSLATE_NOOP("FullscreenUI", "Enable Achievements");
+TRANSLATE_NOOP("FullscreenUI", "Enable Cheats");
 TRANSLATE_NOOP("FullscreenUI", "Enable Discord Presence");
 TRANSLATE_NOOP("FullscreenUI", "Enable Fast Boot");
 TRANSLATE_NOOP("FullscreenUI", "Enable In-Game Overlays");
@@ -6790,7 +6815,6 @@ TRANSLATE_NOOP("FullscreenUI", "Enable SDL Input Source");
 TRANSLATE_NOOP("FullscreenUI", "Enable Subdirectory Scanning");
 TRANSLATE_NOOP("FullscreenUI", "Enable TTY Logging");
 TRANSLATE_NOOP("FullscreenUI", "Enable VRAM Write Texture Replacement");
-TRANSLATE_NOOP("FullscreenUI", "Enable VSync");
 TRANSLATE_NOOP("FullscreenUI", "Enable XInput Input Source");
 TRANSLATE_NOOP("FullscreenUI", "Enable debugging when supported by the host's renderer API. Only for developer use.");
 TRANSLATE_NOOP("FullscreenUI", "Enables alignment and bus exceptions. Not needed for any known games.");
@@ -6851,6 +6875,7 @@ TRANSLATE_NOOP("FullscreenUI", "Genre: %s");
 TRANSLATE_NOOP("FullscreenUI", "GitHub Repository");
 TRANSLATE_NOOP("FullscreenUI", "Global Slot {0} - {1}##global_slot_{0}");
 TRANSLATE_NOOP("FullscreenUI", "Global Slot {0}##global_slot_{0}");
+TRANSLATE_NOOP("FullscreenUI", "Graphics Settings");
 TRANSLATE_NOOP("FullscreenUI", "Hardcore Mode");
 TRANSLATE_NOOP("FullscreenUI", "Hardcore mode will be enabled on next game restart.");
 TRANSLATE_NOOP("FullscreenUI", "Hide Cursor In Fullscreen");
@@ -6870,8 +6895,7 @@ TRANSLATE_NOOP("FullscreenUI", "Input profile '{}' loaded.");
 TRANSLATE_NOOP("FullscreenUI", "Input profile '{}' saved.");
 TRANSLATE_NOOP("FullscreenUI", "Integration");
 TRANSLATE_NOOP("FullscreenUI", "Interface Settings");
-TRANSLATE_NOOP("FullscreenUI", "Internal Resolution Scale");
-TRANSLATE_NOOP("FullscreenUI", "Internal Resolution Screenshots");
+TRANSLATE_NOOP("FullscreenUI", "Internal Resolution");
 TRANSLATE_NOOP("FullscreenUI", "Issue Tracker");
 TRANSLATE_NOOP("FullscreenUI", "Last Played");
 TRANSLATE_NOOP("FullscreenUI", "Last Played: %s");
@@ -6881,6 +6905,7 @@ TRANSLATE_NOOP("FullscreenUI", "Leaderboard Notifications");
 TRANSLATE_NOOP("FullscreenUI", "Leaderboards");
 TRANSLATE_NOOP("FullscreenUI", "Leaderboards are not enabled.");
 TRANSLATE_NOOP("FullscreenUI", "Limits how many frames are displayed to the screen. These frames are still rendered.");
+TRANSLATE_NOOP("FullscreenUI", "Line Detection");
 TRANSLATE_NOOP("FullscreenUI", "List Settings");
 TRANSLATE_NOOP("FullscreenUI", "Load Devices From Save States");
 TRANSLATE_NOOP("FullscreenUI", "Load Profile");
@@ -7022,7 +7047,6 @@ TRANSLATE_NOOP("FullscreenUI", "Save Screenshot");
 TRANSLATE_NOOP("FullscreenUI", "Save State");
 TRANSLATE_NOOP("FullscreenUI", "Save State On Exit");
 TRANSLATE_NOOP("FullscreenUI", "Saved {:%c}");
-TRANSLATE_NOOP("FullscreenUI", "Saves screenshots at internal render resolution and without postprocessing.");
 TRANSLATE_NOOP("FullscreenUI", "Saves state periodically so you can rewind any mistakes while playing.");
 TRANSLATE_NOOP("FullscreenUI", "Scaled Dithering");
 TRANSLATE_NOOP("FullscreenUI", "Scales internal VRAM resolution by the specified multiplier. Some games require 1x VRAM resolution.");
@@ -7031,6 +7055,9 @@ TRANSLATE_NOOP("FullscreenUI", "Scaling");
 TRANSLATE_NOOP("FullscreenUI", "Scan For New Games");
 TRANSLATE_NOOP("FullscreenUI", "Scanning Subdirectories");
 TRANSLATE_NOOP("FullscreenUI", "Screen Display");
+TRANSLATE_NOOP("FullscreenUI", "Screenshot Format");
+TRANSLATE_NOOP("FullscreenUI", "Screenshot Quality");
+TRANSLATE_NOOP("FullscreenUI", "Screenshot Size");
 TRANSLATE_NOOP("FullscreenUI", "Search Directories");
 TRANSLATE_NOOP("FullscreenUI", "Seek Speedup");
 TRANSLATE_NOOP("FullscreenUI", "Select Device");
@@ -7038,6 +7065,7 @@ TRANSLATE_NOOP("FullscreenUI", "Select Disc Image");
 TRANSLATE_NOOP("FullscreenUI", "Select Macro {} Binds");
 TRANSLATE_NOOP("FullscreenUI", "Selects the GPU to use for rendering.");
 TRANSLATE_NOOP("FullscreenUI", "Selects the percentage of the normal clock speed the emulated hardware will run at.");
+TRANSLATE_NOOP("FullscreenUI", "Selects the quality at which screenshots will be compressed.");
 TRANSLATE_NOOP("FullscreenUI", "Selects the resolution scale that will be applied to the final image. 1x will downsample to the original console resolution.");
 TRANSLATE_NOOP("FullscreenUI", "Selects the resolution to use in fullscreen modes.");
 TRANSLATE_NOOP("FullscreenUI", "Selects the view that the game list will open to.");
@@ -7155,6 +7183,7 @@ TRANSLATE_NOOP("FullscreenUI", "Uses game-specific settings for controllers for 
 TRANSLATE_NOOP("FullscreenUI", "Uses perspective-correct interpolation for colors, which can improve visuals in some games.");
 TRANSLATE_NOOP("FullscreenUI", "Uses perspective-correct interpolation for texture coordinates, straightening out warped textures.");
 TRANSLATE_NOOP("FullscreenUI", "Uses screen positions to resolve PGXP data. May improve visuals in some games.");
+TRANSLATE_NOOP("FullscreenUI", "VSync");
 TRANSLATE_NOOP("FullscreenUI", "Value: {} | Default: {} | Minimum: {} | Maximum: {}");
 TRANSLATE_NOOP("FullscreenUI", "When enabled and logged in, DuckStation will scan for achievements on startup.");
 TRANSLATE_NOOP("FullscreenUI", "When enabled, DuckStation will assume all achievements are locked and not send any unlock notifications to the server.");

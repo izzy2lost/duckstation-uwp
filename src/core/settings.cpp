@@ -151,7 +151,7 @@ void Settings::Load(SettingsInterface& si)
   load_devices_from_save_states = si.GetBoolValue("Main", "LoadDevicesFromSaveStates", false);
   apply_compatibility_settings = si.GetBoolValue("Main", "ApplyCompatibilitySettings", true);
   apply_game_settings = si.GetBoolValue("Main", "ApplyGameSettings", true);
-  auto_load_cheats = si.GetBoolValue("Main", "AutoLoadCheats", true);
+  enable_cheats = si.GetBoolValue("Console", "EnableCheats", false);
   disable_all_enhancements = si.GetBoolValue("Main", "DisableAllEnhancements", false);
   enable_discord_presence = si.GetBoolValue("Main", "EnableDiscordPresence", false);
   rewind_enable = si.GetBoolValue("Main", "RewindEnable", false);
@@ -177,8 +177,8 @@ void Settings::Load(SettingsInterface& si)
   gpu_renderer = ParseRendererName(si.GetStringValue("GPU", "Renderer", GetRendererName(DEFAULT_GPU_RENDERER)).c_str())
                    .value_or(DEFAULT_GPU_RENDERER);
   gpu_adapter = si.GetStringValue("GPU", "Adapter", "");
-  gpu_resolution_scale = static_cast<u32>(si.GetIntValue("GPU", "ResolutionScale", 1));
-  gpu_multisamples = static_cast<u32>(si.GetIntValue("GPU", "Multisamples", 1));
+  gpu_resolution_scale = static_cast<u8>(si.GetIntValue("GPU", "ResolutionScale", 1));
+  gpu_multisamples = static_cast<u8>(si.GetIntValue("GPU", "Multisamples", 1));
   gpu_use_debug_device = si.GetBoolValue("GPU", "UseDebugDevice", false);
   gpu_disable_shader_cache = si.GetBoolValue("GPU", "DisableShaderCache", false);
   gpu_disable_dual_source_blend = si.GetBoolValue("GPU", "DisableDualSourceBlend", false);
@@ -196,6 +196,10 @@ void Settings::Load(SettingsInterface& si)
     ParseTextureFilterName(
       si.GetStringValue("GPU", "TextureFilter", GetTextureFilterName(DEFAULT_GPU_TEXTURE_FILTER)).c_str())
       .value_or(DEFAULT_GPU_TEXTURE_FILTER);
+  gpu_line_detect_mode =
+    ParseLineDetectModeName(
+      si.GetStringValue("GPU", "LineDetectMode", GetLineDetectModeName(DEFAULT_GPU_LINE_DETECT_MODE)).c_str())
+      .value_or(DEFAULT_GPU_LINE_DETECT_MODE);
   gpu_downsample_mode =
     ParseDownsampleModeName(
       si.GetStringValue("GPU", "DownsampleMode", GetDownsampleModeName(DEFAULT_GPU_DOWNSAMPLE_MODE)).c_str())
@@ -239,12 +243,28 @@ void Settings::Load(SettingsInterface& si)
   display_scaling =
     ParseDisplayScaling(si.GetStringValue("Display", "Scaling", GetDisplayScalingName(DEFAULT_DISPLAY_SCALING)).c_str())
       .value_or(DEFAULT_DISPLAY_SCALING);
+  display_sync_mode =
+    ParseDisplaySyncMode(
+      si.GetStringValue("Display", "SyncMode", GetDisplaySyncModeName(DEFAULT_DISPLAY_SYNC_MODE)).c_str())
+      .value_or(DEFAULT_DISPLAY_SYNC_MODE);
   display_exclusive_fullscreen_control =
     ParseDisplayExclusiveFullscreenControl(
       si.GetStringValue("Display", "ExclusiveFullscreenControl",
                         GetDisplayExclusiveFullscreenControlName(DEFAULT_DISPLAY_EXCLUSIVE_FULLSCREEN_CONTROL))
         .c_str())
       .value_or(DEFAULT_DISPLAY_EXCLUSIVE_FULLSCREEN_CONTROL);
+  display_screenshot_mode =
+    ParseDisplayScreenshotMode(
+      si.GetStringValue("Display", "ScreenshotMode", GetDisplayScreenshotModeName(DEFAULT_DISPLAY_SCREENSHOT_MODE))
+        .c_str())
+      .value_or(DEFAULT_DISPLAY_SCREENSHOT_MODE);
+  display_screenshot_format =
+    ParseDisplayScreenshotFormat(si.GetStringValue("Display", "ScreenshotFormat",
+                                                   GetDisplayScreenshotFormatName(DEFAULT_DISPLAY_SCREENSHOT_FORMAT))
+                                   .c_str())
+      .value_or(DEFAULT_DISPLAY_SCREENSHOT_FORMAT);
+  display_screenshot_quality = static_cast<u8>(
+    std::clamp<u32>(si.GetUIntValue("Display", "ScreenshotQuality", DEFAULT_DISPLAY_SCREENSHOT_QUALITY), 1, 100));
   display_force_4_3_for_24bit = si.GetBoolValue("Display", "Force4_3For24Bit", false);
   display_active_start_offset = static_cast<s16>(si.GetIntValue("Display", "ActiveStartOffset", 0));
   display_active_end_offset = static_cast<s16>(si.GetIntValue("Display", "ActiveEndOffset", 0));
@@ -262,9 +282,7 @@ void Settings::Load(SettingsInterface& si)
   display_show_inputs = si.GetBoolValue("Display", "ShowInputs", false);
   display_show_enhancements = si.GetBoolValue("Display", "ShowEnhancements", false);
   display_all_frames = si.GetBoolValue("Display", "DisplayAllFrames", false);
-  display_internal_resolution_screenshots = si.GetBoolValue("Display", "InternalResolutionScreenshots", false);
   display_stretch_vertically = si.GetBoolValue("Display", "StretchVertically", false);
-  video_sync_enabled = si.GetBoolValue("Display", "VSync", DEFAULT_VSYNC_VALUE);
   display_max_fps = si.GetFloatValue("Display", "MaxFPS", DEFAULT_DISPLAY_MAX_FPS);
   display_osd_scale = si.GetFloatValue("Display", "OSDScale", DEFAULT_OSD_SCALE);
 
@@ -426,7 +444,7 @@ void Settings::Save(SettingsInterface& si) const
   si.SetBoolValue("Main", "LoadDevicesFromSaveStates", load_devices_from_save_states);
   si.SetBoolValue("Main", "ApplyCompatibilitySettings", apply_compatibility_settings);
   si.SetBoolValue("Main", "ApplyGameSettings", apply_game_settings);
-  si.SetBoolValue("Main", "AutoLoadCheats", auto_load_cheats);
+  si.SetBoolValue("Console", "EnableCheats", enable_cheats);
   si.SetBoolValue("Main", "DisableAllEnhancements", disable_all_enhancements);
   si.SetBoolValue("Main", "EnableDiscordPresence", enable_discord_presence);
   si.SetBoolValue("Main", "RewindEnable", rewind_enable);
@@ -461,6 +479,7 @@ void Settings::Save(SettingsInterface& si) const
   si.SetBoolValue("GPU", "Debanding", gpu_debanding);
   si.SetBoolValue("GPU", "ScaledDithering", gpu_scaled_dithering);
   si.SetStringValue("GPU", "TextureFilter", GetTextureFilterName(gpu_texture_filter));
+  si.SetStringValue("GPU", "LineDetectMode", GetLineDetectModeName(gpu_line_detect_mode));
   si.SetStringValue("GPU", "DownsampleMode", GetDownsampleModeName(gpu_downsample_mode));
   si.SetUIntValue("GPU", "DownsampleScale", gpu_downsample_scale);
   si.SetStringValue("GPU", "WireframeMode", GetGPUWireframeModeName(gpu_wireframe_mode));
@@ -488,8 +507,12 @@ void Settings::Save(SettingsInterface& si) const
   si.SetStringValue("Display", "AspectRatio", GetDisplayAspectRatioName(display_aspect_ratio));
   si.SetStringValue("Display", "Alignment", GetDisplayAlignmentName(display_alignment));
   si.SetStringValue("Display", "Scaling", GetDisplayScalingName(display_scaling));
+  si.SetStringValue("Display", "SyncMode", GetDisplaySyncModeName(display_sync_mode));
   si.SetStringValue("Display", "ExclusiveFullscreenControl",
                     GetDisplayExclusiveFullscreenControlName(display_exclusive_fullscreen_control));
+  si.SetStringValue("Display", "ScreenshotMode", GetDisplayScreenshotModeName(display_screenshot_mode));
+  si.SetStringValue("Display", "ScreenshotFormat", GetDisplayScreenshotFormatName(display_screenshot_format));
+  si.SetUIntValue("Display", "ScreenshotQuality", display_screenshot_quality);
   si.SetIntValue("Display", "CustomAspectRatioNumerator", display_aspect_ratio_custom_numerator);
   si.GetIntValue("Display", "CustomAspectRatioDenominator", display_aspect_ratio_custom_denominator);
   si.SetBoolValue("Display", "ShowOSDMessages", display_show_osd_messages);
@@ -504,9 +527,7 @@ void Settings::Save(SettingsInterface& si) const
   si.SetBoolValue("Display", "ShowInputs", display_show_inputs);
   si.SetBoolValue("Display", "ShowEnhancements", display_show_enhancements);
   si.SetBoolValue("Display", "DisplayAllFrames", display_all_frames);
-  si.SetBoolValue("Display", "InternalResolutionScreenshots", display_internal_resolution_screenshots);
   si.SetBoolValue("Display", "StretchVertically", display_stretch_vertically);
-  si.SetBoolValue("Display", "VSync", video_sync_enabled);
   si.SetFloatValue("Display", "MaxFPS", display_max_fps);
   si.SetFloatValue("Display", "OSDScale", display_osd_scale);
 
@@ -621,6 +642,7 @@ void Settings::FixIncompatibleSettings(bool display_osd_messages)
     g_settings.gpu_debanding = false;
     g_settings.gpu_scaled_dithering = false;
     g_settings.gpu_texture_filter = GPUTextureFilter::Nearest;
+    g_settings.gpu_line_detect_mode = GPULineDetectMode::Disabled;
     g_settings.gpu_disable_interlacing = false;
     g_settings.gpu_force_ntsc_timings = false;
     g_settings.gpu_widescreen_hack = false;
@@ -706,7 +728,7 @@ void Settings::FixIncompatibleSettings(bool display_osd_messages)
       (g_settings.fast_forward_speed != 0.0f) ? std::max(g_settings.fast_forward_speed, 1.0f) : 0.0f;
     g_settings.turbo_speed = (g_settings.turbo_speed != 0.0f) ? std::max(g_settings.turbo_speed, 1.0f) : 0.0f;
     g_settings.rewind_enable = false;
-    g_settings.auto_load_cheats = false;
+    g_settings.enable_cheats = false;
     if (g_settings.cpu_overclock_enable && g_settings.GetCPUOverclockPercent() < 100)
     {
       g_settings.cpu_overclock_enable = false;
@@ -939,16 +961,16 @@ static constexpr const std::array s_gpu_renderer_names = {
 static constexpr const std::array s_gpu_renderer_display_names = {
   TRANSLATE_NOOP("GPURenderer", "Automatic"),
 #ifdef _WIN32
-  TRANSLATE_NOOP("GPURenderer", "Hardware (D3D11)"),  TRANSLATE_NOOP("GPURenderer", "Hardware (D3D12)"),
+  TRANSLATE_NOOP("GPURenderer", "Direct3D 11"), TRANSLATE_NOOP("GPURenderer", "Direct3D 12"),
 #endif
 #ifdef __APPLE__
-  TRANSLATE_NOOP("GPURenderer", "Hardware (Metal)"),
+  TRANSLATE_NOOP("GPURenderer", "Metal"),
 #endif
 #ifdef ENABLE_VULKAN
-  TRANSLATE_NOOP("GPURenderer", "Hardware (Vulkan)"),
+  TRANSLATE_NOOP("GPURenderer", "Vulkan"),
 #endif
 #ifdef ENABLE_OPENGL
-  TRANSLATE_NOOP("GPURenderer", "Hardware (OpenGL)"),
+  TRANSLATE_NOOP("GPURenderer", "OpenGL"),
 #endif
   TRANSLATE_NOOP("GPURenderer", "Software"),
 };
@@ -1005,8 +1027,47 @@ RenderAPI Settings::GetRenderAPIForRenderer(GPURenderer renderer)
   }
 }
 
-static constexpr const std::array s_texture_filter_names = {"Nearest",       "Bilinear", "BilinearBinAlpha", "JINC2",
-                                                            "JINC2BinAlpha", "xBR",      "xBRBinAlpha"};
+GPURenderer Settings::GetRendererForRenderAPI(RenderAPI api)
+{
+  switch (api)
+  {
+#ifdef _WIN32
+    case RenderAPI::D3D11:
+      return GPURenderer::HardwareD3D11;
+
+    case RenderAPI::D3D12:
+      return GPURenderer::HardwareD3D12;
+#endif
+
+#ifdef __APPLE__
+    case RenderAPI::Metal:
+      return GPURenderer::HardwareMetal;
+#endif
+
+#ifdef ENABLE_VULKAN
+    case RenderAPI::Vulkan:
+      return GPURenderer::HardwareVulkan;
+#endif
+
+#ifdef ENABLE_OPENGL
+    case RenderAPI::OpenGL:
+    case RenderAPI::OpenGLES:
+      return GPURenderer::HardwareOpenGL;
+#endif
+
+    default:
+      return GPURenderer::Automatic;
+  }
+}
+
+GPURenderer Settings::GetAutomaticRenderer()
+{
+  return GetRendererForRenderAPI(GPUDevice::GetPreferredAPI());
+}
+
+static constexpr const std::array s_texture_filter_names = {
+  "Nearest", "Bilinear", "BilinearBinAlpha", "JINC2", "JINC2BinAlpha", "xBR", "xBRBinAlpha",
+};
 static constexpr const std::array s_texture_filter_display_names = {
   TRANSLATE_NOOP("GPUTextureFilter", "Nearest-Neighbor"),
   TRANSLATE_NOOP("GPUTextureFilter", "Bilinear"),
@@ -1014,7 +1075,8 @@ static constexpr const std::array s_texture_filter_display_names = {
   TRANSLATE_NOOP("GPUTextureFilter", "JINC2 (Slow)"),
   TRANSLATE_NOOP("GPUTextureFilter", "JINC2 (Slow, No Edge Blending)"),
   TRANSLATE_NOOP("GPUTextureFilter", "xBR (Very Slow)"),
-  TRANSLATE_NOOP("GPUTextureFilter", "xBR (Very Slow, No Edge Blending)")};
+  TRANSLATE_NOOP("GPUTextureFilter", "xBR (Very Slow, No Edge Blending)"),
+};
 
 std::optional<GPUTextureFilter> Settings::ParseTextureFilterName(const char* str)
 {
@@ -1032,12 +1094,49 @@ std::optional<GPUTextureFilter> Settings::ParseTextureFilterName(const char* str
 
 const char* Settings::GetTextureFilterName(GPUTextureFilter filter)
 {
-  return s_texture_filter_names[static_cast<int>(filter)];
+  return s_texture_filter_names[static_cast<size_t>(filter)];
 }
 
 const char* Settings::GetTextureFilterDisplayName(GPUTextureFilter filter)
 {
   return Host::TranslateToCString("GPUTextureFilter", s_texture_filter_display_names[static_cast<int>(filter)]);
+}
+
+static constexpr const std::array s_line_detect_mode_names = {
+  "Disabled",
+  "Quads",
+  "BasicTriangles",
+  "AggressiveTriangles",
+};
+static constexpr const std::array s_line_detect_mode_detect_names = {
+  TRANSLATE_NOOP("GPULineDetectMode", "Disabled"),
+  TRANSLATE_NOOP("GPULineDetectMode", "Quads"),
+  TRANSLATE_NOOP("GPULineDetectMode", "Triangles (Basic)"),
+  TRANSLATE_NOOP("GPULineDetectMode", "Triangles (Aggressive)"),
+};
+
+std::optional<GPULineDetectMode> Settings::ParseLineDetectModeName(const char* str)
+{
+  int index = 0;
+  for (const char* name : s_line_detect_mode_names)
+  {
+    if (StringUtil::Strcasecmp(name, str) == 0)
+      return static_cast<GPULineDetectMode>(index);
+
+    index++;
+  }
+
+  return std::nullopt;
+}
+
+const char* Settings::GetLineDetectModeName(GPULineDetectMode mode)
+{
+  return s_line_detect_mode_names[static_cast<size_t>(mode)];
+}
+
+const char* Settings::GetLineDetectModeDisplayName(GPULineDetectMode mode)
+{
+  return Host::TranslateToCString("GPULineDetectMode", s_line_detect_mode_detect_names[static_cast<size_t>(mode)]);
 }
 
 static constexpr const std::array s_downsample_mode_names = {"Disabled", "Box", "Adaptive"};
@@ -1261,13 +1360,50 @@ const char* Settings::GetDisplayScalingDisplayName(DisplayScalingMode mode)
   return Host::TranslateToCString("DisplayScalingMode", s_display_scaling_display_names[static_cast<int>(mode)]);
 }
 
+static constexpr const std::array s_display_sync_mode_names = {
+  "Disabled",
+  "VSync",
+  "VSyncRelaxed",
+  "VRR",
+};
+static constexpr const std::array s_display_sync_mode_display_names = {
+  TRANSLATE_NOOP("Settings", "Disabled"),
+  TRANSLATE_NOOP("Settings", "VSync"),
+  TRANSLATE_NOOP("Settings", "Relaxed VSync"),
+  TRANSLATE_NOOP("Settings", "VRR/FreeSync/GSync"),
+};
+
+std::optional<DisplaySyncMode> Settings::ParseDisplaySyncMode(const char* str)
+{
+  int index = 0;
+  for (const char* name : s_display_sync_mode_names)
+  {
+    if (StringUtil::Strcasecmp(name, str) == 0)
+      return static_cast<DisplaySyncMode>(index);
+
+    index++;
+  }
+
+  return std::nullopt;
+}
+
+const char* Settings::GetDisplaySyncModeName(DisplaySyncMode mode)
+{
+  return s_display_sync_mode_names[static_cast<size_t>(mode)];
+}
+
+const char* Settings::GetDisplaySyncModeDisplayName(DisplaySyncMode mode)
+{
+  return Host::TranslateToCString("Settings", s_display_sync_mode_display_names[static_cast<size_t>(mode)]);
+}
+
 static constexpr const std::array s_display_exclusive_fullscreen_mode_names = {
   "Automatic",
   "Disallowed",
   "Allowed",
 };
 static constexpr const std::array s_display_exclusive_fullscreen_mode_display_names = {
-  TRANSLATE_NOOP("Settings", "Automatic (Default)"),
+  TRANSLATE_NOOP("Settings", "Automatic"),
   TRANSLATE_NOOP("Settings", "Disallowed"),
   TRANSLATE_NOOP("Settings", "Allowed"),
 };
@@ -1295,6 +1431,83 @@ const char* Settings::GetDisplayExclusiveFullscreenControlDisplayName(DisplayExc
 {
   return Host::TranslateToCString("Settings",
                                   s_display_exclusive_fullscreen_mode_display_names[static_cast<int>(mode)]);
+}
+
+static constexpr const std::array s_display_screenshot_mode_names = {
+  "ScreenResolution",
+  "InternalResolution",
+  "UncorrectedInternalResolution",
+};
+static constexpr const std::array s_display_screenshot_mode_display_names = {
+  TRANSLATE_NOOP("Settings", "Screen Resolution"),
+  TRANSLATE_NOOP("Settings", "Internal Resolution"),
+  TRANSLATE_NOOP("Settings", "Internal Resolution (Aspect Uncorrected)"),
+};
+
+std::optional<DisplayScreenshotMode> Settings::ParseDisplayScreenshotMode(const char* str)
+{
+  int index = 0;
+  for (const char* name : s_display_screenshot_mode_names)
+  {
+    if (StringUtil::Strcasecmp(name, str) == 0)
+      return static_cast<DisplayScreenshotMode>(index);
+
+    index++;
+  }
+
+  return std::nullopt;
+}
+
+const char* Settings::GetDisplayScreenshotModeName(DisplayScreenshotMode mode)
+{
+  return s_display_screenshot_mode_names[static_cast<size_t>(mode)];
+}
+
+const char* Settings::GetDisplayScreenshotModeDisplayName(DisplayScreenshotMode mode)
+{
+  return Host::TranslateToCString("Settings", s_display_screenshot_mode_display_names[static_cast<size_t>(mode)]);
+}
+
+static constexpr const std::array s_display_screenshot_format_names = {
+  "PNG",
+  "JPEG",
+};
+static constexpr const std::array s_display_screenshot_format_display_names = {
+  TRANSLATE_NOOP("Settings", "PNG"),
+  TRANSLATE_NOOP("Settings", "JPEG"),
+};
+static constexpr const std::array s_display_screenshot_format_extensions = {
+  "png",
+  "jpg",
+};
+
+std::optional<DisplayScreenshotFormat> Settings::ParseDisplayScreenshotFormat(const char* str)
+{
+  int index = 0;
+  for (const char* name : s_display_screenshot_format_names)
+  {
+    if (StringUtil::Strcasecmp(name, str) == 0)
+      return static_cast<DisplayScreenshotFormat>(index);
+
+    index++;
+  }
+
+  return std::nullopt;
+}
+
+const char* Settings::GetDisplayScreenshotFormatName(DisplayScreenshotFormat format)
+{
+  return s_display_screenshot_format_names[static_cast<size_t>(format)];
+}
+
+const char* Settings::GetDisplayScreenshotFormatDisplayName(DisplayScreenshotFormat mode)
+{
+  return Host::TranslateToCString("Settings", s_display_screenshot_format_display_names[static_cast<size_t>(mode)]);
+}
+
+const char* Settings::GetDisplayScreenshotFormatExtension(DisplayScreenshotFormat format)
+{
+  return s_display_screenshot_format_extensions[static_cast<size_t>(format)];
 }
 
 static constexpr const std::array s_audio_backend_names = {

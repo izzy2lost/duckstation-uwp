@@ -132,11 +132,6 @@ private:
 
   void LoadVertices();
 
-  void AddVertex(const BatchVertex& v);
-
-  template<typename... Args>
-  void AddNewVertex(Args&&... args);
-
   void PrintSettingsToLog();
   void CheckSettings();
 
@@ -144,9 +139,9 @@ private:
   void UpdateDepthBufferFromMaskBit();
   void ClearDepthBuffer();
   void SetScissor();
-  void MapBatchVertexPointer(u32 required_vertices);
-  void UnmapBatchVertexPointer(u32 used_vertices);
-  void DrawBatchVertices(BatchRenderMode render_mode, u32 num_vertices, u32 base_vertex);
+  void MapGPUBuffer(u32 required_vertices, u32 required_indices);
+  void UnmapGPUBuffer(u32 used_vertices, u32 used_indices);
+  void DrawBatchVertices(BatchRenderMode render_mode, u32 num_indices, u32 base_index, u32 base_vertex);
 
   u32 CalculateResolutionScale() const;
   GPUDownsampleMode GetDownsampleMode(u32 resolution_scale) const;
@@ -160,9 +155,7 @@ private:
   void CheckForTexPageOverlap(u32 texpage, u32 min_u, u32 min_v, u32 max_u, u32 max_v);
 
   bool IsFlushed() const;
-  u32 GetBatchVertexSpace() const;
-  u32 GetBatchVertexCount() const;
-  void EnsureVertexBufferSpace(u32 required_vertices);
+  void EnsureVertexBufferSpace(u32 required_vertices, u32 required_indices);
   void EnsureVertexBufferSpaceForCurrentCommand();
   void ResetBatchVertexDepth();
 
@@ -196,7 +189,8 @@ private:
   void DrawLine(float x0, float y0, u32 col0, float x1, float y1, u32 col1, float depth);
 
   /// Handles quads with flipped texture coordinate directions.
-  static void HandleFlippedQuadTextureCoordinates(BatchVertex* vertices);
+  void HandleFlippedQuadTextureCoordinates(BatchVertex* vertices);
+  void ExpandLineTriangles(BatchVertex* vertices, u32 base_vertex);
 
   /// Computes polygon U/V boundaries.
   void ComputePolygonUVLimits(u32 texpage, BatchVertex* vertices, u32 num_vertices);
@@ -216,46 +210,45 @@ private:
   std::unique_ptr<GPUTexture> m_vram_depth_texture;
   std::unique_ptr<GPUTexture> m_vram_read_texture;
   std::unique_ptr<GPUTexture> m_vram_readback_texture;
+  std::unique_ptr<GPUDownloadTexture> m_vram_readback_download_texture;
   std::unique_ptr<GPUTexture> m_vram_replacement_texture;
   std::unique_ptr<GPUTexture> m_display_private_texture; // TODO: Move to base.
 
   std::unique_ptr<GPUTextureBuffer> m_vram_upload_buffer;
   std::unique_ptr<GPUTexture> m_vram_write_texture;
 
-  FixedHeapArray<u16, VRAM_WIDTH * VRAM_HEIGHT> m_vram_shadow;
-
   std::unique_ptr<GPU_SW_Backend> m_sw_renderer;
 
-  BatchVertex* m_batch_start_vertex_ptr = nullptr;
-  BatchVertex* m_batch_end_vertex_ptr = nullptr;
-  BatchVertex* m_batch_current_vertex_ptr = nullptr;
+  BatchVertex* m_batch_vertex_ptr = nullptr;
+  u16* m_batch_index_ptr = nullptr;
   u32 m_batch_base_vertex = 0;
+  u32 m_batch_base_index = 0;
+  u16 m_batch_vertex_count = 0;
+  u16 m_batch_index_count = 0;
+  u16 m_batch_vertex_space = 0;
+  u16 m_batch_index_space = 0;
   s32 m_current_depth = 0;
   float m_last_depth_z = 1.0f;
 
-  u32 m_resolution_scale = 1;
-  u32 m_multisamples = 1;
+  u8 m_resolution_scale = 1;
+  u8 m_multisamples = 1;
 
-  union
-  {
-    BitField<u8, bool, 0, 1> m_supports_dual_source_blend;
-    BitField<u8, bool, 1, 1> m_supports_framebuffer_fetch;
-    BitField<u8, bool, 2, 1> m_per_sample_shading;
-    BitField<u8, bool, 3, 1> m_scaled_dithering;
-    BitField<u8, bool, 4, 1> m_chroma_smoothing;
-    BitField<u8, bool, 5, 1> m_disable_color_perspective;
-
-    u8 bits = 0;
-  };
+  bool m_supports_dual_source_blend : 1 = false;
+  bool m_supports_framebuffer_fetch : 1 = false;
+  bool m_per_sample_shading : 1 = false;
+  bool m_scaled_dithering : 1 = false;
+  bool m_chroma_smoothing : 1 = false;
+  bool m_disable_color_perspective : 1 = false;
 
   GPUTextureFilter m_texture_filtering = GPUTextureFilter::Nearest;
+  GPULineDetectMode m_line_detect_mode = GPULineDetectMode::Disabled;
   GPUDownsampleMode m_downsample_mode = GPUDownsampleMode::Disabled;
   GPUWireframeMode m_wireframe_mode = GPUWireframeMode::Disabled;
-  bool m_true_color = true;
-  bool m_debanding = false;
-  bool m_clamp_uvs = false;
-  bool m_compute_uv_range = false;
-  bool m_pgxp_depth_buffer = false;
+  bool m_true_color : 1 = true;
+  bool m_debanding : 1 = false;
+  bool m_clamp_uvs : 1 = false;
+  bool m_compute_uv_range : 1 = false;
+  bool m_pgxp_depth_buffer : 1 = false;
   u8 m_texpage_dirty = 0;
 
   BatchConfig m_batch;

@@ -416,15 +416,13 @@ bool StartDumpingAudio(const char* filename = nullptr);
 /// Stops dumping audio to file if it has been started.
 void StopDumpingAudio();
 
-/// Saves a screenshot to the specified file. IF no file name is provided, one will be generated automatically.
-bool SaveScreenshot(const char* filename = nullptr, bool full_resolution = true, bool apply_aspect_ratio = true,
-                    bool compress_on_thread = true);
-
-/// Loads the cheat list from the specified file.
-bool LoadCheatList(const char* filename);
+/// Saves a screenshot to the specified file. If no file name is provided, one will be generated automatically.
+bool SaveScreenshot(const char* filename = nullptr, DisplayScreenshotMode mode = g_settings.display_screenshot_mode,
+                    DisplayScreenshotFormat format = g_settings.display_screenshot_format,
+                    u8 quality = g_settings.display_screenshot_quality, bool compress_on_thread = true);
 
 /// Loads the cheat list for the current game title from the user directory.
-bool LoadCheatListFromGameTitle();
+bool LoadCheatList();
 
 /// Loads the cheat list for the current game code from the built-in code database.
 bool LoadCheatListFromDatabase();
@@ -442,7 +440,7 @@ bool DeleteCheatList();
 void ClearCheatList(bool save_to_file);
 
 /// Enables/disabled the specified cheat code.
-void SetCheatCodeState(u32 index, bool enabled, bool save_to_file);
+void SetCheatCodeState(u32 index, bool enabled);
 
 /// Immediately applies the specified cheat code.
 void ApplyCheatCode(u32 index);
@@ -454,7 +452,7 @@ void ToggleWidescreen();
 bool IsRunningAtNonStandardSpeed();
 
 /// Returns true if vsync should be used.
-bool ShouldUseVSync();
+DisplaySyncMode GetEffectiveDisplaySyncMode();
 
 /// Quick switch between software and hardware rendering.
 void ToggleSoftwareRendering();

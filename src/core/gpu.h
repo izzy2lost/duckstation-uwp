@@ -11,6 +11,7 @@
 #include "common/bitfield.h"
 #include "common/fifo_queue.h"
 #include "common/rectangle.h"
+#include "common/types.h"
 
 #include <algorithm>
 #include <array>
@@ -200,15 +201,14 @@ public:
   Common::Rectangle<s32> CalculateDrawRect(s32 window_width, s32 window_height, bool apply_aspect_ratio = true) const;
 
   /// Helper function to save current display texture to PNG.
-  bool WriteDisplayTextureToFile(std::string filename, bool full_resolution = true, bool apply_aspect_ratio = true,
-                                 bool compress_on_thread = false);
+  bool WriteDisplayTextureToFile(std::string filename, bool compress_on_thread = false);
 
   /// Renders the display, optionally with postprocessing to the specified image.
   bool RenderScreenshotToBuffer(u32 width, u32 height, const Common::Rectangle<s32>& draw_rect, bool postfx,
                                 std::vector<u32>* out_pixels, u32* out_stride, GPUTexture::Format* out_format);
 
   /// Helper function to save screenshot to PNG.
-  bool RenderScreenshotToFile(std::string filename, bool internal_resolution = false, bool compress_on_thread = false);
+  bool RenderScreenshotToFile(std::string filename, DisplayScreenshotMode mode, u8 quality, bool compress_on_thread);
 
   /// Draws the current display texture, with any post-processing.
   bool PresentDisplay();
@@ -358,9 +358,6 @@ protected:
 
   std::unique_ptr<TimingEvent> m_crtc_tick_event;
   std::unique_ptr<TimingEvent> m_command_tick_event;
-
-  // Pointer to VRAM, used for reads/writes. In the hardware backends, this is the shadow buffer.
-  u16* m_vram_ptr = nullptr;
 
   union GPUSTAT
   {
@@ -651,3 +648,4 @@ private:
 };
 
 extern std::unique_ptr<GPU> g_gpu;
+extern u16 g_vram[VRAM_SIZE / sizeof(u16)];

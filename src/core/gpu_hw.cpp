@@ -130,8 +130,6 @@ private:
 
 GPU_HW::GPU_HW() : GPU()
 {
-  m_vram_ptr = m_vram_shadow.data();
-
 #ifdef _DEBUG
   s_draw_number = 0;
 #endif
@@ -176,19 +174,6 @@ ALWAYS_INLINE void GPU_HW::BatchVertex::SetUVLimits(u32 min_u, u32 max_u, u32 mi
   uv_limits = PackUVLimits(min_u, max_u, min_v, max_v);
 }
 
-ALWAYS_INLINE void GPU_HW::AddVertex(const BatchVertex& v)
-{
-  std::memcpy(m_batch_current_vertex_ptr, &v, sizeof(BatchVertex));
-  m_batch_current_vertex_ptr++;
-}
-
-template<typename... Args>
-ALWAYS_INLINE void GPU_HW::AddNewVertex(Args&&... args)
-{
-  m_batch_current_vertex_ptr->Set(std::forward<Args>(args)...);
-  m_batch_current_vertex_ptr++;
-}
-
 const Threading::Thread* GPU_HW::GetSWThread() const
 {
   return m_sw_renderer ? m_sw_renderer->GetThread() : nullptr;
@@ -206,8 +191,8 @@ bool GPU_HW::Initialize()
 
   const GPUDevice::Features features = g_gpu_device->GetFeatures();
 
-  m_resolution_scale = CalculateResolutionScale();
-  m_multisamples = std::min(g_settings.gpu_multisamples, g_gpu_device->GetMaxMultisamples());
+  m_resolution_scale = Truncate8(CalculateResolutionScale());
+  m_multisamples = Truncate8(std::min<u32>(g_settings.gpu_multisamples, g_gpu_device->GetMaxMultisamples()));
   m_supports_dual_source_blend = features.dual_source_blend;
   m_supports_framebuffer_fetch = features.framebuffer_fetch;
   m_per_sample_shading = g_settings.gpu_per_sample_shading && features.per_sample_shading;
@@ -215,6 +200,7 @@ bool GPU_HW::Initialize()
   m_debanding = g_settings.gpu_debanding;
   m_scaled_dithering = g_settings.gpu_scaled_dithering;
   m_texture_filtering = g_settings.gpu_texture_filter;
+  m_line_detect_mode = (m_resolution_scale > 1) ? g_settings.gpu_line_detect_mode : GPULineDetectMode::Disabled;
   m_clamp_uvs = ShouldClampUVs();
   m_compute_uv_range = m_clamp_uvs;
   m_chroma_smoothing = g_settings.gpu_24bit_chroma_smoothing;
@@ -249,11 +235,11 @@ void GPU_HW::Reset(bool clear_vram)
 {
   GPU::Reset(clear_vram);
 
-  m_batch_current_vertex_ptr = m_batch_start_vertex_ptr;
+  if (m_batch_vertex_ptr)
+    UnmapGPUBuffer(0, 0);
 
-  m_vram_shadow.fill(0);
   if (m_sw_renderer)
-    m_sw_renderer->Reset(clear_vram);
+    m_sw_renderer->Reset();
 
   m_batch = {};
   m_batch_ubo_data = {};
@@ -308,7 +294,8 @@ bool GPU_HW::DoState(StateWrapper& sw, GPUTexture** host_texture, bool update_di
   // invalidate the whole VRAM read texture when loading state
   if (sw.IsReading())
   {
-    m_batch_current_vertex_ptr = m_batch_start_vertex_ptr;
+    if (m_batch_vertex_ptr)
+      UnmapGPUBuffer(0, 0);
     SetFullVRAMDirtyRectangle();
     ResetBatchVertexDepth();
   }
@@ -331,8 +318,8 @@ void GPU_HW::UpdateSettings(const Settings& old_settings)
 
   const GPUDevice::Features features = g_gpu_device->GetFeatures();
 
-  const u32 resolution_scale = CalculateResolutionScale();
-  const u32 multisamples = std::min(g_settings.gpu_multisamples, g_gpu_device->GetMaxMultisamples());
+  const u8 resolution_scale = Truncate8(CalculateResolutionScale());
+  const u8 multisamples = Truncate8(std::min<u32>(g_settings.gpu_multisamples, g_gpu_device->GetMaxMultisamples()));
   const bool per_sample_shading = g_settings.gpu_per_sample_shading && features.noperspective_interpolation;
   const GPUDownsampleMode downsample_mode = GetDownsampleMode(resolution_scale);
   const GPUWireframeMode wireframe_mode =
@@ -400,6 +387,7 @@ void GPU_HW::UpdateSettings(const Settings& old_settings)
   m_debanding = g_settings.gpu_debanding;
   m_scaled_dithering = g_settings.gpu_scaled_dithering;
   m_texture_filtering = g_settings.gpu_texture_filter;
+  m_line_detect_mode = (m_resolution_scale > 1) ? g_settings.gpu_line_detect_mode : GPULineDetectMode::Disabled;
   m_clamp_uvs = clamp_uvs;
   m_compute_uv_range = m_clamp_uvs;
   m_chroma_smoothing = g_settings.gpu_24bit_chroma_smoothing;
@@ -442,7 +430,7 @@ void GPU_HW::UpdateSettings(const Settings& old_settings)
       Panic("Failed to recreate buffers.");
 
     RestoreDeviceContext();
-    UpdateVRAM(0, 0, VRAM_WIDTH, VRAM_HEIGHT, m_vram_ptr, false, false);
+    UpdateVRAM(0, 0, VRAM_WIDTH, VRAM_HEIGHT, g_vram, false, false);
     UpdateDepthBufferFromMaskBit();
     UpdateDisplay();
   }
@@ -666,6 +654,26 @@ bool GPU_HW::CreateBuffers()
   GL_OBJECT_NAME(m_vram_read_texture, "VRAM Read Texture");
   GL_OBJECT_NAME(m_vram_readback_texture, "VRAM Readback Texture");
 
+  if (g_gpu_device->GetFeatures().memory_import)
+  {
+    Log_DevPrint("Trying to import guest VRAM buffer for downloads...");
+    m_vram_readback_download_texture = g_gpu_device->CreateDownloadTexture(
+      m_vram_readback_texture->GetWidth(), m_vram_readback_texture->GetHeight(), m_vram_readback_texture->GetFormat(),
+      g_vram, sizeof(g_vram), VRAM_WIDTH * sizeof(u16));
+    if (!m_vram_readback_download_texture)
+      Log_ErrorPrint("Failed to create imported readback buffer");
+  }
+  if (!m_vram_readback_download_texture)
+  {
+    m_vram_readback_download_texture = g_gpu_device->CreateDownloadTexture(
+      m_vram_readback_texture->GetWidth(), m_vram_readback_texture->GetHeight(), m_vram_readback_texture->GetFormat());
+    if (!m_vram_readback_download_texture)
+    {
+      Log_ErrorPrint("Failed to create readback download texture");
+      return false;
+    }
+  }
+
   if (g_gpu_device->GetFeatures().supports_texture_buffers)
   {
     if (!(m_vram_upload_buffer =
@@ -706,6 +714,7 @@ void GPU_HW::DestroyBuffers()
   ClearDisplayTexture();
 
   m_vram_upload_buffer.reset();
+  m_vram_readback_download_texture.reset();
   g_gpu_device->RecycleTexture(std::move(m_downsample_texture));
   g_gpu_device->RecycleTexture(std::move(m_vram_read_texture));
   g_gpu_device->RecycleTexture(std::move(m_vram_depth_texture));
@@ -1355,29 +1364,36 @@ void GPU_HW::SetScissor()
   g_gpu_device->SetScissor(left, top, right - left, bottom - top);
 }
 
-void GPU_HW::MapBatchVertexPointer(u32 required_vertices)
+void GPU_HW::MapGPUBuffer(u32 required_vertices, u32 required_indices)
 {
-  DebugAssert(!m_batch_start_vertex_ptr);
+  DebugAssert(!m_batch_vertex_ptr && !m_batch_index_ptr);
 
-  void* map;
-  u32 space;
-  g_gpu_device->MapVertexBuffer(sizeof(BatchVertex), required_vertices, &map, &space, &m_batch_base_vertex);
+  void* vb_map;
+  u32 vb_space;
+  g_gpu_device->MapVertexBuffer(sizeof(BatchVertex), required_vertices, &vb_map, &vb_space, &m_batch_base_vertex);
+  m_batch_vertex_ptr = static_cast<BatchVertex*>(vb_map);
+  m_batch_vertex_space = Truncate16(std::min<u32>(vb_space, std::numeric_limits<u16>::max()));
 
-  m_batch_start_vertex_ptr = static_cast<BatchVertex*>(map);
-  m_batch_current_vertex_ptr = m_batch_start_vertex_ptr;
-  m_batch_end_vertex_ptr = m_batch_start_vertex_ptr + space;
+  u32 ib_space;
+  g_gpu_device->MapIndexBuffer(required_indices, &m_batch_index_ptr, &ib_space, &m_batch_base_index);
+  m_batch_index_space = Truncate16(std::min<u32>(ib_space, std::numeric_limits<u16>::max()));
 }
 
-void GPU_HW::UnmapBatchVertexPointer(u32 used_vertices)
+void GPU_HW::UnmapGPUBuffer(u32 used_vertices, u32 used_indices)
 {
-  DebugAssert(m_batch_start_vertex_ptr);
+  DebugAssert(m_batch_vertex_ptr && m_batch_index_ptr);
   g_gpu_device->UnmapVertexBuffer(sizeof(BatchVertex), used_vertices);
-  m_batch_start_vertex_ptr = nullptr;
-  m_batch_end_vertex_ptr = nullptr;
-  m_batch_current_vertex_ptr = nullptr;
+  g_gpu_device->UnmapIndexBuffer(used_indices);
+  m_batch_vertex_ptr = nullptr;
+  m_batch_vertex_count = 0;
+  m_batch_vertex_space = 0;
+  m_batch_index_ptr = nullptr;
+  m_batch_index_count = 0;
+  m_batch_index_space = 0;
 }
 
-void GPU_HW::DrawBatchVertices(BatchRenderMode render_mode, u32 num_vertices, u32 base_vertex)
+ALWAYS_INLINE_RELEASE void GPU_HW::DrawBatchVertices(BatchRenderMode render_mode, u32 num_indices, u32 base_index,
+                                                     u32 base_vertex)
 {
   // [depth_test][render_mode][texture_mode][transparency_mode][dithering][interlacing]
   const u8 depth_test = m_batch.use_depth_buffer ? static_cast<u8>(2) : BoolToUInt8(m_batch.check_mask_before_draw);
@@ -1385,7 +1401,7 @@ void GPU_HW::DrawBatchVertices(BatchRenderMode render_mode, u32 num_vertices, u3
     m_batch_pipelines[depth_test][static_cast<u8>(render_mode)][static_cast<u8>(m_batch.texture_mode)][static_cast<u8>(
       m_batch.transparency_mode)][BoolToUInt8(m_batch.dithering)][BoolToUInt8(m_batch.interlacing)]
       .get());
-  g_gpu_device->Draw(num_vertices, base_vertex);
+  g_gpu_device->DrawIndexed(num_indices, base_index, base_vertex);
 }
 
 void GPU_HW::ClearDisplay()
@@ -1396,7 +1412,7 @@ void GPU_HW::ClearDisplay()
     g_gpu_device->ClearRenderTarget(m_display_private_texture.get(), 0xFF000000u);
 }
 
-void GPU_HW::HandleFlippedQuadTextureCoordinates(BatchVertex* vertices)
+ALWAYS_INLINE_RELEASE void GPU_HW::HandleFlippedQuadTextureCoordinates(BatchVertex* vertices)
 {
   // Taken from beetle-psx gpu_polygon.cpp
   // For X/Y flipped 2D sprites, PSX games rely on a very specific rasterization behavior. If U or V is decreasing in X
@@ -1419,6 +1435,24 @@ void GPU_HW::HandleFlippedQuadTextureCoordinates(BatchVertex* vertices)
   const float cax = vertices[0].x - vertices[2].x;
   const float cay = vertices[0].y - vertices[2].y;
 
+  // Hack for Wild Arms 2: The player sprite is drawn one line at a time with a quad, but the bottom V coordinates
+  // are set to a large distance from the top V coordinate. When upscaling, this means that the coordinate is
+  // interpolated between these two values, result in out-of-bounds sampling. At native, it's fine, because at the
+  // top of the primitive, no amount is added to the coordinates. So, in this case, just set all coordinates to the
+  // same value, from the first vertex, ensuring no interpolation occurs. Gate it based on the Y distance being one
+  // pixel, limiting the risk of false positives.
+  if (m_line_detect_mode == GPULineDetectMode::Quads &&
+      (std::max(vertices[0].y, std::max(vertices[1].y, std::max(vertices[2].y, vertices[3].y))) -
+       std::min(vertices[0].y, std::min(vertices[1].y, std::min(vertices[2].y, vertices[3].y)))) == 1.0f) [[unlikely]]
+  {
+    GL_INS_FMT("HLineQuad detected at [{},{}={},{} {},{}={},{} {},{}={},{} {},{}={},{}", vertices[0].x, vertices[0].y,
+               vertices[0].u, vertices[0].v, vertices[1].x, vertices[1].y, vertices[1].u, vertices[1].v, vertices[2].x,
+               vertices[2].y, vertices[2].u, vertices[2].v, vertices[3].x, vertices[3].y, vertices[3].u, vertices[3].v);
+    vertices[1].v = vertices[0].v;
+    vertices[2].v = vertices[0].v;
+    vertices[3].v = vertices[0].v;
+  }
+
   // Compute static derivatives, just assume W is uniform across the primitive and that the plane equation remains the
   // same across the quad. (which it is, there is no Z.. yet).
   const float dudx = -aby * static_cast<float>(vertices[2].u) - bcy * static_cast<float>(vertices[0].u) -
@@ -1435,11 +1469,8 @@ void GPU_HW::HandleFlippedQuadTextureCoordinates(BatchVertex* vertices)
   const s32 texArea = (vertices[1].u - vertices[0].u) * (vertices[2].v - vertices[0].v) -
                       (vertices[2].u - vertices[0].u) * (vertices[1].v - vertices[0].v);
 
-  // Leverage PGXP to further avoid 3D polygons that just happen to align this way after projection
-  const bool is_3d = (vertices[0].w != vertices[1].w || vertices[0].w != vertices[2].w);
-
   // Shouldn't matter as degenerate primitives will be culled anyways.
-  if (area == 0.0f || texArea == 0 || is_3d)
+  if (area == 0.0f || texArea == 0)
     return;
 
   // Use floats here as it'll be faster than integer divides.
@@ -1486,6 +1517,156 @@ void GPU_HW::HandleFlippedQuadTextureCoordinates(BatchVertex* vertices)
   }
 }
 
+ALWAYS_INLINE_RELEASE void GPU_HW::ExpandLineTriangles(BatchVertex* vertices, u32 base_vertex)
+{
+  // Line expansion inspired by beetle-psx.
+  BatchVertex *vshort, *vlong;
+  bool vertical, horizontal;
+
+  if (m_line_detect_mode == GPULineDetectMode::BasicTriangles)
+  {
+    // Given a tall/one-pixel-wide triangle, determine which vertex is the corner with axis-aligned edges.
+    BatchVertex* vcorner;
+    if (vertices[0].u == vertices[1].u && vertices[0].v == vertices[1].v)
+    {
+      // A,B,C
+      vcorner = &vertices[0];
+      vshort = &vertices[1];
+      vlong = &vertices[2];
+    }
+    else if (vertices[1].u == vertices[2].u && vertices[1].v == vertices[2].v)
+    {
+      // B,C,A
+      vcorner = &vertices[1];
+      vshort = &vertices[2];
+      vlong = &vertices[0];
+    }
+    else if (vertices[2].u == vertices[0].u && vertices[2].v == vertices[0].v)
+    {
+      // C,A,B
+      vcorner = &vertices[2];
+      vshort = &vertices[0];
+      vlong = &vertices[1];
+    }
+    else
+    {
+      return;
+    }
+
+    // Determine line direction. Vertical lines will have a width of 1, horizontal lines a height of 1.
+    vertical = ((vcorner->y == vshort->y) && (std::abs(vcorner->x - vshort->x) == 1.0f));
+    horizontal = ((vcorner->x == vshort->x) && (std::abs(vcorner->y - vshort->y) == 1.0f));
+    if (vertical)
+    {
+      // Line should be vertical. Make sure the triangle is actually a right angle.
+      if (vshort->x == vlong->x)
+        std::swap(vshort, vcorner);
+      else if (vcorner->x != vlong->x)
+        return;
+
+      GL_INS_FMT("Vertical line from Y={} to {}", vcorner->y, vlong->y);
+    }
+    else if (horizontal)
+    {
+      // Line should be horizontal. Make sure the triangle is actually a right angle.
+      if (vshort->y == vlong->y)
+        std::swap(vshort, vcorner);
+      else if (vcorner->y != vlong->y)
+        return;
+
+      GL_INS_FMT("Horizontal line from X={} to {}", vcorner->x, vlong->x);
+    }
+    else
+    {
+      // Not a line-like triangle.
+      return;
+    }
+
+    // We could adjust the short texture coordinate to +1 from its original position, rather than leaving it the same.
+    // However, since the texture is unlikely to be a higher resolution than the one-wide triangle, there would be no
+    // benefit in doing so.
+  }
+  else
+  {
+    DebugAssert(m_line_detect_mode == GPULineDetectMode::AggressiveTriangles);
+
+    // Find direction of line based on horizontal position.
+    BatchVertex *va, *vb, *vc;
+    if (vertices[0].x == vertices[1].x)
+    {
+      va = &vertices[0];
+      vb = &vertices[1];
+      vc = &vertices[2];
+    }
+    else if (vertices[1].x == vertices[2].x)
+    {
+      va = &vertices[1];
+      vb = &vertices[2];
+      vc = &vertices[0];
+    }
+    else if (vertices[2].x == vertices[0].x)
+    {
+      va = &vertices[2];
+      vb = &vertices[0];
+      vc = &vertices[1];
+    }
+    else
+    {
+      return;
+    }
+
+    // Determine line direction. Vertical lines will have a width of 1, horizontal lines a height of 1.
+    vertical = (std::abs(va->x - vc->x) == 1.0f);
+    horizontal = (std::abs(va->y - vb->y) == 1.0f);
+    if (!vertical && !horizontal)
+      return;
+
+    // Determine which vertex is the right angle, based on the vertical position.
+    const BatchVertex* vcorner;
+    if (va->y == vc->y)
+      vcorner = va;
+    else if (vb->y == vc->y)
+      vcorner = vb;
+    else
+      return;
+
+    // Find short/long edge of the triangle.
+    BatchVertex* vother = ((vcorner == va) ? vb : va);
+    vshort = horizontal ? vother : vc;
+    vlong = vertical ? vother : vc;
+
+    // Dark Forces draws its gun sprite vertically, but rotated compared to the sprite date in VRAM.
+    // Therefore the difference in V should be ignored.
+    vshort->u = vcorner->u;
+    vshort->v = vcorner->v;
+
+    // We need to re-compute the UV limits, since we adjusted them above.
+    if (m_compute_uv_range)
+      ComputePolygonUVLimits(vertices[0].texpage, vertices, 3);
+
+    // This is super jank, but because we rewrote the UVs on one of the vertices above, we need to rewrite it to GPU
+    // memory again. Has to be all of them as well, not just vshort, because the UV limits may have changed.
+    DebugAssert(m_batch_vertex_count >= 3);
+    std::memcpy(m_batch_vertex_ptr - 3, vertices, sizeof(BatchVertex) * 3);
+  }
+
+  // Need to write the 4th vertex to the GPU.
+  DebugAssert(m_batch_vertex_space >= 1);
+  BatchVertex* last = &(*(m_batch_vertex_ptr++) = *vlong);
+  last->x = vertical ? vshort->x : vlong->x;
+  last->y = horizontal ? vshort->y : vlong->y;
+  m_batch_vertex_count++;
+  m_batch_vertex_space--;
+
+  // Generate indices for second triangle.
+  DebugAssert(m_batch_index_space >= 3);
+  *(m_batch_index_ptr++) = Truncate16(base_vertex + (vshort - vertices));
+  *(m_batch_index_ptr++) = Truncate16(base_vertex + (vlong - vertices));
+  *(m_batch_index_ptr++) = Truncate16(base_vertex + 3);
+  m_batch_index_count += 3;
+  m_batch_index_space -= 3;
+}
+
 void GPU_HW::ComputePolygonUVLimits(u32 texpage, BatchVertex* vertices, u32 num_vertices)
 {
   u32 min_u = vertices[0].u, max_u = vertices[0].u, min_v = vertices[0].v, max_v = vertices[0].v;
@@ -1511,7 +1692,7 @@ void GPU_HW::SetBatchDepthBuffer(bool enabled)
   if (m_batch.use_depth_buffer == enabled)
     return;
 
-  if (GetBatchVertexCount() > 0)
+  if (m_batch_index_count > 0)
   {
     FlushRender();
     EnsureVertexBufferSpaceForCurrentCommand();
@@ -1531,7 +1712,7 @@ void GPU_HW::CheckForDepthClear(const BatchVertex* vertices, u32 num_vertices)
 
   if ((average_z - m_last_depth_z) >= g_settings.gpu_pgxp_depth_clear_threshold)
   {
-    if (GetBatchVertexCount() > 0)
+    if (m_batch_index_count > 0)
     {
       FlushRender();
       EnsureVertexBufferSpaceForCurrentCommand();
@@ -1558,16 +1739,17 @@ u32 GPU_HW::GetAdaptiveDownsamplingMipLevels() const
 
 void GPU_HW::DrawLine(float x0, float y0, u32 col0, float x1, float y1, u32 col1, float depth)
 {
+  DebugAssert(m_batch_vertex_space >= 4 && m_batch_index_space >= 6);
+
   const float dx = x1 - x0;
   const float dy = y1 - y0;
-  std::array<BatchVertex, 4> output;
   if (dx == 0.0f && dy == 0.0f)
   {
     // Degenerate, render a point.
-    output[0].Set(x0, y0, depth, 1.0f, col0, 0, 0, 0);
-    output[1].Set(x0 + 1.0f, y0, depth, 1.0f, col0, 0, 0, 0);
-    output[2].Set(x1, y1 + 1.0f, depth, 1.0f, col0, 0, 0, 0);
-    output[3].Set(x1 + 1.0f, y1 + 1.0f, depth, 1.0f, col0, 0, 0, 0);
+    (m_batch_vertex_ptr++)->Set(x0, y0, depth, 1.0f, col0, 0, 0, 0);
+    (m_batch_vertex_ptr++)->Set(x0 + 1.0f, y0, depth, 1.0f, col0, 0, 0, 0);
+    (m_batch_vertex_ptr++)->Set(x1, y1 + 1.0f, depth, 1.0f, col0, 0, 0, 0);
+    (m_batch_vertex_ptr++)->Set(x1 + 1.0f, y1 + 1.0f, depth, 1.0f, col0, 0, 0, 0);
   }
   else
   {
@@ -1631,18 +1813,24 @@ void GPU_HW::DrawLine(float x0, float y0, u32 col0, float x1, float y1, u32 col1
     const float ox1 = x1 + pad_x1;
     const float oy1 = y1 + pad_y1;
 
-    output[0].Set(ox0, oy0, depth, 1.0f, col0, 0, 0, 0);
-    output[1].Set(ox0 + fill_dx, oy0 + fill_dy, depth, 1.0f, col0, 0, 0, 0);
-    output[2].Set(ox1, oy1, depth, 1.0f, col1, 0, 0, 0);
-    output[3].Set(ox1 + fill_dx, oy1 + fill_dy, depth, 1.0f, col1, 0, 0, 0);
+    (m_batch_vertex_ptr++)->Set(ox0, oy0, depth, 1.0f, col0, 0, 0, 0);
+    (m_batch_vertex_ptr++)->Set(ox0 + fill_dx, oy0 + fill_dy, depth, 1.0f, col0, 0, 0, 0);
+    (m_batch_vertex_ptr++)->Set(ox1, oy1, depth, 1.0f, col1, 0, 0, 0);
+    (m_batch_vertex_ptr++)->Set(ox1 + fill_dx, oy1 + fill_dy, depth, 1.0f, col1, 0, 0, 0);
   }
 
-  AddVertex(output[0]);
-  AddVertex(output[1]);
-  AddVertex(output[2]);
-  AddVertex(output[3]);
-  AddVertex(output[2]);
-  AddVertex(output[1]);
+  const u32 start_index = m_batch_vertex_count;
+  m_batch_vertex_count += 4;
+  m_batch_vertex_space -= 4;
+
+  *(m_batch_index_ptr++) = Truncate16(start_index + 0);
+  *(m_batch_index_ptr++) = Truncate16(start_index + 1);
+  *(m_batch_index_ptr++) = Truncate16(start_index + 2);
+  *(m_batch_index_ptr++) = Truncate16(start_index + 3);
+  *(m_batch_index_ptr++) = Truncate16(start_index + 2);
+  *(m_batch_index_ptr++) = Truncate16(start_index + 1);
+  m_batch_index_count += 6;
+  m_batch_index_space -= 6;
 }
 
 void GPU_HW::LoadVertices()
@@ -1658,8 +1846,6 @@ void GPU_HW::LoadVertices()
   {
     case GPUPrimitive::Polygon:
     {
-      DebugAssert(GetBatchVertexSpace() >= (rc.quad_polygon ? 6u : 3u));
-
       const u32 first_color = rc.color_for_first_vertex;
       const bool shaded = rc.shading_enable;
       const bool textured = rc.texture_enable;
@@ -1708,14 +1894,34 @@ void GPU_HW::LoadVertices()
         }
       }
 
-      if (rc.quad_polygon && m_resolution_scale > 1)
+      // Use PGXP to exclude primitives that are definitely 3D.
+      const bool is_3d = (vertices[0].w != vertices[1].w || vertices[0].w != vertices[2].w);
+      if (m_resolution_scale > 1 && !is_3d && rc.quad_polygon)
         HandleFlippedQuadTextureCoordinates(vertices.data());
 
       if (m_compute_uv_range && textured)
         ComputePolygonUVLimits(texpage, vertices.data(), num_vertices);
 
-      if (!IsDrawingAreaIsValid())
+      if (!IsDrawingAreaIsValid()) [[unlikely]]
         return;
+
+      const u32 start_index = m_batch_vertex_count;
+      if (rc.quad_polygon)
+      {
+        DebugAssert(m_batch_vertex_space >= 4);
+        std::memcpy(m_batch_vertex_ptr, vertices.data(), sizeof(BatchVertex) * 4);
+        m_batch_vertex_ptr += 4;
+        m_batch_vertex_count += 4;
+        m_batch_vertex_space -= 4;
+      }
+      else
+      {
+        DebugAssert(m_batch_vertex_space >= 3);
+        std::memcpy(m_batch_vertex_ptr, vertices.data(), sizeof(BatchVertex) * 3);
+        m_batch_vertex_ptr += 3;
+        m_batch_vertex_count += 3;
+        m_batch_vertex_space -= 3;
+      }
 
       // Cull polygons which are too large.
       const auto [min_x_12, max_x_12] = MinMax(native_vertex_positions[1][0], native_vertex_positions[2][0]);
@@ -1724,8 +1930,9 @@ void GPU_HW::LoadVertices()
       const s32 max_x = std::max(max_x_12, native_vertex_positions[0][0]);
       const s32 min_y = std::min(min_y_12, native_vertex_positions[0][1]);
       const s32 max_y = std::max(max_y_12, native_vertex_positions[0][1]);
+      const bool first_tri_culled = ((max_x - min_x) >= MAX_PRIMITIVE_WIDTH || (max_y - min_y) >= MAX_PRIMITIVE_HEIGHT);
 
-      if ((max_x - min_x) >= MAX_PRIMITIVE_WIDTH || (max_y - min_y) >= MAX_PRIMITIVE_HEIGHT)
+      if (first_tri_culled)
       {
         Log_DebugFmt("Culling too-large polygon: {},{} {},{} {},{}", native_vertex_positions[0][0],
                      native_vertex_positions[0][1], native_vertex_positions[1][0], native_vertex_positions[1][1],
@@ -1745,8 +1952,12 @@ void GPU_HW::LoadVertices()
                              native_vertex_positions[2][0], native_vertex_positions[2][1], rc.shading_enable,
                              rc.texture_enable, rc.transparency_enable);
 
-        std::memcpy(m_batch_current_vertex_ptr, vertices.data(), sizeof(BatchVertex) * 3);
-        m_batch_current_vertex_ptr += 3;
+        DebugAssert(m_batch_index_space >= 3);
+        *(m_batch_index_ptr++) = Truncate16(start_index);
+        *(m_batch_index_ptr++) = Truncate16(start_index + 1);
+        *(m_batch_index_ptr++) = Truncate16(start_index + 2);
+        m_batch_index_count += 3;
+        m_batch_index_space -= 3;
       }
 
       // quads
@@ -1779,10 +1990,19 @@ void GPU_HW::LoadVertices()
                                native_vertex_positions[3][0], native_vertex_positions[3][1], rc.shading_enable,
                                rc.texture_enable, rc.transparency_enable);
 
-          AddVertex(vertices[2]);
-          AddVertex(vertices[1]);
-          AddVertex(vertices[3]);
+          DebugAssert(m_batch_index_space >= 3);
+          *(m_batch_index_ptr++) = Truncate16(start_index + 2);
+          *(m_batch_index_ptr++) = Truncate16(start_index + 1);
+          *(m_batch_index_ptr++) = Truncate16(start_index + 3);
+          m_batch_index_count += 3;
+          m_batch_index_space -= 3;
         }
+      }
+      else
+      {
+        // Expand lines to triangles (Doom, Soul Blade, etc.)
+        if (m_line_detect_mode >= GPULineDetectMode::BasicTriangles && !is_3d && !first_tri_culled)
+          ExpandLineTriangles(vertices.data(), start_index);
       }
 
       if (m_sw_renderer)
@@ -1790,7 +2010,8 @@ void GPU_HW::LoadVertices()
         GPUBackendDrawPolygonCommand* cmd = m_sw_renderer->NewDrawPolygonCommand(num_vertices);
         FillDrawCommand(cmd, rc);
 
-        for (u32 i = 0; i < num_vertices; i++)
+        const u32 sw_num_vertices = rc.quad_polygon ? 4 : 3;
+        for (u32 i = 0; i < sw_num_vertices; i++)
         {
           GPUBackendDrawPolygonCommand::Vertex* vert = &cmd->vertices[i];
           vert->x = native_vertex_positions[i][0];
@@ -1845,12 +2066,13 @@ void GPU_HW::LoadVertices()
         break;
       }
 
-      if (!IsDrawingAreaIsValid())
+      if (!IsDrawingAreaIsValid()) [[unlikely]]
         return;
 
       // we can split the rectangle up into potentially 8 quads
       SetBatchDepthBuffer(false);
-      DebugAssert(GetBatchVertexSpace() >= MAX_VERTICES_FOR_RECTANGLE);
+      DebugAssert(m_batch_vertex_space >= MAX_VERTICES_FOR_RECTANGLE &&
+                  m_batch_index_space >= MAX_VERTICES_FOR_RECTANGLE);
 
       // Split the rectangle into multiple quads if it's greater than 256x256, as the texture page should repeat.
       u16 tex_top = orig_tex_top;
@@ -1872,13 +2094,26 @@ void GPU_HW::LoadVertices()
 
           CheckForTexPageOverlap(texpage, tex_left, tex_top, tex_right - 1, tex_bottom - 1);
 
-          AddNewVertex(quad_start_x, quad_start_y, depth, 1.0f, color, texpage, tex_left, tex_top, uv_limits);
-          AddNewVertex(quad_end_x, quad_start_y, depth, 1.0f, color, texpage, tex_right, tex_top, uv_limits);
-          AddNewVertex(quad_start_x, quad_end_y, depth, 1.0f, color, texpage, tex_left, tex_bottom, uv_limits);
+          const u32 base_vertex = m_batch_vertex_count;
+          (m_batch_vertex_ptr++)
+            ->Set(quad_start_x, quad_start_y, depth, 1.0f, color, texpage, tex_left, tex_top, uv_limits);
+          (m_batch_vertex_ptr++)
+            ->Set(quad_end_x, quad_start_y, depth, 1.0f, color, texpage, tex_right, tex_top, uv_limits);
+          (m_batch_vertex_ptr++)
+            ->Set(quad_start_x, quad_end_y, depth, 1.0f, color, texpage, tex_left, tex_bottom, uv_limits);
+          (m_batch_vertex_ptr++)
+            ->Set(quad_end_x, quad_end_y, depth, 1.0f, color, texpage, tex_right, tex_bottom, uv_limits);
+          m_batch_vertex_count += 4;
+          m_batch_vertex_space -= 4;
 
-          AddNewVertex(quad_start_x, quad_end_y, depth, 1.0f, color, texpage, tex_left, tex_bottom, uv_limits);
-          AddNewVertex(quad_end_x, quad_start_y, depth, 1.0f, color, texpage, tex_right, tex_top, uv_limits);
-          AddNewVertex(quad_end_x, quad_end_y, depth, 1.0f, color, texpage, tex_right, tex_bottom, uv_limits);
+          *(m_batch_index_ptr++) = Truncate16(base_vertex + 0);
+          *(m_batch_index_ptr++) = Truncate16(base_vertex + 1);
+          *(m_batch_index_ptr++) = Truncate16(base_vertex + 2);
+          *(m_batch_index_ptr++) = Truncate16(base_vertex + 2);
+          *(m_batch_index_ptr++) = Truncate16(base_vertex + 1);
+          *(m_batch_index_ptr++) = Truncate16(base_vertex + 3);
+          m_batch_index_count += 6;
+          m_batch_index_space -= 6;
 
           x_offset += quad_width;
           tex_left = 0;
@@ -1919,7 +2154,7 @@ void GPU_HW::LoadVertices()
 
       if (!rc.polyline)
       {
-        DebugAssert(GetBatchVertexSpace() >= 2);
+        DebugAssert(m_batch_vertex_space >= 4 && m_batch_index_space >= 6);
 
         u32 start_color, end_color;
         GPUVertexPosition start_pos, end_pos;
@@ -1937,7 +2172,7 @@ void GPU_HW::LoadVertices()
           end_pos.bits = FifoPop();
         }
 
-        if (!IsDrawingAreaIsValid())
+        if (!IsDrawingAreaIsValid()) [[unlikely]]
           return;
 
         s32 start_x = start_pos.x + m_drawing_offset.x;
@@ -1978,9 +2213,9 @@ void GPU_HW::LoadVertices()
       {
         // Multiply by two because we don't use line strips.
         const u32 num_vertices = GetPolyLineVertexCount();
-        DebugAssert(GetBatchVertexSpace() >= (num_vertices * 2));
+        DebugAssert(m_batch_vertex_space >= (num_vertices * 4) && m_batch_index_space >= (num_vertices * 6));
 
-        if (!IsDrawingAreaIsValid())
+        if (!IsDrawingAreaIsValid()) [[unlikely]]
           return;
 
         const bool shaded = rc.shading_enable;
@@ -2163,7 +2398,7 @@ ALWAYS_INLINE_RELEASE void GPU_HW::CheckForTexPageOverlap(u32 texpage, u32 min_u
 
     if (update_drawn || update_written)
     {
-      if (GetBatchVertexCount() > 0)
+      if (m_batch_index_count > 0)
       {
         FlushRender();
         EnsureVertexBufferSpaceForCurrentCommand();
@@ -2176,7 +2411,7 @@ ALWAYS_INLINE_RELEASE void GPU_HW::CheckForTexPageOverlap(u32 texpage, u32 min_u
 
 ALWAYS_INLINE bool GPU_HW::IsFlushed() const
 {
-  return m_batch_current_vertex_ptr == m_batch_start_vertex_ptr;
+  return (m_batch_index_count == 0);
 }
 
 GPU_HW::InterlacedRenderMode GPU_HW::GetInterlacedRenderMode() const
@@ -2210,44 +2445,44 @@ ALWAYS_INLINE_RELEASE bool GPU_HW::NeedsShaderBlending(GPUTransparencyMode trans
             (transparency != GPUTransparencyMode::Disabled || IsBlendedTextureFiltering(m_texture_filtering)))));
 }
 
-ALWAYS_INLINE u32 GPU_HW::GetBatchVertexSpace() const
+void GPU_HW::EnsureVertexBufferSpace(u32 required_vertices, u32 required_indices)
 {
-  return static_cast<u32>(m_batch_end_vertex_ptr - m_batch_current_vertex_ptr);
-}
-
-ALWAYS_INLINE u32 GPU_HW::GetBatchVertexCount() const
-{
-  return static_cast<u32>(m_batch_current_vertex_ptr - m_batch_start_vertex_ptr);
-}
-
-void GPU_HW::EnsureVertexBufferSpace(u32 required_vertices)
-{
-  if (m_batch_current_vertex_ptr)
+  if (m_batch_vertex_ptr)
   {
-    if (GetBatchVertexSpace() >= required_vertices)
+    if (m_batch_vertex_space >= required_vertices && m_batch_index_space >= required_indices)
       return;
 
     FlushRender();
   }
 
-  MapBatchVertexPointer(required_vertices);
+  MapGPUBuffer(required_vertices, required_indices);
 }
 
 void GPU_HW::EnsureVertexBufferSpaceForCurrentCommand()
 {
   u32 required_vertices;
+  u32 required_indices;
   switch (m_render_command.primitive)
   {
     case GPUPrimitive::Polygon:
-      required_vertices = m_render_command.quad_polygon ? 6 : 3;
+      required_vertices = 4; // assume quad, in case of expansion
+      required_indices = 6;
       break;
     case GPUPrimitive::Rectangle:
-      required_vertices = MAX_VERTICES_FOR_RECTANGLE;
+      required_vertices = MAX_VERTICES_FOR_RECTANGLE; // TODO: WRong
+      required_indices = MAX_VERTICES_FOR_RECTANGLE;
       break;
     case GPUPrimitive::Line:
+    {
+      // assume expansion
+      const u32 vert_count = m_render_command.polyline ? GetPolyLineVertexCount() : 2;
+      required_vertices = vert_count * 4;
+      required_indices = vert_count * 6;
+    }
+    break;
+
     default:
-      required_vertices = m_render_command.polyline ? (GetPolyLineVertexCount() * 6u) : 6u;
-      break;
+      UnreachableCode();
   }
 
   // can we fit these vertices in the current depth buffer range?
@@ -2255,16 +2490,11 @@ void GPU_HW::EnsureVertexBufferSpaceForCurrentCommand()
   {
     // implies FlushRender()
     ResetBatchVertexDepth();
-  }
-  else if (m_batch_current_vertex_ptr)
-  {
-    if (GetBatchVertexSpace() >= required_vertices)
-      return;
-
-    FlushRender();
+    MapGPUBuffer(required_vertices, required_indices);
+    return;
   }
 
-  MapBatchVertexPointer(required_vertices);
+  EnsureVertexBufferSpace(required_vertices, required_indices);
 }
 
 void GPU_HW::ResetBatchVertexDepth()
@@ -2291,8 +2521,6 @@ void GPU_HW::UpdateSoftwareRenderer(bool copy_vram_from_hw)
   if (current_enabled == new_enabled)
     return;
 
-  m_vram_ptr = m_vram_shadow.data();
-
   if (!new_enabled)
   {
     if (m_sw_renderer)
@@ -2310,7 +2538,6 @@ void GPU_HW::UpdateSoftwareRenderer(bool copy_vram_from_hw)
   {
     FlushRender();
     ReadVRAM(0, 0, VRAM_WIDTH, VRAM_HEIGHT);
-    std::memcpy(sw_renderer->GetVRAM(), m_vram_ptr, sizeof(u16) * VRAM_WIDTH * VRAM_HEIGHT);
 
     // Sync the drawing area.
     GPUBackendSetDrawingAreaCommand* cmd = sw_renderer->NewSetDrawingAreaCommand();
@@ -2319,7 +2546,6 @@ void GPU_HW::UpdateSoftwareRenderer(bool copy_vram_from_hw)
   }
 
   m_sw_renderer = std::move(sw_renderer);
-  m_vram_ptr = m_sw_renderer->GetVRAM();
 }
 
 void GPU_HW::FillBackendCommandParameters(GPUBackendCommand* cmd) const
@@ -2412,8 +2638,18 @@ void GPU_HW::ReadVRAM(u32 x, u32 y, u32 width, u32 height)
   }
 
   // Get bounds with wrap-around handled.
-  const Common::Rectangle<u32> copy_rect = GetVRAMTransferBounds(x, y, width, height);
-  const u32 encoded_width = (copy_rect.GetWidth() + 1) / 2;
+  Common::Rectangle<u32> copy_rect = GetVRAMTransferBounds(x, y, width, height);
+
+  // Has to be aligned to an even pixel for the download, due to 32-bit packing.
+  if (copy_rect.left & 1)
+    copy_rect.left--;
+  if (copy_rect.right & 1)
+    copy_rect.right++;
+
+  DebugAssert((copy_rect.left % 2) == 0 && (copy_rect.GetWidth() % 2) == 0);
+  const u32 encoded_left = copy_rect.left / 2;
+  const u32 encoded_top = copy_rect.top;
+  const u32 encoded_width = copy_rect.GetWidth() / 2;
   const u32 encoded_height = copy_rect.GetHeight();
 
   // Encode the 24-bit texture as 16-bit.
@@ -2428,9 +2664,22 @@ void GPU_HW::ReadVRAM(u32 x, u32 y, u32 width, u32 height)
   GL_POP();
 
   // Stage the readback and copy it into our shadow buffer.
-  g_gpu_device->DownloadTexture(m_vram_readback_texture.get(), 0, 0, encoded_width, encoded_height,
-                                reinterpret_cast<u32*>(&m_vram_shadow[copy_rect.top * VRAM_WIDTH + copy_rect.left]),
-                                VRAM_WIDTH * sizeof(u16));
+  if (m_vram_readback_download_texture->IsImported())
+  {
+    // Fast path, read directly.
+    m_vram_readback_download_texture->CopyFromTexture(encoded_left, encoded_top, m_vram_readback_texture.get(), 0, 0,
+                                                      encoded_width, encoded_height, 0, 0, false);
+    m_vram_readback_download_texture->Flush();
+  }
+  else
+  {
+    // Copy to staging buffer, then to VRAM.
+    m_vram_readback_download_texture->CopyFromTexture(0, 0, m_vram_readback_texture.get(), 0, 0, encoded_width,
+                                                      encoded_height, 0, 0, true);
+    m_vram_readback_download_texture->ReadTexels(0, 0, encoded_width, encoded_height,
+                                                 &g_vram[copy_rect.top * VRAM_WIDTH + copy_rect.left],
+                                                 VRAM_WIDTH * sizeof(u16));
+  }
 
   RestoreDeviceContext();
 }
@@ -2732,7 +2981,7 @@ void GPU_HW::DispatchRenderCommand()
 
   EnsureVertexBufferSpaceForCurrentCommand();
 
-  if (GetBatchVertexCount() == 0)
+  if (m_batch_index_count == 0)
   {
     // transparency mode change
     if (transparency_mode != GPUTransparencyMode::Disabled &&
@@ -2805,14 +3054,13 @@ void GPU_HW::DispatchRenderCommand()
 
 void GPU_HW::FlushRender()
 {
-  if (!m_batch_current_vertex_ptr)
+  if (m_batch_index_count == 0)
     return;
 
-  const u32 vertex_count = GetBatchVertexCount();
-  UnmapBatchVertexPointer(vertex_count);
-
-  if (vertex_count == 0)
-    return;
+  const u32 base_vertex = m_batch_base_vertex;
+  const u32 base_index = m_batch_base_index;
+  const u32 index_count = m_batch_index_count;
+  UnmapGPUBuffer(m_batch_vertex_count, m_batch_index_count);
 
 #ifdef _DEBUG
   GL_SCOPE_FMT("Hardware Draw {}", ++s_draw_number);
@@ -2833,19 +3081,19 @@ void GPU_HW::FlushRender()
   {
     if (NeedsTwoPassRendering())
     {
-      DrawBatchVertices(BatchRenderMode::OnlyOpaque, vertex_count, m_batch_base_vertex);
-      DrawBatchVertices(BatchRenderMode::OnlyTransparent, vertex_count, m_batch_base_vertex);
+      DrawBatchVertices(BatchRenderMode::OnlyOpaque, index_count, base_index, base_vertex);
+      DrawBatchVertices(BatchRenderMode::OnlyTransparent, index_count, base_index, base_vertex);
     }
     else
     {
-      DrawBatchVertices(m_batch.GetRenderMode(), vertex_count, m_batch_base_vertex);
+      DrawBatchVertices(m_batch.GetRenderMode(), index_count, base_index, base_vertex);
     }
   }
 
   if (m_wireframe_mode != GPUWireframeMode::Disabled)
   {
     g_gpu_device->SetPipeline(m_wireframe_pipeline.get());
-    g_gpu_device->Draw(vertex_count, m_batch_base_vertex);
+    g_gpu_device->DrawIndexed(index_count, base_index, base_vertex);
   }
 }
 

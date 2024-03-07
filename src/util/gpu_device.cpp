@@ -216,25 +216,32 @@ GPUDevice::~GPUDevice() = default;
 
 RenderAPI GPUDevice::GetPreferredAPI()
 {
+  static RenderAPI preferred_renderer = RenderAPI::None;
+  if (preferred_renderer == RenderAPI::None) [[unlikely]]
+  {
 #if defined(_WIN32) && !defined(_M_ARM64)
-  // Perfer DX11 on Windows, except ARM64, where QCom has slow DX11 drivers.
-  return RenderAPI::D3D12;
-#elif defined(_WIN32) && defined(_M_ARM64)
-  return RenderAPI::D3D12;
+    // Perfer DX11 on Windows, except ARM64, where QCom has slow DX11 drivers, or Xbox/UWP, where it's pretty much our only practical option
+    preferred_renderer = RenderAPI::D3D11;
+#elif defined(_WIN32) && defined(_M_ARM64) || defined(_UWP)
+    preferred_renderer = RenderAPI::D3D12;
 #elif defined(__APPLE__)
-  // Prefer Metal on MacOS.
-  return RenderAPI::Metal;
+    // Prefer Metal on MacOS.
+    preferred_renderer = RenderAPI::Metal;
 #elif defined(ENABLE_OPENGL) && defined(ENABLE_VULKAN)
-  // On Linux, if we have both GL and Vulkan, prefer VK if the driver isn't software.
-  return VulkanDevice::IsSuitableDefaultRenderer() ? RenderAPI::Vulkan : RenderAPI::OpenGL;
+    // On Linux, if we have both GL and Vulkan, prefer VK if the driver isn't software.
+    preferred_renderer = VulkanDevice::IsSuitableDefaultRenderer() ? RenderAPI::Vulkan : RenderAPI::OpenGL;
 #elif defined(ENABLE_OPENGL)
-  return RenderAPI::OpenGL;
+    preferred_renderer = RenderAPI::OpenGL;
 #elif defined(ENABLE_VULKAN)
-  return RenderAPI::Vulkan;
+    preferred_renderer = RenderAPI::Vulkan;
 #else
-  // Uhhh, what?
-  return RenderAPI::None;
+    // Uhhh, what?
+    Log_ErrorPrint("Somehow don't have any renderers available...");
+    preferred_renderer = RenderAPI::None;
 #endif
+  }
+
+  return preferred_renderer;
 }
 
 const char* GPUDevice::RenderAPIToString(RenderAPI api)
@@ -264,10 +271,11 @@ bool GPUDevice::IsSameRenderAPI(RenderAPI lhs, RenderAPI rhs)
 }
 
 bool GPUDevice::Create(const std::string_view& adapter, const std::string_view& shader_cache_path,
-                       u32 shader_cache_version, bool debug_device, bool vsync, bool threaded_presentation,
-                       std::optional<bool> exclusive_fullscreen_control, FeatureMask disabled_features, Error* error)
+                       u32 shader_cache_version, bool debug_device, DisplaySyncMode sync_mode,
+                       bool threaded_presentation, std::optional<bool> exclusive_fullscreen_control,
+                       FeatureMask disabled_features, Error* error)
 {
-  m_vsync_enabled = vsync;
+  m_sync_mode = sync_mode;
   m_debug_device = debug_device;
 
   if (!AcquireWindow(true))
@@ -575,6 +583,11 @@ void GPUDevice::RenderImGui()
       DrawIndexed(pcmd->ElemCount, base_index + pcmd->IdxOffset, base_vertex + pcmd->VtxOffset);
     }
   }
+}
+
+void GPUDevice::SetSyncMode(DisplaySyncMode mode)
+{
+  m_sync_mode = mode;
 }
 
 void GPUDevice::UploadVertexBuffer(const void* vertices, u32 vertex_size, u32 vertex_count, u32* base_vertex)
