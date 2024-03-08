@@ -151,7 +151,7 @@ void WinRTHost::SetXboxSettings(INISettingsInterface& si)
   si.SetStringValue("GPU", "Renderer", "D3D12");
 
   si.SetBoolValue("Main", "SyncToHostRefreshRate", true);
-  si.SetBoolValue("Display", "VSync", true);
+  si.SetBoolValue("Display", "SyncMode", "VSync");
   si.SetBoolValue("Display", "DisplayAllFrames", true);
   si.SetFloatValue("Display", "MaxFPS", 60.0f);
 
@@ -164,7 +164,7 @@ void WinRTHost::SetXboxSettings(INISettingsInterface& si)
   si.SetStringValue("Pad1", "Down",       "XInput-0/DPadDown");
   si.SetStringValue("Pad1", "Left",       "XInput-0/DPadLeft");
   si.SetStringValue("Pad1", "Right",      "XInput-0/DPadRight");
-  si.SetStringValue("Pad1", "Back", "XInput-0/Start");
+  si.SetStringValue("Pad1", "Select", "XInput-0/Back");
   si.SetStringValue("Pad1", "Start",      "XInput-0/Start");
   si.SetStringValue("Pad1", "Triangle",   "XInput-0/Y");
   si.SetStringValue("Pad1", "Cross",      "XInput-0/A");
@@ -184,7 +184,6 @@ void WinRTHost::SetXboxSettings(INISettingsInterface& si)
   si.SetStringValue("Pad1", "RRight",     "XInput-0/+RightX");
   si.SetStringValue("Pad1", "RDown",      "XInput-0/+RightY");
   si.SetStringValue("Pad1", "RUp",        "XInput-0/-RightY");
-  si.SetStringValue("Pad1", "Analog",     "XInput-0/Back & XInput-0/Start");
   si.SetStringValue("Pad1", "SmallMotor", "XInput-0/SmallMotor");
   si.SetStringValue("Pad1", "LargeMotor", "XInput-0/LargeMotor");
 
@@ -352,7 +351,7 @@ void WinRTHost::CPUThreadMainLoop()
       Host::PumpMessagesOnCPUThread();
       ::System::Internal::IdlePollUpdate();
       ::System::PresentDisplay(false);
-      if (!g_gpu_device->IsVsyncEnabled())
+      if (!g_gpu_device->IsVSyncActive()) // stenzek still hasn't updated this on his own NoGUI host. lmao?
         g_gpu_device->ThrottlePresentation();
     }
 }

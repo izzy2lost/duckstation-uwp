@@ -19,6 +19,8 @@ enum class DisplaySyncMode : u8
   Disabled,
   VSync,
   VSyncRelaxed,
+#ifndef _UWP
   VRR,
+#endif
   Count
 };

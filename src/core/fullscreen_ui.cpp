@@ -1371,7 +1371,7 @@ void FullscreenUI::DrawInputBindingButton(SettingsInterface* bsi, InputBindingIn
   {
     BeginInputBinding(bsi, type, section, name, display_name);
   }
-  else if (ImGui::IsItemClicked(ImGuiMouseButton_Right) || ImGui::IsKeyPressed(ImGuiKey_NavGamepadInput, false))
+  else if (ImGui::IsItemClicked(ImGuiMouseButton_Right) || ImGui::IsKeyPressed(ImGuiKey_NavGamepadMenu, false))
   {
     bsi->DeleteValue(section, name);
     SetSettingsChanged(bsi);
@@ -3889,7 +3889,8 @@ void FullscreenUI::DrawDisplaySettingsPage()
 
   DrawEnumSetting(
     bsi, FSUI_CSTR("VSync"),
-    FSUI_CSTR("Synchronizes presentation of the console's frames to the host. Enable for smoother animations."),
+    FSUI_CSTR("Synchronizes presentation of the console's frames to the host. Enable for smoother animations. "
+              "VRR is not present on UWP."),
     "Display", "SyncMode", Settings::DEFAULT_DISPLAY_SYNC_MODE, &Settings::ParseDisplaySyncMode,
     &Settings::GetDisplaySyncModeName, &Settings::GetDisplaySyncModeDisplayName, DisplaySyncMode::Count);
 
@@ -5435,7 +5436,7 @@ void FullscreenUI::DrawSaveStateSelector(bool is_loading)
         }
 
         if (hovered &&
-            (ImGui::IsItemClicked(ImGuiMouseButton_Right) || ImGui::IsKeyPressed(ImGuiKey_NavGamepadInput, false)))
+            (ImGui::IsItemClicked(ImGuiMouseButton_Right) || ImGui::IsKeyPressed(ImGuiKey_NavGamepadMenu, false)))
         {
           s_save_state_selector_submenu_index = static_cast<s32>(i);
         }
@@ -5844,7 +5845,7 @@ void FullscreenUI::DrawGameList(const ImVec2& heading_size)
         selected_entry = entry;
 
       if (selected_entry &&
-          (ImGui::IsItemClicked(ImGuiMouseButton_Right) || ImGui::IsKeyPressed(ImGuiKey_NavGamepadInput, false)))
+          (ImGui::IsItemClicked(ImGuiMouseButton_Right) || ImGui::IsKeyPressed(ImGuiKey_NavGamepadMenu, false)))
       {
         HandleGameListOptions(selected_entry);
       }
@@ -6062,7 +6063,7 @@ void FullscreenUI::DrawGameGrid(const ImVec2& heading_size)
         HandleGameListActivate(entry);
 
       if (hovered &&
-          (ImGui::IsItemClicked(ImGuiMouseButton_Right) || ImGui::IsKeyPressed(ImGuiKey_NavGamepadInput, false)))
+          (ImGui::IsItemClicked(ImGuiMouseButton_Right) || ImGui::IsKeyPressed(ImGuiKey_NavGamepadMenu, false)))
       {
         HandleGameListOptions(entry);
       }

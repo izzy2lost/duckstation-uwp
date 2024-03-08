@@ -486,18 +486,14 @@ struct Settings
   static constexpr DisplayCropMode DEFAULT_DISPLAY_CROP_MODE = DisplayCropMode::Overscan;
   static constexpr DisplayAspectRatio DEFAULT_DISPLAY_ASPECT_RATIO = DisplayAspectRatio::Auto;
   static constexpr DisplayAlignment DEFAULT_DISPLAY_ALIGNMENT = DisplayAlignment::Center;
-  static constexpr DisplayScalingMode DEFAULT_DISPLAY_SCALING = DisplayScalingMode::BilinearSmooth;
+  static constexpr DisplayScalingMode DEFAULT_DISPLAY_SCALING = DisplayScalingMode::Nearest;
   static constexpr DisplaySyncMode DEFAULT_DISPLAY_SYNC_MODE = DisplaySyncMode::Disabled;
   static constexpr DisplayExclusiveFullscreenControl DEFAULT_DISPLAY_EXCLUSIVE_FULLSCREEN_CONTROL =
     DisplayExclusiveFullscreenControl::Automatic;
-<<<<<<< HEAD
-  static constexpr float DEFAULT_OSD_SCALE = 200.0f;
-=======
   static constexpr DisplayScreenshotMode DEFAULT_DISPLAY_SCREENSHOT_MODE = DisplayScreenshotMode::ScreenResolution;
   static constexpr DisplayScreenshotFormat DEFAULT_DISPLAY_SCREENSHOT_FORMAT = DisplayScreenshotFormat::PNG;
   static constexpr u8 DEFAULT_DISPLAY_SCREENSHOT_QUALITY = 85;
-  static constexpr float DEFAULT_OSD_SCALE = 100.0f;
->>>>>>> upstream/master
+  static constexpr float DEFAULT_OSD_SCALE = 200.0f;
 
   static constexpr u8 DEFAULT_CDROM_READAHEAD_SECTORS = 8;
   static constexpr CDROMMechaconVersion DEFAULT_CDROM_MECHACON_VERSION = CDROMMechaconVersion::VC1A;
