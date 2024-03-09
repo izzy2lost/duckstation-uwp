@@ -294,8 +294,7 @@ bool GPU_HW::DoState(StateWrapper& sw, GPUTexture** host_texture, bool update_di
   // invalidate the whole VRAM read texture when loading state
   if (sw.IsReading())
   {
-    if (m_batch_vertex_ptr)
-      UnmapGPUBuffer(0, 0);
+    DebugAssert(!m_batch_vertex_ptr && !m_batch_index_ptr);
     SetFullVRAMDirtyRectangle();
     ResetBatchVertexDepth();
   }
@@ -712,6 +711,10 @@ void GPU_HW::ClearFramebuffer()
 void GPU_HW::DestroyBuffers()
 {
   ClearDisplayTexture();
+
+  DebugAssert((m_batch_vertex_ptr != nullptr) == (m_batch_index_ptr != nullptr));
+  if (m_batch_vertex_ptr)
+    UnmapGPUBuffer(0, 0);
 
   m_vram_upload_buffer.reset();
   m_vram_readback_download_texture.reset();
@@ -2488,7 +2491,7 @@ void GPU_HW::EnsureVertexBufferSpaceForCurrentCommand()
   // can we fit these vertices in the current depth buffer range?
   if ((m_current_depth + required_vertices) > MAX_BATCH_VERTEX_COUNTER_IDS)
   {
-    // implies FlushRender()
+    FlushRender();
     ResetBatchVertexDepth();
     MapGPUBuffer(required_vertices, required_indices);
     return;
@@ -2503,7 +2506,6 @@ void GPU_HW::ResetBatchVertexDepth()
     return;
 
   Log_PerfPrint("Resetting batch vertex depth");
-  FlushRender();
   UpdateDepthBufferFromMaskBit();
 
   m_current_depth = 1;
@@ -3054,13 +3056,14 @@ void GPU_HW::DispatchRenderCommand()
 
 void GPU_HW::FlushRender()
 {
-  if (m_batch_index_count == 0)
-    return;
-
   const u32 base_vertex = m_batch_base_vertex;
   const u32 base_index = m_batch_base_index;
   const u32 index_count = m_batch_index_count;
-  UnmapGPUBuffer(m_batch_vertex_count, m_batch_index_count);
+  DebugAssert((m_batch_vertex_ptr != nullptr) == (m_batch_index_ptr != nullptr));
+  if (m_batch_vertex_ptr)
+    UnmapGPUBuffer(m_batch_vertex_count, index_count);
+  if (index_count == 0)
+    return;
 
 #ifdef _DEBUG
   GL_SCOPE_FMT("Hardware Draw {}", ++s_draw_number);
