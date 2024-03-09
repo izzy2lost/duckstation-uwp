@@ -151,7 +151,7 @@ void WinRTHost::SetXboxSettings(INISettingsInterface& si)
   si.SetStringValue("GPU", "Renderer", "D3D12");
 
   si.SetBoolValue("Main", "SyncToHostRefreshRate", true);
-  si.SetBoolValue("Display", "SyncMode", "VSync");
+  si.SetStringValue("Display", "SyncMode", "VSync");
   si.SetBoolValue("Display", "DisplayAllFrames", true);
   si.SetFloatValue("Display", "MaxFPS", 60.0f);
 
@@ -855,6 +855,10 @@ END_HOTKEY_LIST()
 
 struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 {
+  std::thread m_cpu_thread;
+  winrt::hstring m_launchOnExit;
+  std::string m_bootPath;
+
   IFrameworkView CreateView() { return *this; }
 
   void Initialize(CoreApplicationView const& v)
@@ -888,7 +892,52 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
   void OnActivate(const winrt::Windows::ApplicationModel::Core::CoreApplicationView&,
                   const winrt::Windows::ApplicationModel::Activation::IActivatedEventArgs& args)
   {
-      // TODO: Bring this back for launchpass folks
+    std::stringstream filePath;
+
+    if (args.Kind() == Windows::ApplicationModel::Activation::ActivationKind::Protocol)
+    {
+      auto protocolActivatedEventArgs{args.as<Windows::ApplicationModel::Activation::ProtocolActivatedEventArgs>()};
+      auto query = protocolActivatedEventArgs.Uri().QueryParsed();
+
+      for (uint32_t i = 0; i < query.Size(); i++)
+      {
+        auto arg = query.GetAt(i);
+
+        // parse command line string
+        if (arg.Name() == winrt::hstring(L"cmd"))
+        {
+          std::string argVal = winrt::to_string(arg.Value());
+
+          // Strip the executable from the cmd argument
+          if (argVal.rfind("duckstation.exe", 0) == 0)
+          {
+            argVal = argVal.substr(16, argVal.length());
+          }
+
+          std::istringstream iss(argVal);
+          std::string s;
+
+          // Maintain slashes while reading the quotes
+          while (iss >> std::quoted(s, '"', (char)0))
+          {
+            filePath << s;
+          }
+        }
+        else if (arg.Name() == winrt::hstring(L"launchOnExit"))
+        {
+          // For if we want to return to a frontend
+          m_launchOnExit = arg.Value();
+        }
+      }
+    }
+
+    std::string gamePath = filePath.str();
+    if (!gamePath.empty() && gamePath != "")
+    {
+      SystemBootParameters params;
+      params.filename = gamePath;
+      Host::RunOnCPUThread([params = std::move(params)]() { ::System::BootSystem(std::move(params)); });
+    }
   }
 
   void Load(hstring const&) {}
@@ -929,7 +978,23 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
     }
 
     WinRTHost::CancelAsyncOp();
-    WinRTHost::StopCPUThread();
+
+	if (!m_launchOnExit.empty())
+    {
+      winrt::Windows::Foundation::Uri m_uri{m_launchOnExit};
+      auto asyncOperation = winrt::Windows::System::Launcher::LaunchUriAsync(m_uri);
+      asyncOperation.Completed([](winrt::Windows::Foundation::IAsyncOperation<bool> const& sender,
+                                  winrt::Windows::Foundation::AsyncStatus const asyncStatus) {
+        WinRTHost::StopCPUThread();
+        CoreApplication::Exit();
+        return;
+      });
+    }
+    else
+    {
+      WinRTHost::StopCPUThread();
+      CoreApplication::Exit();
+    }
 
     // Ensure log is flushed.
     Log::SetFileOutputParams(false, nullptr);

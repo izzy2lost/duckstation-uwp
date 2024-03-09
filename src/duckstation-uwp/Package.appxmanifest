@@ -45,6 +45,11 @@
         </uap:DefaultTile >
         <uap:SplashScreen Image="Assets\SplashScreen.png"  BackgroundColor="#2E2E2E"/>
       </uap:VisualElements>
+	  <Extensions>
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="duckstation"/>
+        </uap:Extension>
+      </Extensions>
     </Application>
   </Applications>
 

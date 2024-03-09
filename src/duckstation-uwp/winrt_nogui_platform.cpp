@@ -48,11 +48,9 @@ using namespace winrt::Windows::UI;
 using namespace winrt::Windows::UI::Core;
 using namespace winrt::Windows::UI::Composition;
 
-
 static winrt::Windows::UI::Core::CoreWindow s_corewind{nullptr};
 static std::deque<std::function<void()>> m_event_queue;
 static std::mutex m_event_mutex;
-
 
 namespace WinRTHost {
     static std::optional<WindowInfo> GetPlatformWindowInfo();
