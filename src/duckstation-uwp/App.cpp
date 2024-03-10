@@ -62,6 +62,8 @@ using namespace winrt::Windows::UI::Composition;
 static constexpr u32 SETTINGS_VERSION = 3;
 static constexpr auto CPU_THREAD_POLL_INTERVAL = std::chrono::milliseconds(8); // how often we'll poll controllers when paused
 
+std::unique_ptr<NoGUIPlatform> g_nogui_window;
+
 namespace WinRTHost {
 // this sucks. a necessary evil, i suppose...
 // why couldn't they have just stuck with fullscreen.h?
@@ -615,10 +617,12 @@ void Host::RequestResizeHostDisplay(s32 width, s32 height)
 
 void Host::OpenURL(const std::string_view& url)
 {
-  winrt::Windows::Foundation::Uri m_uri{winrt::to_hstring(url)};
-  auto asyncOperation = winrt::Windows::System::Launcher::LaunchUriAsync(m_uri);
-  asyncOperation.Completed([](winrt::Windows::Foundation::IAsyncOperation<bool> const& sender,
-                              winrt::Windows::Foundation::AsyncStatus const asyncStatus) { return; });
+    // opening links as of current is not really possible since LaunchUriAsync hates me.
+    // why? no idea! doesn't work even if i run it on the UI thread!
+    // or if I run it synchronously OR async! or do literally anything!
+    // WinRT is evil. I don't even care why it's broken anymore
+    // i figure it's better for it to do nothing than to crash with a general purpose exception that it
+    // doesn't explain, so we're back to a no-op. damn you microsoft and your awful awful async garbage
 }
 
 bool Host::CopyTextToClipboard(const std::string_view& text)

@@ -6360,23 +6360,6 @@ void FullscreenUI::DrawAchievementsLoginWindow()
 
   if (ImGui::BeginPopupModal("Achievements Login", &s_achievements_login_window_open, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize))
   {
-    ImGui::TextWrapped("RetroAchievements is unavailable in this release as it is currently non-functional and will be fixed in a later release.");
-    ImGui::NewLine();
-    ImGui::TextWrapped("There is currently no workaround; please do not ask for support with RetroAchievements in this release.");
-    ImGui::NewLine();
-    ImGui::TextWrapped("");
-    BeginMenuButtons();
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + LayoutScale(10.0f));
-    if (MenuButtonWithoutSummary(FSUI_CSTR("OK"), true, LAYOUT_MENU_BUTTON_HEIGHT_NO_SUMMARY, g_large_font,
-                                 ImVec2(0.5f, 0.0f)))
-    {
-      s_achievements_login_window_open = false;
-      ImGui::CloseCurrentPopup();
-    }
-    EndMenuButtons();
-
-    ImGui::EndPopup();
-    /* RetroAchievements are stubbed out here due to them not actually working properly
     ImGui::TextWrapped("Please enter your user name and password for retroachievements.org.");
     ImGui::NewLine();
     ImGui::TextWrapped("Your password will not be saved in DuckStation-UWP, an access token will be generated and used instead.");
@@ -6420,7 +6403,6 @@ void FullscreenUI::DrawAchievementsLoginWindow()
     EndMenuButtons();
 
     ImGui::EndPopup();
-    */
   }
 
   ImGui::PopFont();
