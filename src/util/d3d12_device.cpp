@@ -812,7 +812,7 @@ bool D3D12Device::CreateSwapChain()
   }
   
   u32 surface_width = static_cast<u32>(client_rc.right - client_rc.left);
-  u32 surface_height = static_cast<u32>(client_rc.right - client_rc.left);
+  u32 surface_height = static_cast<u32>(client_rc.bottom - client_rc.top);
 #else
   u32 surface_width = m_window_info.surface_width;
   u32 surface_height = m_window_info.surface_height;
