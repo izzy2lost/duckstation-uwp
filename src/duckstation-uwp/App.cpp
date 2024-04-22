@@ -45,7 +45,6 @@
 
 // Entrypoint into the emulator
 #include "duckstation-nogui/nogui_host.h"
-#include "winrt_nogui_platform.h"
 #include <util/imgui_fullscreen.h>
 
 Log_SetChannel(App);
@@ -62,8 +61,6 @@ using namespace winrt::Windows::UI::Composition;
 
 static constexpr u32 SETTINGS_VERSION = 3;
 static constexpr auto CPU_THREAD_POLL_INTERVAL = std::chrono::milliseconds(8); // how often we'll poll controllers when paused
-
-std::unique_ptr<NoGUIPlatform> g_nogui_window;
 
 namespace WinRTHost {
 // this sucks. a necessary evil, i suppose...

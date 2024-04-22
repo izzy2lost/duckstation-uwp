@@ -34,9 +34,5 @@ void PlatformDevicesChanged();
 bool GetSavedPlatformWindowGeometry(s32* x, s32* y, s32* width, s32* height);
 void SavePlatformWindowGeometry(s32 x, s32 y, s32 width, s32 height);
 
-// Helper to fire off main
-int XboxRun();
-void externalRun(std::string path);
-
 
 } // namespace NoGUIHost

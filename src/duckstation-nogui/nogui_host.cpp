@@ -875,8 +875,6 @@ std::unique_ptr<NoGUIPlatform> NoGUIHost::CreatePlatform()
 
 #if defined(_WIN32) && !defined(_UWP)
   ret = NoGUIPlatform::CreateWin32Platform();
-#elif defined(_UWP)
-  ret = NoGUIPlatform::CreateWinRTPlatform();
 #elif defined(__APPLE__)
   ret = NoGUIPlatform::CreateCocoaPlatform();
 #else
@@ -1435,8 +1433,7 @@ int main(int argc, char* argv[])
   return EXIT_SUCCESS;
 }
 
-#ifdef _WIN322
-
+#if defined(_WIN32) && !defined(_UWP)
 int wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nShowCmd)
 {
   std::vector<std::string> argc_strings;
@@ -1465,52 +1462,4 @@ int wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int
 
   return main(static_cast<int>(argc_pointers.size()), argc_pointers.data());
 }
-
 #endif
-
-int NoGUIHost::XboxRun()
-{
-  CrashHandler::Install();
-
-  g_nogui_window = NoGUIHost::CreatePlatform();
-  if (!g_nogui_window)
-    return EXIT_FAILURE;
-
-  // the rest of initialization happens on the CPU thread.
-  NoGUIHost::HookSignals();
-  NoGUIHost::StartCPUThread();
-
-  g_nogui_window->RunMessageLoop();
-
-  NoGUIHost::CancelAsyncOp();
-  NoGUIHost::StopCPUThread();
-
-  // Ensure log is flushed.
-  Log::SetFileOutputParams(false, nullptr);
-
-  s_base_settings_interface.reset();
-  g_nogui_window.reset();
-  return EXIT_SUCCESS;
-
-}
-
-// TODO: Cleaner way of firing things up?
-void NoGUIHost::externalRun(std::string path)
-{
-  s_uwpPath = path;
- 
-  std::vector<std::string> argc_strings;
-  argc_strings.reserve(1);
-
-  // CommandLineToArgvW() only adds the program path if the command line is empty?!
-  argc_strings.push_back(FileSystem::GetProgramPath());
-
-  std::vector<char*> argc_pointers;
-  argc_pointers.reserve(argc_strings.size());
-  for (std::string& arg : argc_strings)
-    argc_pointers.push_back(arg.data());
-
-
-  //main(argc_pointers.size(), argc_pointers.data());
-  XboxRun();
-}

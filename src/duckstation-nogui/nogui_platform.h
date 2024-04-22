@@ -49,9 +49,6 @@ public:
 #ifdef _WIN32 && !defined(_UWP)
   static std::unique_ptr<NoGUIPlatform> CreateWin32Platform();
 #endif
-#ifdef _UWP
-  static std::unique_ptr<NoGUIPlatform> CreateWinRTPlatform();
-#endif
 #ifdef __APPLE__
   static std::unique_ptr<NoGUIPlatform> CreateCocoaPlatform();
 #endif

@@ -479,7 +479,6 @@
     <ClInclude Include="pch.h" />
     <ClInclude Include="UWPUtils.h" />
     <ClInclude Include="win32_key_names.h" />
-    <ClInclude Include="winrt_nogui_platform.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="App.cpp" />
@@ -497,7 +496,6 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">Create</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="winrt_nogui_platform.cpp" />
   </ItemGroup>
   <Import Project="..\..\dep\msvc\vsprops\Base.props" />
   <Import Project="..\common\common.props" />
