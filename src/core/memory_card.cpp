@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2023 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "memory_card.h"
@@ -36,20 +36,6 @@ MemoryCard::~MemoryCard()
   SaveIfChanged(false);
 }
 
-std::string MemoryCard::SanitizeGameTitleForFileName(const std::string_view& name)
-{
-  std::string ret(name);
-
-  const u32 len = static_cast<u32>(ret.length());
-  for (u32 i = 0; i < len; i++)
-  {
-    if (ret[i] == '\\' || ret[i] == '/' || ret[i] == '?' || ret[i] == '*')
-      ret[i] = '_';
-  }
-
-  return ret;
-}
-
 TickCount MemoryCard::GetSaveDelayInTicks()
 {
   return System::GetTicksPerSecond() * SAVE_DELAY_IN_SECONDS;
@@ -77,6 +63,19 @@ bool MemoryCard::DoState(StateWrapper& sw)
   sw.Do(&m_changed);
 
   return !sw.HasError();
+}
+
+void MemoryCard::CopyState(const MemoryCard* src)
+{
+  DebugAssert(m_data == src->m_data);
+
+  m_state = src->m_state;
+  m_FLAG.bits = src->m_FLAG.bits;
+  m_address = src->m_address;
+  m_sector_offset = src->m_sector_offset;
+  m_checksum = src->m_checksum;
+  m_last_byte = src->m_last_byte;
+  m_changed = src->m_changed;
 }
 
 void MemoryCard::ResetTransferState()

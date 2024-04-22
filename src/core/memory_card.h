@@ -20,8 +20,6 @@ public:
 
   static constexpr u32 STATE_SIZE = 1 + 1 + 2 + 1 + 1 + 1 + MemoryCardImage::DATA_SIZE + 1;
 
-  static std::string SanitizeGameTitleForFileName(const std::string_view& name);
-
   static std::unique_ptr<MemoryCard> Create();
   static std::unique_ptr<MemoryCard> Open(std::string_view filename);
 
@@ -32,6 +30,7 @@ public:
 
   void Reset();
   bool DoState(StateWrapper& sw);
+  void CopyState(const MemoryCard* src);
 
   void ResetTransferState();
   bool Transfer(const u8 data_in, u8* data_out);

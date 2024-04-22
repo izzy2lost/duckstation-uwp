@@ -77,7 +77,7 @@ target_precompile_headers(util PRIVATE "pch.h")
 target_include_directories(util PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_include_directories(util PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(util PUBLIC common simpleini imgui)
-target_link_libraries(util PRIVATE libchdr JPEG::JPEG PNG::PNG ZLIB::ZLIB soundtouch xxhash Zstd::Zstd reshadefx)
+target_link_libraries(util PRIVATE libchdr JPEG::JPEG PNG::PNG WebP::libwebp ZLIB::ZLIB soundtouch xxhash Zstd::Zstd reshadefx)
 
 if(ENABLE_CUBEB)
   target_sources(util PRIVATE
@@ -189,7 +189,8 @@ if(ENABLE_VULKAN)
 endif()
 
 if(ENABLE_SDL2)
-  target_sources(util PRIVATE 
+  target_sources(util PRIVATE
+    sdl_audio_stream.cpp
     sdl_input_source.cpp
     sdl_input_source.h
   )

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "gpu_hw_shadergen.h"
@@ -25,7 +25,6 @@ void GPU_HW_ShaderGen::WriteCommonFunctions(std::stringstream& ss)
 
   ss << "CONSTANT uint RESOLUTION_SCALE = " << m_resolution_scale << "u;\n";
   ss << "CONSTANT uint2 VRAM_SIZE = uint2(" << VRAM_WIDTH << ", " << VRAM_HEIGHT << ") * RESOLUTION_SCALE;\n";
-  ss << "CONSTANT float2 RCP_VRAM_SIZE = float2(1.0, 1.0) / float2(VRAM_SIZE);\n";
   ss << "CONSTANT uint MULTISAMPLES = " << m_multisamples << "u;\n";
   ss << "CONSTANT bool PER_SAMPLE_SHADING = " << (m_per_sample_shading ? "true" : "false") << ";\n";
   ss << R"(
@@ -746,26 +745,27 @@ float4 SampleFromVRAM(uint4 texpage, float2 coords)
     uint2 vicoord = texpage.xy + (index_coord * uint2(RESOLUTION_SCALE, RESOLUTION_SCALE));
 
     // load colour/palette
-    float4 texel = SAMPLE_TEXTURE(samp0, float2(vicoord) * RCP_VRAM_SIZE);
+    float4 texel = LOAD_TEXTURE(samp0, int2(vicoord), 0);
     uint vram_value = RGBA8ToRGBA5551(texel);
 
     // apply palette
     #if PALETTE_4_BIT
       uint subpixel = icoord.x & 3u;
       uint palette_index = (vram_value >> (subpixel * 4u)) & 0x0Fu;
+      uint2 palette_icoord = uint2((texpage.z + palette_index) * RESOLUTION_SCALE, texpage.w);
     #elif PALETTE_8_BIT
+      // can only wrap in X direction for 8-bit, 4-bit will fit in texpage size.
       uint subpixel = icoord.x & 1u;
       uint palette_index = (vram_value >> (subpixel * 8u)) & 0xFFu;
+      uint2 palette_icoord = uint2(((texpage.z + palette_index) & 0x3FFu) * RESOLUTION_SCALE, texpage.w);
     #endif
 
-    // sample palette. can wrap in X direction
-    uint2 palette_icoord = uint2(((texpage.z + palette_index) & 0x3FFu) * RESOLUTION_SCALE, texpage.w);
-    return SAMPLE_TEXTURE(samp0, float2(palette_icoord) * RCP_VRAM_SIZE);
+    return LOAD_TEXTURE(samp0, int2(palette_icoord), 0);
   #else
     // Direct texturing. Render-to-texture effects. Use upscaled coordinates.
     uint2 icoord = ApplyUpscaledTextureWindow(FloatToIntegerCoords(coords));
     uint2 direct_icoord = texpage.xy + icoord;
-    return SAMPLE_TEXTURE(samp0, float2(direct_icoord) * RCP_VRAM_SIZE);
+    return LOAD_TEXTURE(samp0, int2(direct_icoord), 0);
   #endif
 }
 
@@ -1019,36 +1019,18 @@ float3 ApplyDebanding(float2 frag_coord)
   return ss.str();
 }
 
-std::string GPU_HW_ShaderGen::GenerateDisplayFragmentShader(bool depth_24bit,
-                                                            GPU_HW::InterlacedRenderMode interlace_mode,
-                                                            bool smooth_chroma)
+std::string GPU_HW_ShaderGen::GenerateVRAMExtractFragmentShader(bool depth_24bit)
 {
   std::stringstream ss;
   WriteHeader(ss);
   DefineMacro(ss, "DEPTH_24BIT", depth_24bit);
-  DefineMacro(ss, "INTERLACED", interlace_mode != GPU_HW::InterlacedRenderMode::None);
-  DefineMacro(ss, "INTERLEAVED", interlace_mode == GPU_HW::InterlacedRenderMode::InterleavedFields);
-  DefineMacro(ss, "SMOOTH_CHROMA", smooth_chroma);
+  DefineMacro(ss, "MULTISAMPLED", UsingMSAA());
 
   WriteCommonFunctions(ss);
-  DeclareUniformBuffer(ss, {"uint2 u_vram_offset", "uint u_crop_left", "uint u_field_offset"}, true);
+  DeclareUniformBuffer(ss, {"uint2 u_vram_offset", "uint u_skip_x", "uint u_line_skip"}, true);
   DeclareTexture(ss, "samp0", 0, UsingMSAA());
 
   ss << R"(
-float3 RGBToYUV(float3 rgb)
-{
-  return float3(dot(rgb.rgb, float3(0.299f, 0.587f, 0.114f)),
-                dot(rgb.rgb, float3(-0.14713f, -0.28886f, 0.436f)),
-                dot(rgb.rgb, float3(0.615f, -0.51499f, -0.10001f)));
-}
-
-float3 YUVToRGB(float3 yuv)
-{
-  return float3(dot(yuv, float3(1.0f, 0.0f, 1.13983f)),
-                dot(yuv, float3(1.0f, -0.39465f, -0.58060f)),
-                dot(yuv, float3(1.0f, 2.03211f, 0.0f)));
-}
-
 float4 LoadVRAM(int2 coords)
 {
 #if MULTISAMPLING
@@ -1079,61 +1061,15 @@ float3 SampleVRAM24(uint2 icoords)
   return float3(float(s1s0 & 0xFFu) / 255.0, float((s1s0 >> 8u) & 0xFFu) / 255.0,
                 float((s1s0 >> 16u) & 0xFFu) / 255.0);
 }
-
-float3 SampleVRAMAverage2x2(uint2 icoords)
-{
-  float3 value = SampleVRAM24(icoords);
-  value += SampleVRAM24(icoords + uint2(0, 1));
-  value += SampleVRAM24(icoords + uint2(1, 0));
-  value += SampleVRAM24(icoords + uint2(1, 1));
-  return value * 0.25;
-}
-
-float3 SampleVRAM24Smoothed(uint2 icoords)
-{
-  int2 base = int2(icoords) - 1;
-  uint2 low = uint2(max(base & ~1, int2(0, 0)));
-  uint2 high = low + 2u;
-  float2 coeff = vec2(base & 1) * 0.5 + 0.25;
-
-  float3 p = SampleVRAM24(icoords);
-  float3 p00 = SampleVRAMAverage2x2(low);
-  float3 p01 = SampleVRAMAverage2x2(uint2(low.x, high.y));
-  float3 p10 = SampleVRAMAverage2x2(uint2(high.x, low.y));
-  float3 p11 = SampleVRAMAverage2x2(high);
-
-  float3 s = lerp(lerp(p00, p10, coeff.x),
-                  lerp(p01, p11, coeff.x),
-                  coeff.y);
-
-  float y = RGBToYUV(p).x;
-  float2 uv = RGBToYUV(s).yz;
-  return YUVToRGB(float3(y, uv));
-}
 )";
 
   DeclareFragmentEntryPoint(ss, 0, 1, {}, true, 1);
   ss << R"(
 {
-  uint2 icoords = uint2(v_pos.xy) + uint2(u_crop_left, 0u);
-
-  #if INTERLACED
-    if ((icoords.y & 1u) != u_field_offset)
-      discard;
-
-    #if !INTERLEAVED
-      icoords.y /= 2u;
-    #else
-      icoords.y &= ~1u;
-    #endif
-  #endif
+  uint2 icoords = uint2(uint(v_pos.x) + u_skip_x, uint(v_pos.y) << u_line_skip);
 
   #if DEPTH_24BIT
-    #if SMOOTH_CHROMA
-      o_col0 = float4(SampleVRAM24Smoothed(icoords), 1.0);
-    #else
-      o_col0 = float4(SampleVRAM24(icoords), 1.0);
-    #endif
+    o_col0 = float4(SampleVRAM24(icoords), 1.0);
   #else
     o_col0 = float4(LoadVRAM(int2((icoords + u_vram_offset) % VRAM_SIZE)).rgb, 1.0);
   #endif

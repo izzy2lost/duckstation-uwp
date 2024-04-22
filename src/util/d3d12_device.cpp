@@ -927,7 +927,11 @@ bool D3D12Device::CreateSwapChainRTV()
 
   if (m_window_info.type == WindowInfo::Type::Win32)
   {
+#ifndef _UWP
     BOOL fullscreen = FALSE;
+#else
+    BOOL fullscreen = TRUE;
+#endif
     DXGI_SWAP_CHAIN_DESC desc;
     if (SUCCEEDED(m_swap_chain->GetFullscreenState(&fullscreen, nullptr)) && fullscreen &&
         SUCCEEDED(m_swap_chain->GetDesc(&desc)))

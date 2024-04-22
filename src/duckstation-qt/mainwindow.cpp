@@ -588,8 +588,7 @@ void MainWindow::onSystemDestroyed()
   // If we're closing or in batch mode, quit the whole application now.
   if (m_is_closing || QtHost::InBatchMode())
   {
-    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 1);
-    QCoreApplication::quit();
+    quit();
     return;
   }
 
@@ -699,6 +698,22 @@ std::string MainWindow::getDeviceDiscPath(const QString& title)
 
   ret = std::move(devices[selected_index].first);
   return ret;
+}
+
+void MainWindow::quit()
+{
+  // Make sure VM is gone. It really should be if we're here.
+  if (s_system_valid)
+  {
+    g_emu_thread->shutdownSystem(false);
+    while (s_system_valid)
+      QApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 1);
+  }
+
+  // Ensure subwindows are removed before quitting. That way the log window cancelling
+  // the close event won't cancel the quit process.
+  destroySubWindows();
+  QGuiApplication::quit();
 }
 
 void MainWindow::recreate()
@@ -841,12 +856,11 @@ void MainWindow::populateGameListContextMenu(const GameList::Entry* entry, QWidg
           break;
         case MemoryCardType::PerGameTitle:
         {
-          paths[i] = QString::fromStdString(
-            g_settings.GetGameMemoryCardPath(MemoryCard::SanitizeGameTitleForFileName(entry->title), i));
+          paths[i] = QString::fromStdString(g_settings.GetGameMemoryCardPath(Path::SanitizeFileName(entry->title), i));
           if (!entry->disc_set_name.empty() && g_settings.memory_card_use_playlist_title && !QFile::exists(paths[i]))
           {
-            paths[i] = QString::fromStdString(
-              g_settings.GetGameMemoryCardPath(MemoryCard::SanitizeGameTitleForFileName(entry->disc_set_name), i));
+            paths[i] =
+              QString::fromStdString(g_settings.GetGameMemoryCardPath(Path::SanitizeFileName(entry->disc_set_name), i));
           }
         }
         break;
@@ -854,8 +868,8 @@ void MainWindow::populateGameListContextMenu(const GameList::Entry* entry, QWidg
         case MemoryCardType::PerGameFileTitle:
         {
           const std::string display_name(FileSystem::GetDisplayNameFromPath(entry->path));
-          paths[i] = QString::fromStdString(g_settings.GetGameMemoryCardPath(
-            MemoryCard::SanitizeGameTitleForFileName(Path::GetFileTitle(display_name)), i));
+          paths[i] = QString::fromStdString(
+            g_settings.GetGameMemoryCardPath(Path::SanitizeFileName(Path::GetFileTitle(display_name)), i));
         }
         break;
         default:
@@ -1071,8 +1085,7 @@ void MainWindow::onCheatsActionTriggered()
 void MainWindow::onCheatsMenuAboutToShow()
 {
   m_ui.menuCheats->clear();
-  connect(m_ui.menuCheats->addAction(tr("Cheat Manager")), &QAction::triggered, this,
-          &MainWindow::onToolsCheatManagerTriggered);
+  connect(m_ui.menuCheats->addAction(tr("Cheat Manager")), &QAction::triggered, this, &MainWindow::openCheatManager);
   m_ui.menuCheats->addSeparator();
   populateCheatsMenu(m_ui.menuCheats);
 }
@@ -1790,7 +1803,6 @@ void MainWindow::updateEmulationActions(bool starting, bool running, bool cheevo
   m_ui.actionScreenshot->setDisabled(starting || !running);
   m_ui.menuChangeDisc->setDisabled(starting || !running);
   m_ui.menuCheats->setDisabled(starting || !running || cheevos_challenge_mode);
-  m_ui.actionCheatManager->setDisabled(starting || !running || cheevos_challenge_mode);
   m_ui.actionCPUDebugger->setDisabled(cheevos_challenge_mode);
   m_ui.actionDumpRAM->setDisabled(starting || !running || cheevos_challenge_mode);
   m_ui.actionDumpVRAM->setDisabled(starting || !running || cheevos_challenge_mode);
@@ -2083,7 +2095,6 @@ void MainWindow::connectSignals()
   connect(m_ui.actionCheckForUpdates, &QAction::triggered, this, &MainWindow::onCheckForUpdatesActionTriggered);
   connect(m_ui.actionMemory_Card_Editor, &QAction::triggered, this, &MainWindow::onToolsMemoryCardEditorTriggered);
   connect(m_ui.actionCoverDownloader, &QAction::triggered, this, &MainWindow::onToolsCoverDownloaderTriggered);
-  connect(m_ui.actionCheatManager, &QAction::triggered, this, &MainWindow::onToolsCheatManagerTriggered);
   connect(m_ui.actionCPUDebugger, &QAction::triggered, this, &MainWindow::openCPUDebugger);
   SettingWidgetBinder::BindWidgetToBoolSetting(nullptr, m_ui.actionEnableGDBServer, "Debug", "EnableGDBServer", false);
   connect(m_ui.actionOpenDataDirectory, &QAction::triggered, this, &MainWindow::onToolsOpenDataDirectoryTriggered);
@@ -2344,6 +2355,38 @@ void MainWindow::setStyleFromSettings()
     qApp->setPalette(darkPalette);
 
     qApp->setStyleSheet("QToolTip { color: #ffffff; background-color: #505a70; border: 1px solid white; }");
+  }
+  else if (theme == "darkruby")
+  {
+    qApp->setStyle(QStyleFactory::create("Fusion"));
+
+    const QColor gray(128, 128, 128);
+    const QColor slate(18, 18, 18);
+    const QColor rubyish(172, 21, 31);
+
+    QPalette darkPalette;
+    darkPalette.setColor(QPalette::Window, slate);
+    darkPalette.setColor(QPalette::WindowText, Qt::white);
+    darkPalette.setColor(QPalette::Base, slate.lighter());
+    darkPalette.setColor(QPalette::AlternateBase, slate.lighter());
+    darkPalette.setColor(QPalette::ToolTipBase, slate);
+    darkPalette.setColor(QPalette::ToolTipText, Qt::white);
+    darkPalette.setColor(QPalette::Text, Qt::white);
+    darkPalette.setColor(QPalette::Button, slate);
+    darkPalette.setColor(QPalette::ButtonText, Qt::white);
+    darkPalette.setColor(QPalette::Link, Qt::white);
+    darkPalette.setColor(QPalette::Highlight, rubyish);
+    darkPalette.setColor(QPalette::HighlightedText, Qt::white);
+
+    darkPalette.setColor(QPalette::Active, QPalette::Button, slate);
+    darkPalette.setColor(QPalette::Disabled, QPalette::ButtonText, gray);
+    darkPalette.setColor(QPalette::Disabled, QPalette::WindowText, gray);
+    darkPalette.setColor(QPalette::Disabled, QPalette::Text, gray);
+    darkPalette.setColor(QPalette::Disabled, QPalette::Light, slate.lighter());
+
+    qApp->setPalette(darkPalette);
+
+    qApp->setStyleSheet("QToolTip { color: #ffffff; background-color: #2a82da; border: 1px solid white; }");
   }
   else
   {
@@ -2707,7 +2750,7 @@ bool MainWindow::requestShutdown(bool allow_confirm /* = true */, bool allow_sav
   save_state &= allow_save_to_state;
 
   // Only confirm on UI thread because we need to display a msgbox.
-  if (!m_is_closing && allow_confirm && g_settings.confim_power_off)
+  if (!m_is_closing && allow_confirm && Host::GetBaseBoolSettingValue("Main", "ConfirmPowerOff", true))
   {
     SystemLock lock(pauseAndLockSystem());
 
@@ -2756,7 +2799,7 @@ void MainWindow::requestExit(bool allow_confirm /* = true */)
   if (s_system_valid)
     m_is_closing = true;
   else
-    QGuiApplication::quit();
+    quit();
 }
 
 void MainWindow::checkForSettingChanges()
@@ -2891,7 +2934,7 @@ void MainWindow::onToolsCoverDownloaderTriggered()
   dlg.exec();
 }
 
-void MainWindow::onToolsCheatManagerTriggered()
+void MainWindow::openCheatManager()
 {
   if (!m_cheat_manager_dialog)
     m_cheat_manager_dialog = new CheatManagerDialog(this);

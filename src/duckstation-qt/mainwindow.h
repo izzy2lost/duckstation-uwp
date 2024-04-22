@@ -87,6 +87,9 @@ public:
   /// Locks the system by pausing it, while a popup dialog is displayed.
   SystemLock pauseAndLockSystem();
 
+  /// Force quits the application.
+  void quit();
+
   /// Accessors for the status bar widgets, updated by the emulation thread.
   ALWAYS_INLINE QLabel* getStatusRendererWidget() const { return m_status_renderer_widget; }
   ALWAYS_INLINE QLabel* getStatusResolutionWidget() const { return m_status_resolution_widget; }
@@ -164,7 +167,6 @@ private Q_SLOTS:
   void onCheckForUpdatesActionTriggered();
   void onToolsMemoryCardEditorTriggered();
   void onToolsCoverDownloaderTriggered();
-  void onToolsCheatManagerTriggered();
   void onToolsOpenDataDirectoryTriggered();
   void onSettingsTriggeredFromToolbar();
 
@@ -176,6 +178,7 @@ private Q_SLOTS:
 
   void onUpdateCheckComplete();
 
+  void openCheatManager();
   void openCPUDebugger();
   void onCPUDebuggerClosed();
 

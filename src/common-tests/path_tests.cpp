@@ -243,6 +243,16 @@ TEST(Path, SanitizeFileName)
   ASSERT_EQ(Path::SanitizeFileName("foo/bar", false), "foo/bar");
 }
 
+TEST(Path, RemoveLengthLimits)
+{
+#ifdef _WIN32
+  ASSERT_EQ(Path::RemoveLengthLimits("C:\\foo"), "\\\\?\\C:\\foo");
+  ASSERT_EQ(Path::RemoveLengthLimits("\\\\foo\\bar\\baz"), "\\\\?\\UNC\\foo\\bar\\baz");
+#else
+  ASSERT_EQ(Path::RemoveLengthLimits("/foo/bar/baz"), "/foo/bar/baz");
+#endif
+}
+
 #if 0
 
 // Relies on presence of files.
@@ -256,3 +266,13 @@ TEST(Path, RealPath)
 }
 
 #endif
+
+TEST(Path, CreateFileURL)
+{
+#ifdef _WIN32
+  ASSERT_EQ(Path::CreateFileURL("C:\\foo\\bar"), "file:///C:/foo/bar");
+  ASSERT_EQ(Path::CreateFileURL("\\\\server\\share\\file.txt"), "file://server/share/file.txt");
+#else
+  ASSERT_EQ(Path::CreateFileURL("/foo/bar"), "file:///foo/bar");
+#endif
+}

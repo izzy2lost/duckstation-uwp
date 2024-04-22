@@ -2437,7 +2437,7 @@ void FullscreenUI::DoCopyGameSettings()
 
   Settings temp_settings;
   temp_settings.Load(*GetEditingSettingsInterface(false));
-  temp_settings.Save(*s_game_settings_interface);
+  temp_settings.Save(*s_game_settings_interface, true);
   SetSettingsChanged(s_game_settings_interface.get());
 
   ShowToast("Game Settings Copied", fmt::format(FSUI_FSTR("Game settings initialized with global settings for '{}'."),
@@ -2972,7 +2972,7 @@ void FullscreenUI::DrawConsoleSettingsPage()
   DrawIntRangeSetting(
     bsi, FSUI_ICONSTR(ICON_FA_FAST_FORWARD, "Readahead Sectors"),
     FSUI_CSTR("Reduces hitches in emulation by reading/decompressing CD data asynchronously on a worker thread."),
-    "CDROM", "ReadaheadSectors", Settings::DEFAULT_CDROM_READAHEAD_SECTORS, 0, 32, "%d sectors");
+    "CDROM", "ReadaheadSectors", Settings::DEFAULT_CDROM_READAHEAD_SECTORS, 0, 32, FSUI_CSTR("%d sectors"));
 
   DrawToggleSetting(
     bsi, FSUI_ICONSTR(ICON_FA_DOWNLOAD, "Preload Images to RAM"),
@@ -3050,11 +3050,11 @@ void FullscreenUI::DrawEmulationSettingsPage()
   DrawFloatRangeSetting(
     bsi, FSUI_CSTR("Rewind Save Frequency"),
     FSUI_CSTR("How often a rewind state will be created. Higher frequencies have greater system requirements."), "Main",
-    "RewindFrequency", 10.0f, 0.0f, 3600.0f, "%.2f Seconds");
+    "RewindFrequency", 10.0f, 0.0f, 3600.0f, FSUI_CSTR("%.2f Seconds"));
   DrawIntRangeSetting(
     bsi, FSUI_CSTR("Rewind Save Slots"),
     FSUI_CSTR("How many saves will be kept for rewinding. Higher values have greater memory requirements."), "Main",
-    "RewindSaveSlots", 10, 1, 10000, "%d Frames");
+    "RewindSaveSlots", 10, 1, 10000, FSUI_CSTR("%d Frames"));
 
   const s32 runahead_frames = GetEffectiveIntSetting(bsi, "Main", "RunaheadFrameCount", 0);
   const bool runahead_enabled = (runahead_frames > 0);
@@ -3956,6 +3956,14 @@ void FullscreenUI::DrawDisplaySettingsPage()
                   "AspectRatio", Settings::DEFAULT_DISPLAY_ASPECT_RATIO, &Settings::ParseDisplayAspectRatio,
                   &Settings::GetDisplayAspectRatioName, &Settings::GetDisplayAspectRatioDisplayName,
                   DisplayAspectRatio::Count);
+
+  DrawEnumSetting(
+    bsi, FSUI_CSTR("Deinterlacing Mode"),
+    FSUI_CSTR(
+      "Determines which algorithm is used to convert interlaced frames to progressive for display on your system."),
+    "Display", "DeinterlacingMode", Settings::DEFAULT_DISPLAY_DEINTERLACING_MODE,
+    &Settings::ParseDisplayDeinterlacingMode, &Settings::GetDisplayDeinterlacingModeName,
+    &Settings::GetDisplayDeinterlacingModeDisplayName, DisplayDeinterlacingMode::Count);
 
   DrawEnumSetting(bsi, FSUI_CSTR("Crop Mode"),
                   FSUI_CSTR("Determines how much of the area typically not visible on a consumer TV set to crop/hide."),
@@ -6596,6 +6604,9 @@ void FullscreenUI::OpenAchievementsLoginWindow()
 
 #if 0
 // TRANSLATION-STRING-AREA-BEGIN
+TRANSLATE_NOOP("FullscreenUI", "%.2f Seconds");
+TRANSLATE_NOOP("FullscreenUI", "%d Frames");
+TRANSLATE_NOOP("FullscreenUI", "%d sectors");
 TRANSLATE_NOOP("FullscreenUI", "-");
 TRANSLATE_NOOP("FullscreenUI", "1 Frame");
 TRANSLATE_NOOP("FullscreenUI", "10 Frames");
@@ -6766,6 +6777,7 @@ TRANSLATE_NOOP("FullscreenUI", "Default Boot");
 TRANSLATE_NOOP("FullscreenUI", "Default View");
 TRANSLATE_NOOP("FullscreenUI", "Default: Disabled");
 TRANSLATE_NOOP("FullscreenUI", "Default: Enabled");
+TRANSLATE_NOOP("FullscreenUI", "Deinterlacing Mode");
 TRANSLATE_NOOP("FullscreenUI", "Delete Save");
 TRANSLATE_NOOP("FullscreenUI", "Delete State");
 TRANSLATE_NOOP("FullscreenUI", "Depth Buffer");
@@ -6784,6 +6796,7 @@ TRANSLATE_NOOP("FullscreenUI", "Determines the format that screenshots will be s
 TRANSLATE_NOOP("FullscreenUI", "Determines the position on the screen when black borders must be added.");
 TRANSLATE_NOOP("FullscreenUI", "Determines the size of screenshots created by DuckStation.");
 TRANSLATE_NOOP("FullscreenUI", "Determines whether a prompt will be displayed to confirm shutting down the emulator/game when the hotkey is pressed.");
+TRANSLATE_NOOP("FullscreenUI", "Determines which algorithm is used to convert interlaced frames to progressive for display on your system.");
 TRANSLATE_NOOP("FullscreenUI", "Device Settings");
 TRANSLATE_NOOP("FullscreenUI", "Disable All Enhancements");
 TRANSLATE_NOOP("FullscreenUI", "Disable Interlacing");

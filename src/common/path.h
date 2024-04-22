@@ -28,6 +28,10 @@ void Canonicalize(std::string* path);
 std::string SanitizeFileName(const std::string_view& str, bool strip_slashes = true);
 void SanitizeFileName(std::string* str, bool strip_slashes = true);
 
+/// Mutates the path to remove any MAX_PATH limits (for Windows).
+std::string RemoveLengthLimits(std::string_view str);
+void RemoveLengthLimits(std::string* path);
+
 /// Returns true if the specified path is an absolute path (C:\Path on Windows or /path on Unix).
 bool IsAbsolute(const std::string_view& path);
 
@@ -71,4 +75,13 @@ std::string JoinWindowsPath(const std::vector<std::string_view>& components);
 /// Splits a path into its components, only handling native separators.
 std::vector<std::string_view> SplitNativePath(const std::string_view& path);
 std::string JoinNativePath(const std::vector<std::string_view>& components);
+
+/// URL encodes the specified string.
+std::string URLEncode(std::string_view str);
+
+/// Decodes the specified escaped string.
+std::string URLDecode(std::string_view str);
+
+/// Returns a URL for a given path. The path should be absolute.
+std::string CreateFileURL(std::string_view path);
 } // namespace Path

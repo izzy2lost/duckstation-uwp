@@ -239,7 +239,7 @@ static time_t s_discord_presence_time_epoch;
 
 static TinyString GetTimestampStringForFileName()
 {
-  return TinyString::from_format("{:%Y-%m-%d_%H-%M-%S}", fmt::localtime(std::time(nullptr)));
+  return TinyString::from_format("{:%Y-%m-%d-%H-%M-%S}", fmt::localtime(std::time(nullptr)));
 }
 
 bool System::Internal::ProcessStartup()
@@ -900,7 +900,10 @@ bool System::RecreateGPU(GPURenderer renderer, bool force_recreate_device, bool 
   // create new renderer
   g_gpu.reset();
   if (force_recreate_device)
+  {
+    PostProcessing::Shutdown();
     Host::ReleaseGPUDevice();
+  }
 
   if (!CreateGPU(renderer, true))
   {
@@ -975,7 +978,7 @@ void System::SetDefaultSettings(SettingsInterface& si)
   for (u32 i = 0; i < NUM_CONTROLLER_AND_CARD_PORTS; i++)
     temp.controller_types[i] = g_settings.controller_types[i];
 
-  temp.Save(si);
+  temp.Save(si, false);
 }
 
 void System::ApplySettings(bool display_osd_messages)
@@ -1622,8 +1625,6 @@ bool System::Initialize(bool force_software_renderer)
   }
 
   DMA::Initialize();
-  InterruptController::Initialize();
-
   CDROM::Initialize();
   Pad::Initialize();
   Timers::Initialize();
@@ -1675,7 +1676,6 @@ void System::DestroySystem()
   Pad::Shutdown();
   CDROM::Shutdown();
   g_gpu.reset();
-  InterruptController::Shutdown();
   DMA::Shutdown();
   CPU::PGXP::Shutdown();
   CPU::CodeCache::Shutdown();
@@ -2045,6 +2045,7 @@ bool System::CreateGPU(GPURenderer renderer, bool is_switching)
       Log_ErrorPrintf("Failed to create fallback software renderer.");
       if (!s_keep_gpu_device_on_shutdown)
       {
+        PostProcessing::Shutdown();
         Host::ReleaseGPUDevice();
         Host::ReleaseRenderWindow();
       }
@@ -3067,21 +3068,18 @@ std::unique_ptr<MemoryCard> System::GetMemoryCardForSlot(u32 slot, MemoryCardTyp
         // Playlist - use title if different.
         if (HasMediaSubImages() && s_running_game_entry && s_running_game_title != s_running_game_entry->title)
         {
-          card_path =
-            g_settings.GetGameMemoryCardPath(MemoryCard::SanitizeGameTitleForFileName(s_running_game_title), slot);
+          card_path = g_settings.GetGameMemoryCardPath(Path::SanitizeFileName(s_running_game_title), slot);
         }
         // Multi-disc game - use disc set name.
         else if (s_running_game_entry && !s_running_game_entry->disc_set_name.empty())
         {
-          card_path = g_settings.GetGameMemoryCardPath(
-            MemoryCard::SanitizeGameTitleForFileName(s_running_game_entry->disc_set_name), slot);
+          card_path =
+            g_settings.GetGameMemoryCardPath(Path::SanitizeFileName(s_running_game_entry->disc_set_name), slot);
         }
 
         // But prefer a disc-specific card if one already exists.
-        std::string disc_card_path =
-          g_settings.GetGameMemoryCardPath(MemoryCard::SanitizeGameTitleForFileName(
-                                             s_running_game_entry ? s_running_game_entry->title : s_running_game_title),
-                                           slot);
+        std::string disc_card_path = g_settings.GetGameMemoryCardPath(
+          Path::SanitizeFileName(s_running_game_entry ? s_running_game_entry->title : s_running_game_title), slot);
         if (disc_card_path != card_path)
         {
           if (card_path.empty() || !g_settings.memory_card_use_playlist_title ||
@@ -3121,8 +3119,7 @@ std::unique_ptr<MemoryCard> System::GetMemoryCardForSlot(u32 slot, MemoryCardTyp
       else
       {
         Host::RemoveKeyedOSDMessage(std::move(message_key));
-        return MemoryCard::Open(
-          g_settings.GetGameMemoryCardPath(MemoryCard::SanitizeGameTitleForFileName(file_title).c_str(), slot));
+        return MemoryCard::Open(g_settings.GetGameMemoryCardPath(Path::SanitizeFileName(file_title).c_str(), slot));
       }
     }
 
@@ -3363,7 +3360,8 @@ void System::UpdateRunningGame(const char* path, CDImage* image, bool booting)
       // TODO: We could pull the title from the PSF.
       s_running_game_title = Path::GetFileTitle(path);
     }
-    else if (image)
+    // Check for an audio CD. Those shouldn't set any title.
+    else if (image && image->GetTrack(1).mode != CDImage::TrackMode::Audio)
     {
       std::string id;
       GetGameDetailsFromImage(image, &id, &s_running_game_hash);
@@ -3684,6 +3682,7 @@ void System::CheckForSettingsChanges(const Settings& old_settings)
         g_settings.gpu_downsample_mode != old_settings.gpu_downsample_mode ||
         g_settings.gpu_downsample_scale != old_settings.gpu_downsample_scale ||
         g_settings.gpu_wireframe_mode != old_settings.gpu_wireframe_mode ||
+        g_settings.display_deinterlacing_mode != old_settings.display_deinterlacing_mode ||
         g_settings.display_crop_mode != old_settings.display_crop_mode ||
         g_settings.display_aspect_ratio != old_settings.display_aspect_ratio ||
         g_settings.display_alignment != old_settings.display_alignment ||
@@ -4348,36 +4347,29 @@ bool System::SaveScreenshot(const char* filename, DisplayScreenshotMode mode, Di
   std::string auto_filename;
   if (!filename)
   {
-    const auto& code = System::GetGameSerial();
+    const std::string& name = System::GetGameTitle();
     const char* extension = Settings::GetDisplayScreenshotFormatExtension(format);
-    if (code.empty())
-    {
-      auto_filename =
-        Path::Combine(EmuFolders::Screenshots, fmt::format("{}.{}", GetTimestampStringForFileName(), extension));
-    }
+    std::string basename;
+    if (name.empty())
+      basename = fmt::format("{}", GetTimestampStringForFileName());
     else
+      basename = fmt::format("{} {}", name, GetTimestampStringForFileName());
+
+    auto_filename = fmt::format("{}" FS_OSPATH_SEPARATOR_STR "{}.{}", EmuFolders::Screenshots, basename, extension);
+
+    // handle quick screenshots to the same filename
+    u32 next_suffix = 1;
+    while (FileSystem::FileExists(Path::RemoveLengthLimits(auto_filename).c_str()))
     {
-      auto_filename = Path::Combine(EmuFolders::Screenshots,
-                                    fmt::format("{}_{}.{}", code, GetTimestampStringForFileName(), extension));
+      auto_filename = fmt::format("{}" FS_OSPATH_SEPARATOR_STR "{} ({}).{}", EmuFolders::Screenshots, basename,
+                                  next_suffix, extension);
+      next_suffix++;
     }
 
     filename = auto_filename.c_str();
   }
 
-  if (FileSystem::FileExists(filename))
-  {
-    Host::AddFormattedOSDMessage(10.0f, TRANSLATE("OSDMessage", "Screenshot file '%s' already exists."), filename);
-    return false;
-  }
-
-  if (!g_gpu->RenderScreenshotToFile(filename, mode, quality, compress_on_thread))
-  {
-    Host::AddFormattedOSDMessage(10.0f, TRANSLATE("OSDMessage", "Failed to save screenshot to '%s'"), filename);
-    return false;
-  }
-
-  Host::AddFormattedOSDMessage(5.0f, TRANSLATE("OSDMessage", "Screenshot saved to '%s'."), filename);
-  return true;
+  return g_gpu->RenderScreenshotToFile(filename, mode, quality, compress_on_thread, true);
 }
 
 std::string System::GetGameSaveStateFileName(const std::string_view& serial, s32 slot)

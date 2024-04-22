@@ -129,6 +129,7 @@ struct Settings
   bool gpu_pgxp_cpu : 1 = false;
   bool gpu_pgxp_preserve_proj_fp : 1 = false;
   bool gpu_pgxp_depth_buffer : 1 = false;
+  DisplayDeinterlacingMode display_deinterlacing_mode = DEFAULT_DISPLAY_DEINTERLACING_MODE;
   DisplayCropMode display_crop_mode = DEFAULT_DISPLAY_CROP_MODE;
   DisplayAspectRatio display_aspect_ratio = DEFAULT_DISPLAY_ASPECT_RATIO;
   DisplayAlignment display_alignment = DEFAULT_DISPLAY_ALIGNMENT;
@@ -159,7 +160,11 @@ struct Settings
   bool display_show_enhancements : 1 = false;
   bool display_all_frames : 1 = false;
   bool display_stretch_vertically : 1 = false;
+#ifndef _UWP
+  float display_osd_scale = 100.0f;
+#else
   float display_osd_scale = 200.0f;
+#endif
   float display_max_fps = DEFAULT_DISPLAY_MAX_FPS;
   float gpu_pgxp_tolerance = -1.0f;
   float gpu_pgxp_depth_clear_threshold = DEFAULT_GPU_PGXP_DEPTH_THRESHOLD / GPU_PGXP_DEPTH_THRESHOLD_SCALE;
@@ -340,7 +345,8 @@ struct Settings
   };
 
   void Load(SettingsInterface& si);
-  void Save(SettingsInterface& si) const;
+  void Save(SettingsInterface& si, bool ignore_base) const;
+  static void Clear(SettingsInterface& si);
 
   void FixIncompatibleSettings(bool display_osd_messages);
 
@@ -393,6 +399,10 @@ struct Settings
   static std::optional<GPUWireframeMode> ParseGPUWireframeMode(const char* str);
   static const char* GetGPUWireframeModeName(GPUWireframeMode mode);
   static const char* GetGPUWireframeModeDisplayName(GPUWireframeMode mode);
+
+  static std::optional<DisplayDeinterlacingMode> ParseDisplayDeinterlacingMode(const char* str);
+  static const char* GetDisplayDeinterlacingModeName(DisplayDeinterlacingMode mode);
+  static const char* GetDisplayDeinterlacingModeDisplayName(DisplayDeinterlacingMode mode);
 
   static std::optional<DisplayCropMode> ParseDisplayCropMode(const char* str);
   static const char* GetDisplayCropModeName(DisplayCropMode crop_mode);
@@ -479,10 +489,13 @@ struct Settings
   static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::XAudio2;
 #elif defined(__ANDROID__)
   static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::AAudio;
+#elif defined(ENABLE_SDL2)
+  static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::SDL;
 #else
   static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::Null;
 #endif
 
+  static constexpr DisplayDeinterlacingMode DEFAULT_DISPLAY_DEINTERLACING_MODE = DisplayDeinterlacingMode::Adaptive;
   static constexpr DisplayCropMode DEFAULT_DISPLAY_CROP_MODE = DisplayCropMode::Overscan;
   static constexpr DisplayAspectRatio DEFAULT_DISPLAY_ASPECT_RATIO = DisplayAspectRatio::Auto;
   static constexpr DisplayAlignment DEFAULT_DISPLAY_ALIGNMENT = DisplayAlignment::Center;

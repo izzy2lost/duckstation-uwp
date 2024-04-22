@@ -12,6 +12,7 @@
 #include <winrt/Windows.Graphics.Display.Core.h>
 #include <winrt/Windows.Gaming.Input.h>
 #include <winrt/Windows.System.h>
+#include <gamingdeviceinformation.h>
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -37,6 +38,7 @@
 #include "IconsPromptFont.h"
 #include "UWPUtils.h"
 
+#include <deque>
 #include <thread>
 #include <chrono>
 
@@ -46,6 +48,7 @@
 // Entrypoint into the emulator
 #include "duckstation-nogui/nogui_host.h"
 #include <util/imgui_fullscreen.h>
+#include <util/gpu_device.h>
 
 Log_SetChannel(App);
 

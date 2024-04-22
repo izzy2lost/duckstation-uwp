@@ -1284,9 +1284,19 @@ bool InputManager::IsUsingRawInput()
 void InputManager::SetDefaultSourceConfig(SettingsInterface& si)
 {
   si.ClearSection("InputSources");
+
+#ifndef _UWP
   si.SetBoolValue("InputSources", "SDL", false);
-  si.SetBoolValue("InputSources", "SDLControllerEnhancedMode", false);
+#else
+  si.SetBoolValue("InputSources", "SDL", true);
+#endif
+#ifndef _UWP
+  si.SetBoolValue("InputSources", "XInput", false);
+#else
   si.SetBoolValue("InputSources", "XInput", true);
+#endif
+
+  si.SetBoolValue("InputSources", "SDLControllerEnhancedMode", false);
   si.SetBoolValue("InputSources", "RawInput", false);
 }
 
