@@ -512,6 +512,21 @@
       <DeploymentContent>true</DeploymentContent>
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <Content Include="..\..\dep\msvc\deps-x64\bin\freetype.dll">
+      <ExcludedFromBuild>false</ExcludedFromBuild>
+      <DeploymentContent>true</DeploymentContent>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\dep\msvc\deps-x64\bin\harfbuzz.dll">
+      <ExcludedFromBuild>false</ExcludedFromBuild>
+      <DeploymentContent>true</DeploymentContent>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\dep\msvc\deps-x64\bin\shaderc_shared.dll">
+      <ExcludedFromBuild>false</ExcludedFromBuild>
+      <DeploymentContent>true</DeploymentContent>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
     <Content Include="..\..\dep\msvc\deps-x64\bin\libjpeg.dll">
       <ExcludedFromBuild>false</ExcludedFromBuild>
       <DeploymentContent>true</DeploymentContent>

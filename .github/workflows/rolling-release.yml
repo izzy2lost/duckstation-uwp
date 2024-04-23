@@ -74,7 +74,6 @@ jobs:
         call update_rc_version.bat
         cd ..\..
         git update-index --assume-unchanged src/duckstation-qt/duckstation-qt.rc
-        git update-index --assume-unchanged src/duckstation-nogui/duckstation-nogui.rc
 
     - name: Compile x64 release build
       shell: cmd
@@ -166,7 +165,6 @@ jobs:
         call update_rc_version.bat
         cd ..\..
         git update-index --assume-unchanged src/duckstation-qt/duckstation-qt.rc
-        git update-index --assume-unchanged src/duckstation-nogui/duckstation-nogui.rc
 
     - name: Compile arm64 release build
       shell: cmd
@@ -240,11 +238,11 @@ jobs:
       uses: actions/cache@v3.3.2
       with:
         path: ~/deps
-        key: deps ${{ hashFiles('scripts/build-dependencies.sh') }}
+        key: deps ${{ hashFiles('scripts/build-dependencies-linux.sh') }}
 
     - name: Build Dependencies
       if: steps.cache-deps.outputs.cache-hit != 'true'
-      run: scripts/build-dependencies.sh "$HOME/deps"
+      run: scripts/build-dependencies-linux.sh "$HOME/deps"
 
     - name: Tag as preview build
       if: github.ref == 'refs/heads/master'
@@ -283,7 +281,7 @@ jobs:
   linux-flatpak-build:
     runs-on: ubuntu-22.04
     container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.6
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.7
       options: --privileged
     timeout-minutes: 120
     steps:
@@ -322,7 +320,7 @@ jobs:
         branch: master
         cache: true
         restore-cache: true
-        cache-key: flatpak-x64-${{ hashFiles('.scripts/flatpak/**/*.json') }}
+        cache-key: flatpak-x64-${{ hashFiles('scripts/flatpak/**/*.json') }}
 
     # fails due to screenshots..
     #- name: Validate build

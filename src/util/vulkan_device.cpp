@@ -23,6 +23,7 @@
 #include "fmt/format.h"
 #include "xxhash.h"
 
+#include <cstdlib>
 #include <limits>
 #include <mutex>
 
@@ -53,6 +54,7 @@ enum : u32
 {
   MAX_DRAW_CALLS_PER_FRAME = 2048,
   MAX_COMBINED_IMAGE_SAMPLER_DESCRIPTORS_PER_FRAME = GPUDevice::MAX_TEXTURE_SAMPLERS * MAX_DRAW_CALLS_PER_FRAME,
+  MAX_INPUT_ATTACHMENT_DESCRIPTORS_PER_FRAME = MAX_DRAW_CALLS_PER_FRAME,
   MAX_DESCRIPTOR_SETS_PER_FRAME = MAX_DRAW_CALLS_PER_FRAME,
   MAX_SAMPLER_DESCRIPTORS = 8192,
 
@@ -380,8 +382,6 @@ bool VulkanDevice::SelectDeviceExtensions(ExtensionList* extension_list, bool en
   m_optional_extensions.vk_ext_rasterization_order_attachment_access =
     SupportsExtension(VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME, false) ||
     SupportsExtension(VK_ARM_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME, false);
-  m_optional_extensions.vk_ext_attachment_feedback_loop_layout =
-    SupportsExtension(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME, false);
   m_optional_extensions.vk_khr_get_memory_requirements2 =
     SupportsExtension(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME, false);
   m_optional_extensions.vk_khr_bind_memory2 = SupportsExtension(VK_KHR_BIND_MEMORY_2_EXTENSION_NAME, false);
@@ -392,7 +392,21 @@ bool VulkanDevice::SelectDeviceExtensions(ExtensionList* extension_list, bool en
     SupportsExtension(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME, false) &&
     SupportsExtension(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME, false) &&
     SupportsExtension(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, false);
+  m_optional_extensions.vk_khr_dynamic_rendering_local_read =
+    m_optional_extensions.vk_khr_dynamic_rendering &&
+    SupportsExtension(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME, false);
   m_optional_extensions.vk_khr_push_descriptor = SupportsExtension(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME, false);
+
+  // glslang generates debug info instructions before phi nodes at the beginning of blocks when non-semantic debug info
+  // is enabled, triggering errors by spirv-val. Gate it by an environment variable if you want source debugging until
+  // this is fixed.
+  if (const char* val = std::getenv("USE_NON_SEMANTIC_DEBUG_INFO");
+      val && StringUtil::FromChars<bool>(val).value_or(false))
+  {
+    m_optional_extensions.vk_khr_shader_non_semantic_info =
+      SupportsExtension(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME, false);
+  }
+
   m_optional_extensions.vk_ext_external_memory_host =
     SupportsExtension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME, false);
 
@@ -538,17 +552,19 @@ bool VulkanDevice::CreateDevice(VkSurfaceKHR surface, bool enable_validation_lay
   VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT rasterization_order_access_feature = {
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_FEATURES_EXT, nullptr, VK_TRUE, VK_FALSE,
     VK_FALSE};
-  VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT attachment_feedback_loop_feature = {
-    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT, nullptr, VK_TRUE};
   VkPhysicalDeviceDynamicRenderingFeatures dynamic_rendering_feature = {
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES, nullptr, VK_TRUE};
+  VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR dynamic_rendering_local_read_feature = {
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR, nullptr, VK_TRUE};
 
   if (m_optional_extensions.vk_ext_rasterization_order_attachment_access)
     Vulkan::AddPointerToChain(&device_info, &rasterization_order_access_feature);
-  if (m_optional_extensions.vk_ext_attachment_feedback_loop_layout)
-    Vulkan::AddPointerToChain(&device_info, &attachment_feedback_loop_feature);
   if (m_optional_extensions.vk_khr_dynamic_rendering)
+  {
     Vulkan::AddPointerToChain(&device_info, &dynamic_rendering_feature);
+    if (m_optional_extensions.vk_khr_dynamic_rendering_local_read)
+      Vulkan::AddPointerToChain(&device_info, &dynamic_rendering_local_read_feature);
+  }
 
   VkResult res = vkCreateDevice(m_physical_device, &device_info, nullptr, &m_device);
   if (res != VK_SUCCESS)
@@ -586,18 +602,20 @@ void VulkanDevice::ProcessDeviceExtensions()
   VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT rasterization_order_access_feature = {
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_FEATURES_EXT, nullptr, VK_FALSE, VK_FALSE,
     VK_FALSE};
-  VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT attachment_feedback_loop_feature = {
-    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT, nullptr, VK_FALSE};
   VkPhysicalDeviceDynamicRenderingFeatures dynamic_rendering_feature = {
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES, nullptr, VK_FALSE};
+  VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR dynamic_rendering_local_read_feature = {
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR, nullptr, VK_FALSE};
 
   // add in optional feature structs
   if (m_optional_extensions.vk_ext_rasterization_order_attachment_access)
     Vulkan::AddPointerToChain(&features2, &rasterization_order_access_feature);
-  if (m_optional_extensions.vk_ext_attachment_feedback_loop_layout)
-    Vulkan::AddPointerToChain(&features2, &attachment_feedback_loop_feature);
   if (m_optional_extensions.vk_khr_dynamic_rendering)
+  {
     Vulkan::AddPointerToChain(&features2, &dynamic_rendering_feature);
+    if (m_optional_extensions.vk_khr_dynamic_rendering_local_read)
+      Vulkan::AddPointerToChain(&features2, &dynamic_rendering_local_read_feature);
+  }
 
   // we might not have VK_KHR_get_physical_device_properties2...
   if (!vkGetPhysicalDeviceFeatures2 || !vkGetPhysicalDeviceProperties2 || !vkGetPhysicalDeviceMemoryProperties2)
@@ -627,9 +645,9 @@ void VulkanDevice::ProcessDeviceExtensions()
   // confirm we actually support it
   m_optional_extensions.vk_ext_rasterization_order_attachment_access &=
     (rasterization_order_access_feature.rasterizationOrderColorAttachmentAccess == VK_TRUE);
-  m_optional_extensions.vk_ext_attachment_feedback_loop_layout &=
-    (attachment_feedback_loop_feature.attachmentFeedbackLoopLayout == VK_TRUE);
   m_optional_extensions.vk_khr_dynamic_rendering &= (dynamic_rendering_feature.dynamicRendering == VK_TRUE);
+  m_optional_extensions.vk_khr_dynamic_rendering_local_read &=
+    (dynamic_rendering_local_read_feature.dynamicRenderingLocalRead == VK_TRUE);
 
   VkPhysicalDeviceProperties2 properties2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, nullptr, {}};
   VkPhysicalDevicePushDescriptorPropertiesKHR push_descriptor_properties = {
@@ -664,6 +682,7 @@ void VulkanDevice::ProcessDeviceExtensions()
     if (m_optional_extensions.vk_khr_dynamic_rendering)
     {
       m_optional_extensions.vk_khr_dynamic_rendering = false;
+      m_optional_extensions.vk_khr_dynamic_rendering_local_read = false;
       Log_WarningPrint("Disabling VK_KHR_dynamic_rendering on broken mobile driver.");
     }
     if (m_optional_extensions.vk_khr_push_descriptor)
@@ -673,26 +692,24 @@ void VulkanDevice::ProcessDeviceExtensions()
     }
   }
 
-  Log_InfoPrintf("VK_EXT_memory_budget is %s",
-                 m_optional_extensions.vk_ext_memory_budget ? "supported" : "NOT supported");
-  Log_InfoPrintf("VK_EXT_rasterization_order_attachment_access is %s",
-                 m_optional_extensions.vk_ext_rasterization_order_attachment_access ? "supported" : "NOT supported");
-  Log_InfoPrintf("VK_EXT_attachment_feedback_loop_layout is %s",
-                 m_optional_extensions.vk_ext_attachment_feedback_loop_layout ? "supported" : "NOT supported");
-  Log_InfoPrintf("VK_KHR_get_memory_requirements2 is %s",
-                 m_optional_extensions.vk_khr_get_memory_requirements2 ? "supported" : "NOT supported");
-  Log_InfoPrintf("VK_KHR_bind_memory2 is %s",
-                 m_optional_extensions.vk_khr_bind_memory2 ? "supported" : "NOT supported");
-  Log_InfoPrintf("VK_KHR_get_physical_device_properties2 is %s",
-                 m_optional_extensions.vk_khr_get_physical_device_properties2 ? "supported" : "NOT supported");
-  Log_InfoPrintf("VK_KHR_dedicated_allocation is %s",
-                 m_optional_extensions.vk_khr_dedicated_allocation ? "supported" : "NOT supported");
-  Log_InfoPrintf("VK_KHR_dynamic_rendering is %s",
-                 m_optional_extensions.vk_khr_dynamic_rendering ? "supported" : "NOT supported");
-  Log_InfoPrintf("VK_KHR_push_descriptor is %s",
-                 m_optional_extensions.vk_khr_push_descriptor ? "supported" : "NOT supported");
-  Log_InfoPrintf("VK_EXT_external_memory_host is %s",
-                 m_optional_extensions.vk_ext_external_memory_host ? "supported" : "NOT supported");
+  Log_InfoFmt("VK_EXT_memory_budget is {}", m_optional_extensions.vk_ext_memory_budget ? "supported" : "NOT supported");
+  Log_InfoFmt("VK_EXT_rasterization_order_attachment_access is {}",
+              m_optional_extensions.vk_ext_rasterization_order_attachment_access ? "supported" : "NOT supported");
+  Log_InfoFmt("VK_KHR_get_memory_requirements2 is {}",
+              m_optional_extensions.vk_khr_get_memory_requirements2 ? "supported" : "NOT supported");
+  Log_InfoFmt("VK_KHR_bind_memory2 is {}", m_optional_extensions.vk_khr_bind_memory2 ? "supported" : "NOT supported");
+  Log_InfoFmt("VK_KHR_get_physical_device_properties2 is {}",
+              m_optional_extensions.vk_khr_get_physical_device_properties2 ? "supported" : "NOT supported");
+  Log_InfoFmt("VK_KHR_dedicated_allocation is {}",
+              m_optional_extensions.vk_khr_dedicated_allocation ? "supported" : "NOT supported");
+  Log_InfoFmt("VK_KHR_dynamic_rendering is {}",
+              m_optional_extensions.vk_khr_dynamic_rendering ? "supported" : "NOT supported");
+  Log_InfoFmt("VK_KHR_dynamic_rendering_local_read is {}",
+              m_optional_extensions.vk_khr_dynamic_rendering_local_read ? "supported" : "NOT supported");
+  Log_InfoFmt("VK_KHR_push_descriptor is {}",
+              m_optional_extensions.vk_khr_push_descriptor ? "supported" : "NOT supported");
+  Log_InfoFmt("VK_EXT_external_memory_host is {}",
+              m_optional_extensions.vk_ext_external_memory_host ? "supported" : "NOT supported");
 }
 
 bool VulkanDevice::CreateAllocator()
@@ -834,25 +851,26 @@ bool VulkanDevice::CreateCommandBuffers()
     }
     Vulkan::SetObjectName(m_device, resources.fence, TinyString::from_format("Frame Fence {}", frame_index));
 
+    u32 num_pools = 0;
+    VkDescriptorPoolSize pool_sizes[2];
     if (!m_optional_extensions.vk_khr_push_descriptor)
     {
-      VkDescriptorPoolSize pool_sizes[] = {
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_COMBINED_IMAGE_SAMPLER_DESCRIPTORS_PER_FRAME},
-      };
-
-      VkDescriptorPoolCreateInfo pool_create_info = {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, nullptr,   0, MAX_DESCRIPTOR_SETS_PER_FRAME,
-        static_cast<u32>(std::size(pool_sizes)),       pool_sizes};
-
-      res = vkCreateDescriptorPool(m_device, &pool_create_info, nullptr, &resources.descriptor_pool);
-      if (res != VK_SUCCESS)
-      {
-        LOG_VULKAN_ERROR(res, "vkCreateDescriptorPool failed: ");
-        return false;
-      }
-      Vulkan::SetObjectName(m_device, resources.descriptor_pool,
-                            TinyString::from_format("Frame Descriptor Pool {}", frame_index));
+      pool_sizes[num_pools++] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                 MAX_COMBINED_IMAGE_SAMPLER_DESCRIPTORS_PER_FRAME};
     }
+    pool_sizes[num_pools++] = {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, MAX_INPUT_ATTACHMENT_DESCRIPTORS_PER_FRAME};
+
+    VkDescriptorPoolCreateInfo pool_create_info = {
+      VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, nullptr, 0, MAX_DESCRIPTOR_SETS_PER_FRAME, num_pools, pool_sizes};
+
+    res = vkCreateDescriptorPool(m_device, &pool_create_info, nullptr, &resources.descriptor_pool);
+    if (res != VK_SUCCESS)
+    {
+      LOG_VULKAN_ERROR(res, "vkCreateDescriptorPool failed: ");
+      return false;
+    }
+    Vulkan::SetObjectName(m_device, resources.descriptor_pool,
+                          TinyString::from_format("Frame Descriptor Pool {}", frame_index));
 
     ++frame_index;
   }
@@ -970,17 +988,15 @@ VkRenderPass VulkanDevice::GetRenderPass(const GPUPipeline::GraphicsConfig& conf
     key.stencil_store_op = stencil ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
   }
 
-  // key.color_feedback_loop = false;
-  // key.depth_sampling = false;
-
   key.samples = static_cast<u8>(config.samples);
+  key.feedback_loop = config.render_pass_flags;
 
   const auto it = m_render_pass_cache.find(key);
   return (it != m_render_pass_cache.end()) ? it->second : CreateCachedRenderPass(key);
 }
 
-VkRenderPass VulkanDevice::GetRenderPass(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds,
-                                         bool color_feedback_loop /* = false */, bool depth_sampling /* = false */)
+VkRenderPass VulkanDevice::GetRenderPass(VulkanTexture* const* rts, u32 num_rts, VulkanTexture* ds,
+                                         GPUPipeline::RenderPassFlag feedback_loop)
 {
   RenderPassCacheKey key;
   std::memset(&key, 0, sizeof(key));
@@ -1009,8 +1025,7 @@ VkRenderPass VulkanDevice::GetRenderPass(GPUTexture* const* rts, u32 num_rts, GP
     key.samples = static_cast<u8>(ds->GetSamples());
   }
 
-  key.color_feedback_loop = color_feedback_loop;
-  key.depth_sampling = depth_sampling;
+  key.feedback_loop = feedback_loop;
 
   const auto it = m_render_pass_cache.find(key);
   return (it != m_render_pass_cache.end()) ? it->second : CreateCachedRenderPass(key);
@@ -1229,8 +1244,8 @@ void VulkanDevice::WaitForCommandBufferCompletion(u32 index)
   }
 }
 
-void VulkanDevice::SubmitCommandBuffer(VulkanSwapChain* present_swap_chain /* = nullptr */,
-                                       bool submit_on_thread /* = false */)
+void VulkanDevice::EndAndSubmitCommandBuffer(VulkanSwapChain* present_swap_chain, bool explicit_present,
+                                             bool submit_on_thread)
 {
   if (m_last_submit_failed.load(std::memory_order_acquire))
     return;
@@ -1268,10 +1283,10 @@ void VulkanDevice::SubmitCommandBuffer(VulkanSwapChain* present_swap_chain /* = 
   std::unique_lock<std::mutex> lock(m_present_mutex);
   WaitForPresentComplete(lock);
 
-  if (!submit_on_thread || !m_present_thread.joinable())
+  if (!submit_on_thread || explicit_present || !m_present_thread.joinable())
   {
     DoSubmitCommandBuffer(m_current_frame, present_swap_chain);
-    if (present_swap_chain)
+    if (present_swap_chain && !explicit_present)
       DoPresent(present_swap_chain);
     return;
   }
@@ -1467,7 +1482,7 @@ void VulkanDevice::SubmitCommandBuffer(bool wait_for_completion)
   DebugAssert(!InRenderPass());
 
   const u32 current_frame = m_current_frame;
-  SubmitCommandBuffer();
+  EndAndSubmitCommandBuffer(nullptr, false, false);
   MoveToNextCommandBuffer();
 
   if (wait_for_completion)
@@ -1674,8 +1689,9 @@ VkRenderPass VulkanDevice::CreateCachedRenderPass(RenderPassCacheKey key)
       break;
 
     const VkImageLayout layout =
-      key.color_feedback_loop ?
-        (UseFeedbackLoopLayout() ? VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT : VK_IMAGE_LAYOUT_GENERAL) :
+      (key.feedback_loop & GPUPipeline::ColorFeedbackLoop) ?
+        (m_optional_extensions.vk_khr_dynamic_rendering_local_read ? VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR :
+                                                                     VK_IMAGE_LAYOUT_GENERAL) :
         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
     const RenderPassCacheKey::RenderTarget key_rt = key.color[i];
@@ -1692,15 +1708,12 @@ VkRenderPass VulkanDevice::CreateCachedRenderPass(RenderPassCacheKey key)
     color_references[num_attachments].layout = layout;
     color_reference_ptr = color_references.data();
 
-    if (key.color_feedback_loop)
+    if (key.feedback_loop & GPUPipeline::ColorFeedbackLoop)
     {
       DebugAssert(i == 0);
-      if (!UseFeedbackLoopLayout())
-      {
-        input_reference.attachment = num_attachments;
-        input_reference.layout = layout;
-        input_reference_ptr = &input_reference;
-      }
+      input_reference.attachment = num_attachments;
+      input_reference.layout = layout;
+      input_reference_ptr = &input_reference;
 
       if (!m_optional_extensions.vk_ext_rasterization_order_attachment_access)
       {
@@ -1710,11 +1723,8 @@ VkRenderPass VulkanDevice::CreateCachedRenderPass(RenderPassCacheKey key)
         subpass_dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         subpass_dependency.dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
         subpass_dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        subpass_dependency.dstAccessMask =
-          UseFeedbackLoopLayout() ? VK_ACCESS_SHADER_READ_BIT : VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
-        subpass_dependency.dependencyFlags = UseFeedbackLoopLayout() ?
-                                               (VK_DEPENDENCY_BY_REGION_BIT | VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT) :
-                                               VK_DEPENDENCY_BY_REGION_BIT;
+        subpass_dependency.dstAccessMask = VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
+        subpass_dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
         subpass_dependency_ptr = &subpass_dependency;
       }
     }
@@ -1726,10 +1736,9 @@ VkRenderPass VulkanDevice::CreateCachedRenderPass(RenderPassCacheKey key)
 
   if (key.depth_format != static_cast<u8>(GPUTexture::Format::Unknown))
   {
-    const VkImageLayout layout =
-      key.depth_sampling ?
-        (UseFeedbackLoopLayout() ? VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT : VK_IMAGE_LAYOUT_GENERAL) :
-        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    const VkImageLayout layout = (key.feedback_loop & GPUPipeline::SampleDepthBuffer) ?
+                                   VK_IMAGE_LAYOUT_GENERAL :
+                                   VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     attachments[num_attachments] = {0,
                                     static_cast<VkFormat>(TEXTURE_FORMAT_MAPPING[key.depth_format]),
                                     static_cast<VkSampleCountFlagBits>(key.samples),
@@ -1746,7 +1755,8 @@ VkRenderPass VulkanDevice::CreateCachedRenderPass(RenderPassCacheKey key)
   }
 
   const VkSubpassDescriptionFlags subpass_flags =
-    (key.color_feedback_loop && m_optional_extensions.vk_ext_rasterization_order_attachment_access) ?
+    ((key.feedback_loop & GPUPipeline::ColorFeedbackLoop) &&
+     m_optional_extensions.vk_ext_rasterization_order_attachment_access) ?
       VK_SUBPASS_DESCRIPTION_RASTERIZATION_ORDER_ATTACHMENT_COLOR_ACCESS_BIT_EXT :
       0;
   const VkSubpassDescription subpass = {subpass_flags,
@@ -1784,7 +1794,9 @@ VkRenderPass VulkanDevice::CreateCachedRenderPass(RenderPassCacheKey key)
 VkFramebuffer VulkanDevice::CreateFramebuffer(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds, u32 flags)
 {
   VulkanDevice& dev = VulkanDevice::GetInstance();
-  VkRenderPass render_pass = dev.GetRenderPass(rts, num_rts, ds, false, false);
+  VkRenderPass render_pass =
+    dev.GetRenderPass(reinterpret_cast<VulkanTexture* const*>(rts), num_rts, static_cast<VulkanTexture*>(ds),
+                      static_cast<GPUPipeline::RenderPassFlag>(flags));
 
   const GPUTexture* rt_or_ds = (num_rts > 0) ? rts[0] : ds;
   DebugAssert(rt_or_ds);
@@ -2022,7 +2034,7 @@ bool VulkanDevice::CreateDevice(const std::string_view& adapter, bool threaded_p
 
   if (surface != VK_NULL_HANDLE)
   {
-    m_swap_chain = VulkanSwapChain::Create(m_window_info, surface, m_sync_mode, m_exclusive_fullscreen_control);
+    m_swap_chain = VulkanSwapChain::Create(m_window_info, surface, m_vsync_enabled, m_exclusive_fullscreen_control);
     if (!m_swap_chain)
     {
       Error::SetStringView(error, "Failed to create swap chain");
@@ -2243,7 +2255,7 @@ bool VulkanDevice::UpdateWindow()
     return false;
   }
 
-  m_swap_chain = VulkanSwapChain::Create(m_window_info, surface, m_sync_mode, m_exclusive_fullscreen_control);
+  m_swap_chain = VulkanSwapChain::Create(m_window_info, surface, m_vsync_enabled, m_exclusive_fullscreen_control);
   if (!m_swap_chain)
   {
     Log_ErrorPrintf("Failed to create swap chain");
@@ -2319,22 +2331,21 @@ std::string VulkanDevice::GetDriverInfo() const
   return ret;
 }
 
-void VulkanDevice::SetSyncMode(DisplaySyncMode mode)
+void VulkanDevice::SetVSyncEnabled(bool enabled)
 {
-  if (m_sync_mode == mode)
+  if (m_vsync_enabled == enabled)
     return;
 
-  const DisplaySyncMode prev_mode = m_sync_mode;
-  m_sync_mode = mode;
+  m_vsync_enabled = enabled;
   if (!m_swap_chain)
     return;
 
   // This swap chain should not be used by the current buffer, thus safe to destroy.
   WaitForGPUIdle();
-  if (!m_swap_chain->SetSyncMode(mode))
+  if (!m_swap_chain->SetVSyncEnabled(enabled))
   {
     // Try switching back to the old mode..
-    if (!m_swap_chain->SetSyncMode(prev_mode))
+    if (!m_swap_chain->SetVSyncEnabled(!enabled))
     {
       Panic("Failed to reset old vsync mode after failure");
       m_swap_chain.reset();
@@ -2409,7 +2420,7 @@ bool VulkanDevice::BeginPresent(bool frame_skip)
   return true;
 }
 
-void VulkanDevice::EndPresent()
+void VulkanDevice::EndPresent(bool explicit_present)
 {
   DebugAssert(InRenderPass() && m_num_current_render_targets == 0 && !m_current_depth_target);
   EndRenderPass();
@@ -2418,10 +2429,16 @@ void VulkanDevice::EndPresent()
   VulkanTexture::TransitionSubresourcesToLayout(cmdbuf, m_swap_chain->GetCurrentImage(), GPUTexture::Type::RenderTarget,
                                                 0, 1, 0, 1, VulkanTexture::Layout::ColorAttachment,
                                                 VulkanTexture::Layout::PresentSrc);
-  SubmitCommandBuffer(m_swap_chain.get(), !m_swap_chain->IsPresentModeSynchronizing());
+  EndAndSubmitCommandBuffer(m_swap_chain.get(), explicit_present, !m_swap_chain->IsPresentModeSynchronizing());
   MoveToNextCommandBuffer();
   InvalidateCachedState();
   TrimTexturePool();
+}
+
+void VulkanDevice::SubmitPresent()
+{
+  DebugAssert(m_swap_chain);
+  DoPresent(m_swap_chain.get());
 }
 
 #ifdef _DEBUG
@@ -2510,7 +2527,9 @@ bool VulkanDevice::CheckFeatures(FeatureMask disabled_features)
 
   m_features.dual_source_blend =
     !(disabled_features & FEATURE_MASK_DUAL_SOURCE_BLEND) && m_device_features.dualSrcBlend;
-  m_features.framebuffer_fetch = /*!(disabled_features & FEATURE_MASK_FRAMEBUFFER_FETCH) && */ false;
+  m_features.framebuffer_fetch =
+    !(disabled_features & (FEATURE_MASK_FEEDBACK_LOOPS | FEATURE_MASK_FRAMEBUFFER_FETCH)) &&
+    m_optional_extensions.vk_ext_rasterization_order_attachment_access;
 
   if (!m_features.dual_source_blend)
     Log_WarningPrintf("Vulkan driver is missing dual-source blending. This will have an impact on performance.");
@@ -2519,6 +2538,7 @@ bool VulkanDevice::CheckFeatures(FeatureMask disabled_features)
   m_features.texture_copy_to_self = !(disabled_features & FEATURE_MASK_TEXTURE_COPY_TO_SELF);
   m_features.per_sample_shading = m_device_features.sampleRateShading;
   m_features.supports_texture_buffers = !(disabled_features & FEATURE_MASK_TEXTURE_BUFFERS);
+  m_features.feedback_loops = !(disabled_features & FEATURE_MASK_FEEDBACK_LOOPS);
 
 #ifdef __APPLE__
   // Partial texture buffer uploads appear to be broken in macOS/MoltenVK.
@@ -2540,6 +2560,7 @@ bool VulkanDevice::CheckFeatures(FeatureMask disabled_features)
 
   m_features.partial_msaa_resolve = true;
   m_features.memory_import = m_optional_extensions.vk_ext_external_memory_host;
+  m_features.explicit_present = true;
   m_features.shader_cache = true;
   m_features.pipeline_cache = true;
   m_features.prefer_unused_textures = true;
@@ -2674,22 +2695,45 @@ void VulkanDevice::ResolveTextureRegion(GPUTexture* dst, u32 dst_x, u32 dst_y, u
 void VulkanDevice::ClearRenderTarget(GPUTexture* t, u32 c)
 {
   GPUDevice::ClearRenderTarget(t, c);
-  if (InRenderPass() && IsRenderTargetBound(t))
-    EndRenderPass();
+  if (InRenderPass())
+  {
+    const s32 idx = IsRenderTargetBoundIndex(t);
+    if (idx >= 0)
+    {
+      // Use an attachment clear so the render pass isn't restarted.
+      const VkClearAttachment ca = {VK_IMAGE_ASPECT_COLOR_BIT,
+                                    static_cast<u32>(idx),
+                                    {.color = static_cast<VulkanTexture*>(t)->GetClearColorValue()}};
+      const VkClearRect rc = {{{0, 0}, {t->GetWidth(), t->GetHeight()}}, 0u, 1u};
+      vkCmdClearAttachments(m_current_command_buffer, 1, &ca, 1, &rc);
+      t->SetState(GPUTexture::State::Dirty);
+    }
+  }
 }
 
 void VulkanDevice::ClearDepth(GPUTexture* t, float d)
 {
   GPUDevice::ClearDepth(t, d);
   if (InRenderPass() && m_current_depth_target == t)
-    EndRenderPass();
+  {
+    // Use an attachment clear so the render pass isn't restarted.
+    const VkClearAttachment ca = {
+      VK_IMAGE_ASPECT_DEPTH_BIT, 0, {.depthStencil = static_cast<VulkanTexture*>(t)->GetClearDepthValue()}};
+    const VkClearRect rc = {{{0, 0}, {t->GetWidth(), t->GetHeight()}}, 0u, 1u};
+    vkCmdClearAttachments(m_current_command_buffer, 1, &ca, 1, &rc);
+    t->SetState(GPUTexture::State::Dirty);
+  }
 }
 
 void VulkanDevice::InvalidateRenderTarget(GPUTexture* t)
 {
   GPUDevice::InvalidateRenderTarget(t);
-  if (InRenderPass() && (t->IsRenderTarget() ? IsRenderTargetBound(t) : (m_current_depth_target == t)))
-    EndRenderPass();
+  if (InRenderPass() && (t->IsRenderTarget() ? (IsRenderTargetBoundIndex(t) >= 0) : (m_current_depth_target == t)))
+  {
+    // Invalidate includes leaving whatever's in the current buffer.
+    GL_INS_FMT("Invalidating current {}", t->IsRenderTarget() ? "RT" : "DS");
+    t->SetState(GPUTexture::State::Dirty);
+  }
 }
 
 bool VulkanDevice::CreateBuffers()
@@ -2874,10 +2918,22 @@ bool VulkanDevice::CreatePipelineLayouts()
     Vulkan::SetObjectName(m_device, m_multi_texture_ds_layout, "Multi Texture Descriptor Set Layout");
   }
 
+  if (m_features.feedback_loops)
+  {
+    // TODO: This isn't ideal, since we can't push the RT descriptors.
+    dslb.AddBinding(0, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_FRAGMENT_BIT);
+    if ((m_feedback_loop_ds_layout = dslb.Create(m_device)) == VK_NULL_HANDLE)
+      return false;
+    Vulkan::SetObjectName(m_device, m_feedback_loop_ds_layout, "Feedback Loop Descriptor Set Layout");
+  }
+
   {
     VkPipelineLayout& pl = m_pipeline_layouts[static_cast<u8>(GPUPipeline::Layout::SingleTextureAndUBO)];
     plb.AddDescriptorSet(m_ubo_ds_layout);
     plb.AddDescriptorSet(m_single_texture_ds_layout);
+    // TODO: REMOVE ME
+    if (m_features.feedback_loops)
+      plb.AddDescriptorSet(m_feedback_loop_ds_layout);
     if ((pl = plb.Create(m_device)) == VK_NULL_HANDLE)
       return false;
     Vulkan::SetObjectName(m_device, pl, "Single Texture + UBO Pipeline Layout");
@@ -2886,6 +2942,9 @@ bool VulkanDevice::CreatePipelineLayouts()
   {
     VkPipelineLayout& pl = m_pipeline_layouts[static_cast<u8>(GPUPipeline::Layout::SingleTextureAndPushConstants)];
     plb.AddDescriptorSet(m_single_texture_ds_layout);
+    // TODO: REMOVE ME
+    if (m_features.feedback_loops)
+      plb.AddDescriptorSet(m_feedback_loop_ds_layout);
     plb.AddPushConstants(UNIFORM_PUSH_CONSTANTS_STAGES, 0, UNIFORM_PUSH_CONSTANTS_SIZE);
     if ((pl = plb.Create(m_device)) == VK_NULL_HANDLE)
       return false;
@@ -2896,6 +2955,9 @@ bool VulkanDevice::CreatePipelineLayouts()
     VkPipelineLayout& pl =
       m_pipeline_layouts[static_cast<u8>(GPUPipeline::Layout::SingleTextureBufferAndPushConstants)];
     plb.AddDescriptorSet(m_single_texture_buffer_ds_layout);
+    // TODO: REMOVE ME
+    if (m_features.feedback_loops)
+      plb.AddDescriptorSet(m_feedback_loop_ds_layout);
     plb.AddPushConstants(UNIFORM_PUSH_CONSTANTS_STAGES, 0, UNIFORM_PUSH_CONSTANTS_SIZE);
     if ((pl = plb.Create(m_device)) == VK_NULL_HANDLE)
       return false;
@@ -2941,6 +3003,7 @@ void VulkanDevice::DestroyPipelineLayouts()
       l = VK_NULL_HANDLE;
     }
   };
+  destroy_dsl(m_feedback_loop_ds_layout);
   destroy_dsl(m_multi_texture_ds_layout);
   destroy_dsl(m_single_texture_buffer_ds_layout);
   destroy_dsl(m_single_texture_ds_layout);
@@ -2987,7 +3050,7 @@ void VulkanDevice::RenderBlankFrame()
   VulkanTexture::TransitionSubresourcesToLayout(cmdbuf, image, GPUTexture::Type::RenderTarget, 0, 1, 0, 1,
                                                 VulkanTexture::Layout::TransferDst, VulkanTexture::Layout::PresentSrc);
 
-  SubmitCommandBuffer(m_swap_chain.get(), !m_swap_chain->IsPresentModeSynchronizing());
+  EndAndSubmitCommandBuffer(m_swap_chain.get(), false, !m_swap_chain->IsPresentModeSynchronizing());
   MoveToNextCommandBuffer();
 
   InvalidateCachedState();
@@ -3080,13 +3143,15 @@ bool VulkanDevice::TryImportHostMemory(void* data, size_t data_size, VkBufferUsa
   return true;
 }
 
-void VulkanDevice::SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds)
+void VulkanDevice::SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds,
+                                    GPUPipeline::RenderPassFlag feedback_loop)
 {
-  bool changed = (m_num_current_render_targets != num_rts || m_current_depth_target != ds);
+  bool changed = (m_num_current_render_targets != num_rts || m_current_depth_target != ds ||
+                  m_current_feedback_loop != feedback_loop);
   bool needs_ds_clear = (ds && ds->IsClearedOrInvalidated());
   bool needs_rt_clear = false;
 
-  m_current_depth_target = ds;
+  m_current_depth_target = static_cast<VulkanTexture*>(ds);
   for (u32 i = 0; i < num_rts; i++)
   {
     VulkanTexture* const RT = static_cast<VulkanTexture*>(rts[i]);
@@ -3096,7 +3161,8 @@ void VulkanDevice::SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUText
   }
   for (u32 i = num_rts; i < m_num_current_render_targets; i++)
     m_current_render_targets[i] = nullptr;
-  m_num_current_render_targets = num_rts;
+  m_num_current_render_targets = Truncate8(num_rts);
+  m_current_feedback_loop = feedback_loop;
 
   if (changed)
   {
@@ -3109,17 +3175,21 @@ void VulkanDevice::SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUText
       return;
     }
 
-    if (!m_optional_extensions.vk_khr_dynamic_rendering)
+    if (!m_optional_extensions.vk_khr_dynamic_rendering || ((feedback_loop & GPUPipeline::ColorFeedbackLoop) &&
+                                                            !m_optional_extensions.vk_khr_dynamic_rendering_local_read))
     {
-      m_current_framebuffer =
-        m_framebuffer_manager.Lookup((m_num_current_render_targets > 0) ? m_current_render_targets.data() : nullptr,
-                                     m_num_current_render_targets, m_current_depth_target, 0);
+      m_current_framebuffer = m_framebuffer_manager.Lookup(
+        (m_num_current_render_targets > 0) ? reinterpret_cast<GPUTexture**>(m_current_render_targets.data()) : nullptr,
+        m_num_current_render_targets, m_current_depth_target, feedback_loop);
       if (m_current_framebuffer == VK_NULL_HANDLE)
       {
         Log_ErrorPrint("Failed to create framebuffer");
         return;
       }
     }
+
+    m_dirty_flags = (m_dirty_flags & ~DIRTY_FLAG_INPUT_ATTACHMENT) |
+                    ((feedback_loop & GPUPipeline::ColorFeedbackLoop) ? DIRTY_FLAG_INPUT_ATTACHMENT : 0);
   }
 
   // TODO: This could use vkCmdClearAttachments() instead.
@@ -3140,7 +3210,8 @@ void VulkanDevice::BeginRenderPass()
   for (u32 i = 0; i < num_textures; i++)
     m_current_textures[i]->TransitionToLayout(VulkanTexture::Layout::ShaderReadOnly);
 
-  if (m_optional_extensions.vk_khr_dynamic_rendering)
+  if (m_optional_extensions.vk_khr_dynamic_rendering && (m_optional_extensions.vk_khr_dynamic_rendering_local_read ||
+                                                         !(m_current_feedback_loop & GPUPipeline::ColorFeedbackLoop)))
   {
     VkRenderingInfoKHR ri = {
       VK_STRUCTURE_TYPE_RENDERING_INFO_KHR, nullptr, 0u, {}, 1u, 0u, 0u, nullptr, nullptr, nullptr};
@@ -3157,7 +3228,9 @@ void VulkanDevice::BeginRenderPass()
       for (u32 i = 0; i < m_num_current_render_targets; i++)
       {
         VulkanTexture* const rt = static_cast<VulkanTexture*>(m_current_render_targets[i]);
-        rt->TransitionToLayout(VulkanTexture::Layout::ColorAttachment);
+        rt->TransitionToLayout((m_current_feedback_loop & GPUPipeline::ColorFeedbackLoop) ?
+                                 VulkanTexture::Layout::FeedbackLoop :
+                                 VulkanTexture::Layout::ColorAttachment);
         rt->SetUseFenceCounter(GetCurrentFenceCounter());
 
         VkRenderingAttachmentInfo& ai = attachments[i];
@@ -3179,7 +3252,7 @@ void VulkanDevice::BeginRenderPass()
         rt->SetState(GPUTexture::State::Dirty);
       }
 
-      if (VulkanTexture* const ds = static_cast<VulkanTexture*>(m_current_depth_target))
+      if (VulkanTexture* const ds = m_current_depth_target)
       {
         ds->TransitionToLayout(VulkanTexture::Layout::DepthStencilAttachment);
         ds->SetUseFenceCounter(GetCurrentFenceCounter());
@@ -3201,8 +3274,8 @@ void VulkanDevice::BeginRenderPass()
         ds->SetState(GPUTexture::State::Dirty);
       }
 
-      const VulkanTexture* const rt_or_ds = static_cast<const VulkanTexture*>(
-        (m_num_current_render_targets > 0) ? m_current_render_targets[0] : m_current_depth_target);
+      const VulkanTexture* const rt_or_ds =
+        (m_num_current_render_targets > 0) ? m_current_render_targets[0] : m_current_depth_target;
       ri.renderArea = {{}, {rt_or_ds->GetWidth(), rt_or_ds->GetHeight()}};
     }
     else
@@ -3236,7 +3309,7 @@ void VulkanDevice::BeginRenderPass()
     {
       bi.framebuffer = m_current_framebuffer;
       bi.renderPass = m_current_render_pass = GetRenderPass(
-        m_current_render_targets.data(), m_num_current_render_targets, m_current_depth_target, false, false);
+        m_current_render_targets.data(), m_num_current_render_targets, m_current_depth_target, m_current_feedback_loop);
       if (bi.renderPass == VK_NULL_HANDLE)
       {
         Log_ErrorPrint("Failed to create render pass");
@@ -3255,7 +3328,9 @@ void VulkanDevice::BeginRenderPass()
           bi.clearValueCount = i + 1;
         }
         rt->SetState(GPUTexture::State::Dirty);
-        rt->TransitionToLayout(VulkanTexture::Layout::ColorAttachment);
+        rt->TransitionToLayout((m_current_feedback_loop & GPUPipeline::ColorFeedbackLoop) ?
+                                 VulkanTexture::Layout::FeedbackLoop :
+                                 VulkanTexture::Layout::ColorAttachment);
         rt->SetUseFenceCounter(GetCurrentFenceCounter());
       }
       if (VulkanTexture* const ds = static_cast<VulkanTexture*>(m_current_depth_target))
@@ -3357,6 +3432,7 @@ void VulkanDevice::BeginSwapChainRenderPass()
 
   s_stats.num_render_passes++;
   m_num_current_render_targets = 0;
+  m_current_feedback_loop = GPUPipeline::NoRenderPassFlags;
   std::memset(m_current_render_targets.data(), 0, sizeof(m_current_render_targets));
   m_current_depth_target = nullptr;
   m_current_framebuffer = VK_NULL_HANDLE;
@@ -3420,20 +3496,21 @@ void VulkanDevice::UnbindPipeline(VulkanPipeline* pl)
 
 void VulkanDevice::InvalidateCachedState()
 {
-  m_dirty_flags = ALL_DIRTY_STATE;
+  m_dirty_flags =
+    ALL_DIRTY_STATE | ((m_current_feedback_loop & GPUPipeline::ColorFeedbackLoop) ? DIRTY_FLAG_INPUT_ATTACHMENT : 0);
   m_current_render_pass = VK_NULL_HANDLE;
   m_current_pipeline = nullptr;
 }
 
-bool VulkanDevice::IsRenderTargetBound(const GPUTexture* tex) const
+s32 VulkanDevice::IsRenderTargetBoundIndex(const GPUTexture* tex) const
 {
   for (u32 i = 0; i < m_num_current_render_targets; i++)
   {
     if (m_current_render_targets[i] == tex)
-      return true;
+      return static_cast<s32>(i);
   }
 
-  return false;
+  return -1;
 }
 
 VkPipelineLayout VulkanDevice::GetCurrentVkPipelineLayout() const
@@ -3472,14 +3549,14 @@ void VulkanDevice::SetTextureSampler(u32 slot, GPUTexture* texture, GPUSampler* 
 {
   VulkanTexture* T = texture ? static_cast<VulkanTexture*>(texture) : m_null_texture.get();
   const VkSampler vsampler = static_cast<VulkanSampler*>(sampler ? sampler : m_nearest_sampler.get())->GetSampler();
-  if (m_current_textures[slot] != texture || m_current_samplers[slot] != vsampler)
+  if (m_current_textures[slot] != T || m_current_samplers[slot] != vsampler)
   {
     m_current_textures[slot] = T;
     m_current_samplers[slot] = vsampler;
     m_dirty_flags |= DIRTY_FLAG_TEXTURES_OR_SAMPLERS;
   }
 
-  if (T)
+  if (texture)
   {
     T->CommitClear();
     T->SetUseFenceCounter(GetCurrentFenceCounter());
@@ -3584,11 +3661,20 @@ void VulkanDevice::SetScissor(s32 x, s32 y, s32 width, s32 height)
 
 void VulkanDevice::PreDrawCheck()
 {
+  if (!InRenderPass())
+    BeginRenderPass();
+
   DebugAssert(!(m_dirty_flags & DIRTY_FLAG_INITIAL));
-  const u32 dirty = std::exchange(m_dirty_flags, 0);
+  const u32 update_mask = (m_current_feedback_loop ? ~0u : ~DIRTY_FLAG_INPUT_ATTACHMENT);
+  const u32 dirty = m_dirty_flags & update_mask;
+  m_dirty_flags = m_dirty_flags & ~update_mask;
+  if (dirty & DIRTY_FLAG_PIPELINE_LAYOUT && !(dirty & DIRTY_FLAG_INPUT_ATTACHMENT))
+    m_dirty_flags |= DIRTY_FLAG_INPUT_ATTACHMENT; // TODO: FOR NEXT TIME
+
   if (dirty != 0)
   {
-    if (dirty & (DIRTY_FLAG_PIPELINE_LAYOUT | DIRTY_FLAG_DYNAMIC_OFFSETS | DIRTY_FLAG_TEXTURES_OR_SAMPLERS))
+    if (dirty & (DIRTY_FLAG_PIPELINE_LAYOUT | DIRTY_FLAG_DYNAMIC_OFFSETS | DIRTY_FLAG_TEXTURES_OR_SAMPLERS |
+                 DIRTY_FLAG_INPUT_ATTACHMENT))
     {
       if (!UpdateDescriptorSets(dirty))
       {
@@ -3598,21 +3684,22 @@ void VulkanDevice::PreDrawCheck()
       }
     }
   }
-
-  if (!InRenderPass())
-    BeginRenderPass();
 }
 
 template<GPUPipeline::Layout layout>
-bool VulkanDevice::UpdateDescriptorSetsForLayout(bool new_layout, bool new_dynamic_offsets)
+bool VulkanDevice::UpdateDescriptorSetsForLayout(u32 dirty)
 {
-  std::array<VkDescriptorSet, 2> ds;
+  [[maybe_unused]] bool new_dynamic_offsets = false;
+
+  std::array<VkDescriptorSet, 3> ds;
   u32 first_ds = 0;
   u32 num_ds = 0;
 
   if constexpr (layout == GPUPipeline::Layout::SingleTextureAndUBO || layout == GPUPipeline::Layout::MultiTextureAndUBO)
   {
-    if (new_layout || new_dynamic_offsets)
+    new_dynamic_offsets = ((dirty & DIRTY_FLAG_DYNAMIC_OFFSETS) != 0);
+
+    if (dirty & (DIRTY_FLAG_PIPELINE_LAYOUT | DIRTY_FLAG_DYNAMIC_OFFSETS))
     {
       ds[num_ds++] = m_ubo_descriptor_set;
       new_dynamic_offsets = true;
@@ -3645,7 +3732,7 @@ bool VulkanDevice::UpdateDescriptorSetsForLayout(bool new_layout, bool new_dynam
       {
         DebugAssert(m_current_textures[i] && m_current_samplers[i] != VK_NULL_HANDLE);
         dsub.AddCombinedImageSamplerDescriptorWrite(VK_NULL_HANDLE, i, m_current_textures[i]->GetView(),
-                                                    m_current_samplers[i], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                                                    m_current_samplers[i], m_current_textures[i]->GetVkLayout());
       }
 
       const u32 set = (layout == GPUPipeline::Layout::MultiTextureAndUBO) ? 1 : 0;
@@ -3666,9 +3753,28 @@ bool VulkanDevice::UpdateDescriptorSetsForLayout(bool new_layout, bool new_dynam
       {
         DebugAssert(m_current_textures[i] && m_current_samplers[i] != VK_NULL_HANDLE);
         dsub.AddCombinedImageSamplerDescriptorWrite(tds, i, m_current_textures[i]->GetView(), m_current_samplers[i],
-                                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                                                    m_current_textures[i]->GetVkLayout());
       }
 
+      dsub.Update(m_device, false);
+    }
+  }
+
+  if constexpr (layout == GPUPipeline::Layout::SingleTextureAndUBO ||
+                layout == GPUPipeline::Layout::SingleTextureAndPushConstants ||
+                layout == GPUPipeline::Layout::SingleTextureBufferAndPushConstants)
+  {
+    if (dirty & DIRTY_FLAG_INPUT_ATTACHMENT)
+    {
+      VkDescriptorSet ids = AllocateDescriptorSet(m_feedback_loop_ds_layout);
+      if (ids == VK_NULL_HANDLE)
+        return false;
+
+      ds[num_ds++] = ids;
+
+      Vulkan::DescriptorSetUpdateBuilder dsub;
+      dsub.AddInputAttachmentDescriptorWrite(ids, 0, m_current_render_targets[0]->GetView(),
+                                             m_current_render_targets[0]->GetVkLayout());
       dsub.Update(m_device, false);
     }
   }
@@ -3684,25 +3790,22 @@ bool VulkanDevice::UpdateDescriptorSetsForLayout(bool new_layout, bool new_dynam
 
 bool VulkanDevice::UpdateDescriptorSets(u32 dirty)
 {
-  const bool new_layout = (dirty & DIRTY_FLAG_PIPELINE_LAYOUT) != 0;
-  const bool new_dynamic_offsets = (dirty & DIRTY_FLAG_DYNAMIC_OFFSETS) != 0;
-
   switch (m_current_pipeline_layout)
   {
     case GPUPipeline::Layout::SingleTextureAndUBO:
-      return UpdateDescriptorSetsForLayout<GPUPipeline::Layout::SingleTextureAndUBO>(new_layout, new_dynamic_offsets);
+      return UpdateDescriptorSetsForLayout<GPUPipeline::Layout::SingleTextureAndUBO>(dirty);
 
     case GPUPipeline::Layout::SingleTextureAndPushConstants:
-      return UpdateDescriptorSetsForLayout<GPUPipeline::Layout::SingleTextureAndPushConstants>(new_layout, false);
+      return UpdateDescriptorSetsForLayout<GPUPipeline::Layout::SingleTextureAndPushConstants>(dirty);
 
     case GPUPipeline::Layout::SingleTextureBufferAndPushConstants:
-      return UpdateDescriptorSetsForLayout<GPUPipeline::Layout::SingleTextureBufferAndPushConstants>(new_layout, false);
+      return UpdateDescriptorSetsForLayout<GPUPipeline::Layout::SingleTextureBufferAndPushConstants>(dirty);
 
     case GPUPipeline::Layout::MultiTextureAndUBO:
-      return UpdateDescriptorSetsForLayout<GPUPipeline::Layout::MultiTextureAndUBO>(new_layout, new_dynamic_offsets);
+      return UpdateDescriptorSetsForLayout<GPUPipeline::Layout::MultiTextureAndUBO>(dirty);
 
     case GPUPipeline::Layout::MultiTextureAndPushConstants:
-      return UpdateDescriptorSetsForLayout<GPUPipeline::Layout::MultiTextureAndPushConstants>(new_layout, false);
+      return UpdateDescriptorSetsForLayout<GPUPipeline::Layout::MultiTextureAndPushConstants>(dirty);
 
     default:
       UnreachableCode();
@@ -3721,4 +3824,79 @@ void VulkanDevice::DrawIndexed(u32 index_count, u32 base_index, u32 base_vertex)
   PreDrawCheck();
   s_stats.num_draws++;
   vkCmdDrawIndexed(GetCurrentCommandBuffer(), index_count, 1, base_index, base_vertex, 0);
+}
+
+VkImageMemoryBarrier VulkanDevice::GetColorBufferBarrier(const VulkanTexture* rt) const
+{
+  const VkImageLayout vk_layout = m_optional_extensions.vk_khr_dynamic_rendering_local_read ?
+                                    VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR :
+                                    VK_IMAGE_LAYOUT_GENERAL;
+  DebugAssert(rt->GetLayout() == VulkanTexture::Layout::FeedbackLoop);
+
+  return {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+          nullptr,
+          VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+          VK_ACCESS_INPUT_ATTACHMENT_READ_BIT,
+          vk_layout,
+          vk_layout,
+          VK_QUEUE_FAMILY_IGNORED,
+          VK_QUEUE_FAMILY_IGNORED,
+          rt->GetImage(),
+          {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 1u, 0u, 1u}};
+}
+
+void VulkanDevice::DrawIndexedWithBarrier(u32 index_count, u32 base_index, u32 base_vertex, DrawBarrier type)
+{
+  PreDrawCheck();
+
+  // TODO: The first barrier is unnecessary if we're starting the render pass.
+
+  switch (type)
+  {
+    case GPUDevice::DrawBarrier::None:
+    {
+      s_stats.num_draws++;
+      vkCmdDrawIndexed(GetCurrentCommandBuffer(), index_count, 1, base_index, base_vertex, 0);
+    }
+    break;
+
+    case GPUDevice::DrawBarrier::One:
+    {
+      DebugAssert(m_num_current_render_targets == 1);
+      s_stats.num_barriers++;
+      s_stats.num_draws++;
+
+      const VkImageMemoryBarrier barrier =
+        GetColorBufferBarrier(static_cast<VulkanTexture*>(m_current_render_targets[0]));
+      vkCmdPipelineBarrier(m_current_command_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                           VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 0, nullptr,
+                           1, &barrier);
+      vkCmdDrawIndexed(GetCurrentCommandBuffer(), index_count, 1, base_index, base_vertex, 0);
+    }
+    break;
+
+    case GPUDevice::DrawBarrier::Full:
+    {
+      DebugAssert(m_num_current_render_targets == 1);
+
+      const VkImageMemoryBarrier barrier =
+        GetColorBufferBarrier(static_cast<VulkanTexture*>(m_current_render_targets[0]));
+      const u32 indices_per_primitive = m_current_pipeline->GetVerticesPerPrimitive();
+      const u32 end_batch = base_index + index_count;
+
+      for (; base_index < end_batch; base_index += indices_per_primitive)
+      {
+        s_stats.num_barriers++;
+        s_stats.num_draws++;
+
+        vkCmdPipelineBarrier(m_current_command_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 0, nullptr,
+                             1, &barrier);
+        vkCmdDrawIndexed(GetCurrentCommandBuffer(), indices_per_primitive, 1, base_index, base_vertex, 0);
+      }
+    }
+    break;
+
+      DefaultCaseIsUnreachable();
+  }
 }

@@ -1,16 +1,19 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "memory_settings_interface.h"
+
 #include "common/assert.h"
+#include "common/error.h"
 #include "common/string_util.h"
 
 MemorySettingsInterface::MemorySettingsInterface() = default;
 
 MemorySettingsInterface::~MemorySettingsInterface() = default;
 
-bool MemorySettingsInterface::Save()
+bool MemorySettingsInterface::Save(Error* error /* = nullptr */)
 {
+  Error::SetStringView(error, "Memory settings cannot be saved.");
   return false;
 }
 
@@ -120,6 +123,20 @@ bool MemorySettingsInterface::GetStringValue(const char* section, const char* ke
     return false;
 
   *value = iter->second;
+  return true;
+}
+
+bool MemorySettingsInterface::GetStringValue(const char* section, const char* key, SmallStringBase* value) const
+{
+  const auto sit = m_sections.find(section);
+  if (sit == m_sections.end())
+    return false;
+
+  const auto iter = sit->second.find(key);
+  if (iter == sit->second.end())
+    return false;
+
+  value->assign(iter->second);
   return true;
 }
 

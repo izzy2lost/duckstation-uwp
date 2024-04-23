@@ -16,7 +16,7 @@ public:
 
   static bool UseGLSLBindingLayout();
 
-  std::string GenerateScreenQuadVertexShader();
+  std::string GenerateScreenQuadVertexShader(float z = 0.0f);
   std::string GenerateUVQuadVertexShader();
   std::string GenerateFillFragmentShader();
   std::string GenerateCopyFragmentShader();
@@ -53,7 +53,7 @@ protected:
                                  const std::initializer_list<std::pair<const char*, const char*>>& additional_inputs,
                                  bool declare_fragcoord = false, u32 num_color_outputs = 1, bool depth_output = false,
                                  bool msaa = false, bool ssaa = false, bool declare_sample_id = false,
-                                 bool noperspective_color = false, bool framebuffer_fetch = false);
+                                 bool noperspective_color = false, bool feedback_loop = false);
 
   RenderAPI m_render_api;
   bool m_glsl;

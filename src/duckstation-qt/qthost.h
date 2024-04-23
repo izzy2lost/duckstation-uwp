@@ -168,10 +168,10 @@ public Q_SLOTS:
   void stopFullscreenUI();
   void bootSystem(std::shared_ptr<SystemBootParameters> params);
   void resumeSystemFromMostRecentState();
-  void shutdownSystem(bool save_state = true);
-  void resetSystem();
+  void shutdownSystem(bool save_state, bool check_memcard_busy);
+  void resetSystem(bool check_memcard_busy);
   void setSystemPaused(bool paused, bool wait_until_paused = false);
-  void changeDisc(const QString& new_disc_filename);
+  void changeDisc(const QString& new_disc_filename, bool reset_system, bool check_memcard_busy);
   void changeDiscFromPlaylist(quint32 index);
   void loadState(const QString& filename);
   void loadState(bool global, qint32 slot);
@@ -218,6 +218,8 @@ private:
   void createBackgroundControllerPollTimer();
   void destroyBackgroundControllerPollTimer();
   void setInitialState(std::optional<bool> override_fullscreen);
+  void confirmActionIfMemoryCardBusy(const QString& action, bool cancel_resume_on_accept,
+                                     std::function<void(bool)> callback) const;
 
   QThread* m_ui_thread;
   QSemaphore m_started_semaphore;
@@ -274,6 +276,9 @@ QIcon GetAppIcon();
 
 /// Returns the base path for resources. This may be : prefixed, if we're using embedded resources.
 QString GetResourcesBasePath();
+
+/// Returns the base settings interface. Should lock before manipulating.
+INISettingsInterface* GetBaseSettingsInterface();
 
 /// Downloads the specified URL to the provided path.
 bool DownloadFile(QWidget* parent, const QString& title, std::string url, const char* path);

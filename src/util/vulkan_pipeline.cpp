@@ -1,15 +1,18 @@
-// SPDX-FileCopyrightText: 2019-2023 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "vulkan_pipeline.h"
-#include "spirv_compiler.h"
 #include "vulkan_builders.h"
 #include "vulkan_device.h"
 
 #include "common/assert.h"
 #include "common/log.h"
 
+#include "shaderc/shaderc.hpp"
+
 Log_SetChannel(VulkanDevice);
+
+static std::unique_ptr<shaderc::Compiler> s_shaderc_compiler;
 
 VulkanShader::VulkanShader(GPUShaderStage stage, VkShaderModule mod) : GPUShader(stage), m_module(mod)
 {
@@ -45,35 +48,65 @@ std::unique_ptr<GPUShader> VulkanDevice::CreateShaderFromSource(GPUShaderStage s
                                                                 const char* entry_point,
                                                                 DynamicHeapArray<u8>* out_binary)
 {
-  if (std::strcmp(entry_point, "main") != 0)
+  static constexpr const std::array<shaderc_shader_kind, static_cast<size_t>(GPUShaderStage::MaxCount)> stage_kinds = {{
+    shaderc_glsl_vertex_shader,
+    shaderc_glsl_fragment_shader,
+    shaderc_glsl_geometry_shader,
+    shaderc_glsl_compute_shader,
+  }};
+
+  // TODO: NOT thread safe, yet.
+  if (!s_shaderc_compiler)
+    s_shaderc_compiler = std::make_unique<shaderc::Compiler>();
+
+  shaderc::CompileOptions options;
+  options.SetSourceLanguage(shaderc_source_language_glsl);
+  options.SetTargetEnvironment(shaderc_target_env_vulkan, 0);
+
+  if (m_debug_device)
   {
-    Log_ErrorPrintf("Entry point must be 'main', but got '%s' instead.", entry_point);
-    return {};
+    options.SetGenerateDebugInfo();
+    if (m_optional_extensions.vk_khr_shader_non_semantic_info)
+      options.SetEmitNonSemanticDebugInfo();
+
+    options.SetOptimizationLevel(shaderc_optimization_level_zero);
+  }
+  else
+  {
+    options.SetOptimizationLevel(shaderc_optimization_level_performance);
   }
 
-  const u32 options = (m_debug_device ? SPIRVCompiler::DebugInfo : 0) | SPIRVCompiler::VulkanRules;
-
-  std::optional<SPIRVCompiler::SPIRVCodeVector> spirv = SPIRVCompiler::CompileShader(stage, source, options);
-  if (!spirv.has_value())
+  const shaderc::SpvCompilationResult result = s_shaderc_compiler->CompileGlslToSpv(
+    source.data(), source.length(), stage_kinds[static_cast<size_t>(stage)], "source", entry_point, options);
+  if (result.GetCompilationStatus() != shaderc_compilation_status_success)
   {
-    Log_ErrorPrintf("Failed to compile shader to SPIR-V.");
+    const std::string errors = result.GetErrorMessage();
+    DumpBadShader(source, errors);
+    Log_ErrorFmt("Failed to compile shader to SPIR-V:\n{}", errors);
     return {};
   }
+  else if (result.GetNumWarnings() > 0)
+  {
+    Log_WarningFmt("Shader compiled with warnings:\n{}", result.GetErrorMessage());
+  }
 
-  const size_t spirv_size = spirv->size() * sizeof(SPIRVCompiler::SPIRVCodeType);
+  const size_t spirv_size = std::distance(result.cbegin(), result.cend()) * sizeof(*result.cbegin());
+  DebugAssert(spirv_size > 0);
   if (out_binary)
   {
     out_binary->resize(spirv_size);
-    std::memcpy(out_binary->data(), spirv->data(), spirv_size);
+    std::copy(result.cbegin(), result.cend(), reinterpret_cast<uint32_t*>(out_binary->data()));
   }
 
-  return CreateShaderFromBinary(stage, std::span<const u8>(reinterpret_cast<const u8*>(spirv->data()), spirv_size));
+  return CreateShaderFromBinary(stage, std::span<const u8>(reinterpret_cast<const u8*>(result.cbegin()), spirv_size));
 }
 
 //////////////////////////////////////////////////////////////////////////
 
-VulkanPipeline::VulkanPipeline(VkPipeline pipeline, Layout layout)
-  : GPUPipeline(), m_pipeline(pipeline), m_layout(layout)
+VulkanPipeline::VulkanPipeline(VkPipeline pipeline, Layout layout, u8 vertices_per_primitive,
+                               RenderPassFlag render_pass_flags)
+  : GPUPipeline(), m_pipeline(pipeline), m_layout(layout), m_vertices_per_primitive(vertices_per_primitive),
+    m_render_pass_flags(render_pass_flags)
 {
 }
 
@@ -89,12 +122,13 @@ void VulkanPipeline::SetDebugName(const std::string_view& name)
 
 std::unique_ptr<GPUPipeline> VulkanDevice::CreatePipeline(const GPUPipeline::GraphicsConfig& config)
 {
-  static constexpr std::array<VkPrimitiveTopology, static_cast<u32>(GPUPipeline::Primitive::MaxCount)> primitives = {{
-    VK_PRIMITIVE_TOPOLOGY_POINT_LIST,     // Points
-    VK_PRIMITIVE_TOPOLOGY_LINE_LIST,      // Lines
-    VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,  // Triangles
-    VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, // TriangleStrips
-  }};
+  static constexpr std::array<std::pair<VkPrimitiveTopology, u32>, static_cast<u32>(GPUPipeline::Primitive::MaxCount)>
+    primitives = {{
+      {VK_PRIMITIVE_TOPOLOGY_POINT_LIST, 1},     // Points
+      {VK_PRIMITIVE_TOPOLOGY_LINE_LIST, 2},      // Lines
+      {VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 3},  // Triangles
+      {VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, 3}, // TriangleStrips
+    }};
 
   static constexpr u32 MAX_COMPONENTS = 4;
   static constexpr const VkFormat format_mapping[static_cast<u8>(
@@ -171,7 +205,8 @@ std::unique_ptr<GPUPipeline> VulkanDevice::CreatePipeline(const GPUPipeline::Gra
     }
   }
 
-  gpb.SetPrimitiveTopology(primitives[static_cast<u8>(config.primitive)]);
+  const auto [vk_topology, vertices_per_primitive] = primitives[static_cast<u8>(config.primitive)];
+  gpb.SetPrimitiveTopology(vk_topology);
 
   // Line width?
 
@@ -206,7 +241,8 @@ std::unique_ptr<GPUPipeline> VulkanDevice::CreatePipeline(const GPUPipeline::Gra
 
   gpb.SetPipelineLayout(m_pipeline_layouts[static_cast<u8>(config.layout)]);
 
-  if (m_optional_extensions.vk_khr_dynamic_rendering)
+  if (m_optional_extensions.vk_khr_dynamic_rendering && (m_optional_extensions.vk_khr_dynamic_rendering_local_read ||
+                                                         !(config.render_pass_flags & GPUPipeline::ColorFeedbackLoop)))
   {
     gpb.SetDynamicRendering();
 
@@ -224,6 +260,13 @@ std::unique_ptr<GPUPipeline> VulkanDevice::CreatePipeline(const GPUPipeline::Gra
       gpb.SetDynamicRenderingDepthAttachment(VulkanDevice::TEXTURE_FORMAT_MAPPING[static_cast<u8>(config.depth_format)],
                                              VK_FORMAT_UNDEFINED);
     }
+
+    if (config.render_pass_flags & GPUPipeline::ColorFeedbackLoop)
+    {
+      DebugAssert(m_optional_extensions.vk_khr_dynamic_rendering_local_read &&
+                  config.color_formats[0] != GPUTexture::Format::Unknown);
+      gpb.AddDynamicRenderingInputAttachment(0);
+    }
   }
   else
   {
@@ -236,5 +279,6 @@ std::unique_ptr<GPUPipeline> VulkanDevice::CreatePipeline(const GPUPipeline::Gra
   if (!pipeline)
     return {};
 
-  return std::unique_ptr<GPUPipeline>(new VulkanPipeline(pipeline, config.layout));
+  return std::unique_ptr<GPUPipeline>(
+    new VulkanPipeline(pipeline, config.layout, static_cast<u8>(vertices_per_primitive), config.render_pass_flags));
 }

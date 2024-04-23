@@ -46,7 +46,6 @@
 
 
 // Entrypoint into the emulator
-#include "duckstation-nogui/nogui_host.h"
 #include <util/imgui_fullscreen.h>
 #include <util/gpu_device.h>
 
@@ -159,7 +158,7 @@ void WinRTHost::SetXboxSettings(INISettingsInterface& si)
   si.SetStringValue("Pad1", "Down",       "XInput-0/DPadDown");
   si.SetStringValue("Pad1", "Left",       "XInput-0/DPadLeft");
   si.SetStringValue("Pad1", "Right",      "XInput-0/DPadRight");
-  si.SetStringValue("Pad1", "Select", "XInput-0/Back");
+  si.SetStringValue("Pad1", "Select",     "XInput-0/Back");
   si.SetStringValue("Pad1", "Start",      "XInput-0/Start");
   si.SetStringValue("Pad1", "Triangle",   "XInput-0/Y");
   si.SetStringValue("Pad1", "Cross",      "XInput-0/A");
@@ -189,7 +188,7 @@ void WinRTHost::SetXboxSettings(INISettingsInterface& si)
 
   si.SetBoolValue("Display", "DisplayAllFrames", true);
   si.SetBoolValue("Main", "SyncToHostRefreshRate", true);
-  si.SetStringValue("Display", "SyncMode", "VSync");
+  si.SetBoolValue("Display", "VSync", true);
 
   if (is_running_on_xbox)
   {
@@ -370,8 +369,8 @@ void WinRTHost::CPUThreadMainLoop()
 
       Host::PumpMessagesOnCPUThread();
       ::System::Internal::IdlePollUpdate();
-      ::System::PresentDisplay(false);
-      if (!g_gpu_device->IsVSyncActive()) // stenzek still hasn't updated this on his own NoGUI host. lmao?
+      ::System::PresentDisplay(false, false);
+      if (!g_gpu_device->IsVSyncEnabled())
         g_gpu_device->ThrottlePresentation();
     }
 }
@@ -665,7 +664,7 @@ void Host::OnAchievementsLoginRequested(Achievements::LoginRequestReason reason)
     Host::AddIconOSDMessage("uwp_achievements_login_requested", ICON_PF_INFORMATION,
                             "RetroAchievements token is invalid, displaying login window.", 5.0f);
   }
-  FullscreenUI::OpenAchievementsLoginWindow();
+  // FullscreenUI::OpenAchievementsLoginWindow();
 }
 
 void Host::OnAchievementsLoginSuccess(const char* username, u32 points, u32 sc_points, u32 unread_messages)
@@ -742,7 +741,7 @@ std::optional<WindowInfo> Host::GetTopLevelWindowInfo()
   return WinRTHost::GetPlatformWindowInfo();
 }
 
-void Host::RequestExit(bool allow_confirm)
+void Host::RequestExitApplication(bool allow_confirm)
 {
   if (::System::IsValid())
   {
@@ -752,6 +751,11 @@ void Host::RequestExit(bool allow_confirm)
   // clear the running flag, this'll break out of the main CPU loop once the VM is shutdown.
   WinRTHost::s_running.store(false, std::memory_order_release);
 }
+
+void Host::RequestExitBigPicture()
+{
+    // that dont even make sense
+} 
 
 void Host::RequestSystemShutdown(bool allow_confirm, bool save_state)
 {
@@ -937,9 +941,9 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
   {
     std::stringstream filePath;
 
-    if (args.Kind() == Windows::ApplicationModel::Activation::ActivationKind::Protocol)
+    if (args.Kind() == winrt::Windows::ApplicationModel::Activation::ActivationKind::Protocol)
     {
-      auto protocolActivatedEventArgs{args.as<Windows::ApplicationModel::Activation::ProtocolActivatedEventArgs>()};
+      auto protocolActivatedEventArgs{args.as<winrt::Windows::ApplicationModel::Activation::ProtocolActivatedEventArgs>()};
       auto query = protocolActivatedEventArgs.Uri().QueryParsed();
 
       for (uint32_t i = 0; i < query.Size(); i++)
@@ -979,7 +983,10 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
     {
       SystemBootParameters params;
       params.filename = gamePath;
-      Host::RunOnCPUThread([params = std::move(params)]() { ::System::BootSystem(std::move(params)); });
+      Host::RunOnCPUThread([params = std::move(params)]() {
+        Error error;
+        ::System::BootSystem(std::move(params), &error);
+      });
     }
   }
 

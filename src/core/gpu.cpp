@@ -164,6 +164,10 @@ void GPU::Reset(bool clear_vram)
   if (clear_vram)
     std::memset(g_vram, 0, sizeof(g_vram));
 
+  // Force event to reschedule itself.
+  m_crtc_tick_event->Deactivate();
+  m_command_tick_event->Deactivate();
+
   SoftReset();
   UpdateDisplay();
 }
@@ -211,7 +215,6 @@ void GPU::SoftReset()
   SetTextureWindow(0);
   UpdateDMARequest();
   UpdateCRTCConfig();
-  UpdateCRTCTickEvent();
   UpdateCommandTickEvent();
   UpdateGPUIdle();
 }
@@ -342,7 +345,6 @@ bool GPU::DoState(StateWrapper& sw, GPUTexture** host_texture, bool update_displ
     if (update_display)
       UpdateDisplay();
 
-    UpdateCRTCTickEvent();
     UpdateCommandTickEvent();
   }
 
@@ -467,7 +469,6 @@ void GPU::WriteRegister(u32 offset, u32 value)
     case 0x00:
       m_fifo.Push(value);
       ExecuteCommands();
-      UpdateCommandTickEvent();
       return;
 
     case 0x04:
@@ -495,16 +496,7 @@ void GPU::DMARead(u32* words, u32 word_count)
 
 void GPU::EndDMAWrite()
 {
-  m_fifo_pushed = true;
-  if (!m_syncing)
-  {
-    ExecuteCommands();
-    UpdateCommandTickEvent();
-  }
-  else
-  {
-    UpdateDMARequest();
-  }
+  ExecuteCommands();
 }
 
 /**
@@ -1029,26 +1021,24 @@ void GPU::CRTCTickEvent(TickCount ticks)
 void GPU::CommandTickEvent(TickCount ticks)
 {
   m_pending_command_ticks -= SystemTicksToGPUTicks(ticks);
-  m_command_tick_event->Deactivate();
 
-  // we can be syncing if this came from a DMA write. recursively executing commands would be bad.
-  if (!m_syncing)
-    ExecuteCommands();
-
-  UpdateGPUIdle();
-
-  if (m_pending_command_ticks <= 0)
-    m_pending_command_ticks = 0;
-  else
-    m_command_tick_event->SetIntervalAndSchedule(GPUTicksToSystemTicks(m_pending_command_ticks));
+  m_executing_commands = true;
+  ExecuteCommands();
+  UpdateCommandTickEvent();
+  m_executing_commands = false;
 }
 
 void GPU::UpdateCommandTickEvent()
 {
   if (m_pending_command_ticks <= 0)
+  {
+    m_pending_command_ticks = 0;
     m_command_tick_event->Deactivate();
-  else if (!m_command_tick_event->IsActive())
+  }
+  else
+  {
     m_command_tick_event->SetIntervalAndSchedule(GPUTicksToSystemTicks(m_pending_command_ticks));
+  }
 }
 
 void GPU::ConvertScreenCoordinatesToDisplayCoordinates(float window_x, float window_y, float* display_x,
@@ -1121,7 +1111,6 @@ u32 GPU::ReadGPUREAD()
 
         // end of transfer, catch up on any commands which were written (unlikely)
         ExecuteCommands();
-        UpdateCommandTickEvent();
         break;
       }
     }
@@ -1615,10 +1604,11 @@ bool GPU::CompileDisplayPipelines(bool display, bool deinterlace, bool chroma_sm
   plconfig.rasterization = GPUPipeline::RasterizationState::GetNoCullState();
   plconfig.depth = GPUPipeline::DepthState::GetNoTestsState();
   plconfig.blend = GPUPipeline::BlendState::GetNoBlendingState();
+  plconfig.geometry_shader = nullptr;
   plconfig.depth_format = GPUTexture::Format::Unknown;
   plconfig.samples = 1;
   plconfig.per_sample_shading = false;
-  plconfig.geometry_shader = nullptr;
+  plconfig.render_pass_flags = GPUPipeline::NoRenderPassFlags;
 
   if (display)
   {
@@ -2707,10 +2697,10 @@ void GPU::GetStatsString(SmallStringBase& str)
 {
   if (IsHardwareRenderer())
   {
-    str.format("{} HW | {} P | {} DC | {} RP | {} RB | {} C | {} W",
+    str.format("{} HW | {} P | {} DC | {} B | {} RP | {} RB | {} C | {} W",
                GPUDevice::RenderAPIToString(g_gpu_device->GetRenderAPI()), m_stats.num_primitives,
-               m_stats.host_num_draws, m_stats.host_num_render_passes, m_stats.num_reads, m_stats.num_copies,
-               m_stats.num_writes);
+               m_stats.host_num_draws, m_stats.host_num_barriers, m_stats.host_num_render_passes,
+               m_stats.host_num_downloads, m_stats.num_copies, m_stats.num_writes);
   }
   else
   {
@@ -2753,6 +2743,7 @@ void GPU::UpdateStatistics(u32 frame_count)
 
   UPDATE_GPU_STAT(buffer_streamed);
   UPDATE_GPU_STAT(num_draws);
+  UPDATE_GPU_STAT(num_barriers);
   UPDATE_GPU_STAT(num_render_passes);
   UPDATE_GPU_STAT(num_copies);
   UPDATE_GPU_STAT(num_downloads);

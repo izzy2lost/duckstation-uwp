@@ -45,6 +45,10 @@ static constexpr PhysicalMemoryAddress BASE_ADDRESS_MASK = UINT32_C(0x00FFFFFF);
 static constexpr PhysicalMemoryAddress TRANSFER_ADDRESS_MASK = UINT32_C(0x00FFFFFC);
 static constexpr PhysicalMemoryAddress LINKED_LIST_TERMINATOR = UINT32_C(0x00FFFFFF);
 
+static constexpr TickCount LINKED_LIST_HEADER_READ_TICKS = 10;
+static constexpr TickCount LINKED_LIST_BLOCK_SETUP_TICKS = 5;
+static constexpr TickCount SLICE_SIZE_WHEN_TRANSMITTING_PAD = 10;
+
 struct ChannelState
 {
   u32 base_address = 0;
@@ -172,10 +176,6 @@ static bool CanTransferChannel(Channel channel, bool ignore_halt);
 static bool IsTransferHalted();
 static void UpdateIRQ();
 
-// returns false if the DMA should now be halted
-static TickCount GetTransferSliceTicks();
-static TickCount GetTransferHaltTicks();
-
 static void HaltTransfer(TickCount duration);
 static void UnhaltTransfer(void*, TickCount ticks, TickCount ticks_late);
 
@@ -194,7 +194,7 @@ static TickCount TransferDeviceToMemory(u32 address, u32 increment, u32 word_cou
 template<Channel channel>
 static TickCount TransferMemoryToDevice(u32 address, u32 increment, u32 word_count);
 
-
+static TickCount GetMaxSliceTicks();
 
 // configuration
 static TickCount s_max_slice_ticks = 1000;
@@ -543,34 +543,15 @@ ALWAYS_INLINE_RELEASE void DMA::CompleteTransfer(Channel channel, ChannelState& 
   }
 }
 
-// Plenty of games seem to suffer from this issue where they have a linked list DMA going while polling the
-// controller. Using a too-large slice size will result in the serial timing being off, and the game thinking
-// the controller is disconnected. So we don't hurt performance too much for the general case, we reduce this
-// to equal CPU and DMA time when the controller is transferring, but otherwise leave it at the higher size.
-enum : TickCount
+TickCount DMA::GetMaxSliceTicks()
 {
-  SLICE_SIZE_WHEN_TRANSMITTING_PAD = 100,
-  HALT_TICKS_WHEN_TRANSMITTING_PAD = 100,
-  LINKED_LIST_HEADER_READ_TICKS = 10,
-  LINKED_LIST_BLOCK_SETUP_TICKS = 5,
-};
+  const TickCount max = Pad::IsTransmitting() ? SLICE_SIZE_WHEN_TRANSMITTING_PAD : s_max_slice_ticks;
+  if (!TimingEvents::IsRunningEvents())
+    return max;
 
-TickCount DMA::GetTransferSliceTicks()
-{
-#ifdef _DEBUG
-  if (Pad::IsTransmitting())
-  {
-    Log_DebugPrintf("DMA transfer while transmitting pad - using lower slice size of %u vs %u",
-                    SLICE_SIZE_WHEN_TRANSMITTING_PAD, s_max_slice_ticks);
-  }
-#endif
-
-  return Pad::IsTransmitting() ? SLICE_SIZE_WHEN_TRANSMITTING_PAD : s_max_slice_ticks;
-}
-
-TickCount DMA::GetTransferHaltTicks()
-{
-  return Pad::IsTransmitting() ? HALT_TICKS_WHEN_TRANSMITTING_PAD : s_halt_ticks;
+  const u32 current_ticks = TimingEvents::GetGlobalTickCounter();
+  const u32 max_ticks = TimingEvents::GetEventRunTickCounter() + static_cast<u32>(max);
+  return std::clamp(static_cast<TickCount>(max_ticks - current_ticks), 0, max);
 }
 
 template<DMA::Channel channel>
@@ -622,7 +603,8 @@ bool DMA::TransferChannel()
       const u8* const ram_ptr = Bus::g_ram;
       const u32 mask = Bus::g_ram_mask;
 
-      TickCount remaining_ticks = GetTransferSliceTicks();
+      const TickCount slice_ticks = GetMaxSliceTicks();
+      TickCount remaining_ticks = slice_ticks;
       while (cs.request && remaining_ticks > 0)
       {
         u32 header;
@@ -666,7 +648,7 @@ bool DMA::TransferChannel()
       if (cs.request)
       {
         // stall the transfer for a bit if we ran for too long
-        HaltTransfer(GetTransferHaltTicks());
+        HaltTransfer(s_halt_ticks);
         return false;
       }
       else
@@ -685,7 +667,7 @@ bool DMA::TransferChannel()
 
       const u32 block_size = cs.block_control.request.GetBlockSize();
       u32 blocks_remaining = cs.block_control.request.GetBlockCount();
-      TickCount ticks_remaining = GetTransferSliceTicks();
+      TickCount ticks_remaining = GetMaxSliceTicks();
 
       if (copy_to_device)
       {
@@ -740,7 +722,7 @@ bool DMA::TransferChannel()
         {
           // we got halted
           if (!s_unhalt_event->IsActive())
-            HaltTransfer(GetTransferHaltTicks());
+            HaltTransfer(s_halt_ticks);
 
           return false;
         }

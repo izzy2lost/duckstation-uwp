@@ -139,7 +139,7 @@ bool OpenGLContextWGL::SwapBuffers()
   return ::SwapBuffers(m_dc);
 }
 
-bool OpenGLContextWGL::IsCurrent()
+bool OpenGLContextWGL::IsCurrent() const
 {
   return (m_rc && wglGetCurrentContext() == m_rc);
 }
@@ -158,6 +158,11 @@ bool OpenGLContextWGL::MakeCurrent()
 bool OpenGLContextWGL::DoneCurrent()
 {
   return wglMakeCurrent(m_dc, nullptr);
+}
+
+bool OpenGLContextWGL::SupportsNegativeSwapInterval() const
+{
+  return GLAD_WGL_EXT_swap_control && GLAD_WGL_EXT_swap_control_tear;
 }
 
 bool OpenGLContextWGL::SetSwapInterval(s32 interval)

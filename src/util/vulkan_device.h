@@ -44,7 +44,6 @@ public:
   {
     bool vk_ext_memory_budget : 1;
     bool vk_ext_rasterization_order_attachment_access : 1;
-    bool vk_ext_attachment_feedback_loop_layout : 1;
     bool vk_ext_full_screen_exclusive : 1;
     bool vk_khr_get_memory_requirements2 : 1;
     bool vk_khr_bind_memory2 : 1;
@@ -52,7 +51,9 @@ public:
     bool vk_khr_dedicated_allocation : 1;
     bool vk_khr_driver_properties : 1;
     bool vk_khr_dynamic_rendering : 1;
+    bool vk_khr_dynamic_rendering_local_read : 1;
     bool vk_khr_push_descriptor : 1;
+    bool vk_khr_shader_non_semantic_info : 1;
     bool vk_ext_external_memory_host : 1;
   };
 
@@ -114,7 +115,8 @@ public:
   void PushUniformBuffer(const void* data, u32 data_size) override;
   void* MapUniformBuffer(u32 size) override;
   void UnmapUniformBuffer(u32 size) override;
-  void SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds) override;
+  void SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds,
+                        GPUPipeline::RenderPassFlag feedback_loop = GPUPipeline::NoRenderPassFlags) override;
   void SetPipeline(GPUPipeline* pipeline) override;
   void SetTextureSampler(u32 slot, GPUTexture* texture, GPUSampler* sampler) override;
   void SetTextureBuffer(u32 slot, GPUTextureBuffer* buffer) override;
@@ -122,14 +124,16 @@ public:
   void SetScissor(s32 x, s32 y, s32 width, s32 height) override;
   void Draw(u32 vertex_count, u32 base_vertex) override;
   void DrawIndexed(u32 index_count, u32 base_index, u32 base_vertex) override;
+  void DrawIndexedWithBarrier(u32 index_count, u32 base_index, u32 base_vertex, DrawBarrier type) override;
 
   bool SetGPUTimingEnabled(bool enabled) override;
   float GetAndResetAccumulatedGPUTime() override;
 
-  void SetSyncMode(DisplaySyncMode mode) override;
+  void SetVSyncEnabled(bool enabled) override;
 
   bool BeginPresent(bool skip_present) override;
-  void EndPresent() override;
+  void EndPresent(bool explicit_present) override;
+  void SubmitPresent() override;
 
   // Global state accessors
   ALWAYS_INLINE static VulkanDevice& GetInstance() { return *static_cast<VulkanDevice*>(g_gpu_device.get()); }
@@ -143,13 +147,6 @@ public:
 
   /// Returns true if Vulkan is suitable as a default for the devices in the system.
   static bool IsSuitableDefaultRenderer();
-
-  // The interaction between raster order attachment access and fbfetch is unclear.
-  ALWAYS_INLINE bool UseFeedbackLoopLayout() const
-  {
-    return (m_optional_extensions.vk_ext_attachment_feedback_loop_layout &&
-            !m_optional_extensions.vk_ext_rasterization_order_attachment_access);
-  }
 
   // Helpers for getting constants
   ALWAYS_INLINE u32 GetBufferCopyOffsetAlignment() const
@@ -165,8 +162,8 @@ public:
 
   // Creates a simple render pass.
   VkRenderPass GetRenderPass(const GPUPipeline::GraphicsConfig& config);
-  VkRenderPass GetRenderPass(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds, bool color_feedback_loop = false,
-                             bool depth_sampling = false);
+  VkRenderPass GetRenderPass(VulkanTexture* const* rts, u32 num_rts, VulkanTexture* ds,
+                             GPUPipeline::RenderPassFlag render_pass_flags);
   VkRenderPass GetSwapChainRenderPass(GPUTexture::Format format, VkAttachmentLoadOp load_op);
 
   // Gets a non-clearing version of the specified render pass. Slow, don't call in hot path.
@@ -239,9 +236,10 @@ private:
     DIRTY_FLAG_PIPELINE_LAYOUT = (1 << 1),
     DIRTY_FLAG_DYNAMIC_OFFSETS = (1 << 2),
     DIRTY_FLAG_TEXTURES_OR_SAMPLERS = (1 << 3),
+    DIRTY_FLAG_INPUT_ATTACHMENT = (1 << 4),
 
-    ALL_DIRTY_STATE =
-      DIRTY_FLAG_INITIAL | DIRTY_FLAG_PIPELINE_LAYOUT | DIRTY_FLAG_DYNAMIC_OFFSETS | DIRTY_FLAG_TEXTURES_OR_SAMPLERS,
+    ALL_DIRTY_STATE = DIRTY_FLAG_INITIAL | DIRTY_FLAG_PIPELINE_LAYOUT | DIRTY_FLAG_DYNAMIC_OFFSETS |
+                      DIRTY_FLAG_TEXTURES_OR_SAMPLERS | DIRTY_FLAG_INPUT_ATTACHMENT,
   };
 
   struct RenderPassCacheKey
@@ -259,8 +257,7 @@ private:
     u8 depth_store_op : 1;
     u8 stencil_load_op : 2;
     u8 stencil_store_op : 1;
-    u8 depth_sampling : 1;
-    u8 color_feedback_loop : 1;
+    u8 feedback_loop : 2;
     u8 samples;
 
     bool operator==(const RenderPassCacheKey& rhs) const;
@@ -311,7 +308,7 @@ private:
   bool IsDeviceImgTec() const;
   bool IsBrokenMobileDriver() const;
 
-  void SubmitCommandBuffer(VulkanSwapChain* present_swap_chain = nullptr, bool submit_on_thread = false);
+  void EndAndSubmitCommandBuffer(VulkanSwapChain* present_swap_chain, bool explicit_present, bool submit_on_thread);
   void MoveToNextCommandBuffer();
   void WaitForPresentComplete();
 
@@ -353,7 +350,7 @@ private:
   /// Set dirty flags on everything to force re-bind at next draw time.
   void InvalidateCachedState();
 
-  bool IsRenderTargetBound(const GPUTexture* tex) const;
+  s32 IsRenderTargetBoundIndex(const GPUTexture* tex) const;
 
   /// Applies any changed state.
   VkPipelineLayout GetCurrentVkPipelineLayout() const;
@@ -361,7 +358,7 @@ private:
   void PreDrawCheck();
 
   template<GPUPipeline::Layout layout>
-  bool UpdateDescriptorSetsForLayout(bool new_layout, bool new_dynamic_offsets);
+  bool UpdateDescriptorSetsForLayout(u32 dirty);
   bool UpdateDescriptorSets(u32 dirty);
 
   // Ends a render pass if we're currently in one.
@@ -374,6 +371,8 @@ private:
   VkRenderPass CreateCachedRenderPass(RenderPassCacheKey key);
   static VkFramebuffer CreateFramebuffer(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds, u32 flags);
   static void DestroyFramebuffer(VkFramebuffer fbo);
+
+  VkImageMemoryBarrier GetColorBufferBarrier(const VulkanTexture* rt) const;
 
   void BeginCommandBuffer(u32 index);
   void WaitForCommandBufferCompletion(u32 index);
@@ -445,6 +444,7 @@ private:
   VkDescriptorSetLayout m_single_texture_ds_layout = VK_NULL_HANDLE;
   VkDescriptorSetLayout m_single_texture_buffer_ds_layout = VK_NULL_HANDLE;
   VkDescriptorSetLayout m_multi_texture_ds_layout = VK_NULL_HANDLE;
+  VkDescriptorSetLayout m_feedback_loop_ds_layout = VK_NULL_HANDLE;
   std::array<VkPipelineLayout, static_cast<u8>(GPUPipeline::Layout::MaxCount)> m_pipeline_layouts = {};
 
   VulkanStreamBuffer m_vertex_buffer;
@@ -460,9 +460,10 @@ private:
   // Which bindings/state has to be updated before the next draw.
   u32 m_dirty_flags = ALL_DIRTY_STATE;
 
-  u32 m_num_current_render_targets = 0;
-  std::array<GPUTexture*, MAX_RENDER_TARGETS> m_current_render_targets = {};
-  GPUTexture* m_current_depth_target = nullptr;
+  u8 m_num_current_render_targets = 0;
+  GPUPipeline::RenderPassFlag m_current_feedback_loop = GPUPipeline::NoRenderPassFlags;
+  std::array<VulkanTexture*, MAX_RENDER_TARGETS> m_current_render_targets = {};
+  VulkanTexture* m_current_depth_target = nullptr;
   VkFramebuffer m_current_framebuffer = VK_NULL_HANDLE;
   VkRenderPass m_current_render_pass = VK_NULL_HANDLE;
 

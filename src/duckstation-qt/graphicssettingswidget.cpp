@@ -75,9 +75,6 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
   SettingWidgetBinder::BindWidgetToEnumSetting(sif, m_ui.displayScaling, "Display", "Scaling",
                                                &Settings::ParseDisplayScaling, &Settings::GetDisplayScalingName,
                                                Settings::DEFAULT_DISPLAY_SCALING);
-  SettingWidgetBinder::BindWidgetToEnumSetting(sif, m_ui.displaySyncMode, "Display", "SyncMode",
-                                               &Settings::ParseDisplaySyncMode, &Settings::GetDisplaySyncModeName,
-                                               Settings::DEFAULT_DISPLAY_SYNC_MODE);
   SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.gpuDownsampleScale, "GPU", "DownsampleScale", 1);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.trueColor, "GPU", "TrueColor", false);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.disableInterlacing, "GPU", "DisableInterlacing", true);
@@ -97,8 +94,8 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
           &GraphicsSettingsWidget::onAspectRatioChanged);
   connect(m_ui.gpuDownsampleMode, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
           &GraphicsSettingsWidget::onDownsampleModeChanged);
-  connect(m_ui.trueColor, &QCheckBox::stateChanged, this, &GraphicsSettingsWidget::onTrueColorChanged);
-  connect(m_ui.pgxpEnable, &QCheckBox::stateChanged, this, &GraphicsSettingsWidget::updatePGXPSettingsEnabled);
+  connect(m_ui.trueColor, &QCheckBox::checkStateChanged, this, &GraphicsSettingsWidget::onTrueColorChanged);
+  connect(m_ui.pgxpEnable, &QCheckBox::checkStateChanged, this, &GraphicsSettingsWidget::updatePGXPSettingsEnabled);
 
   if (!dialog->isPerGameSettings() ||
       (dialog->containsSettingValue("GPU", "Multisamples") || dialog->containsSettingValue("GPU", "PerSampleShading")))
@@ -161,9 +158,10 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.pgxpCPU, "GPU", "PGXPCPU", false);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.pgxpVertexCache, "GPU", "PGXPVertexCache", false);
 
-  connect(m_ui.pgxpTextureCorrection, &QCheckBox::stateChanged, this,
+  connect(m_ui.pgxpTextureCorrection, &QCheckBox::checkStateChanged, this,
           &GraphicsSettingsWidget::updatePGXPSettingsEnabled);
-  connect(m_ui.pgxpDepthBuffer, &QCheckBox::stateChanged, this, &GraphicsSettingsWidget::updatePGXPSettingsEnabled);
+  connect(m_ui.pgxpDepthBuffer, &QCheckBox::checkStateChanged, this,
+          &GraphicsSettingsWidget::updatePGXPSettingsEnabled);
 
   // OSD Tab
 
@@ -176,6 +174,8 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showGPU, "Display", "ShowGPU", false);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showInput, "Display", "ShowInputs", false);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showGPUStatistics, "Display", "ShowGPUStatistics", false);
+  SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showLatencyStatistics, "Display", "ShowLatencyStatistics",
+                                               false);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showStatusIndicators, "Display", "ShowStatusIndicators", true);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showFrameTimes, "Display", "ShowFrameTimes", false);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showSettings, "Display", "ShowEnhancements", false);
@@ -209,9 +209,9 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
                                               "DumpVRAMWriteHeightThreshold",
                                               Settings::DEFAULT_VRAM_WRITE_DUMP_HEIGHT_THRESHOLD);
 
-  connect(m_ui.vramWriteReplacement, &QCheckBox::stateChanged, this,
+  connect(m_ui.vramWriteReplacement, &QCheckBox::checkStateChanged, this,
           &GraphicsSettingsWidget::onEnableAnyTextureReplacementsChanged);
-  connect(m_ui.vramWriteDumping, &QCheckBox::stateChanged, this,
+  connect(m_ui.vramWriteDumping, &QCheckBox::checkStateChanged, this,
           &GraphicsSettingsWidget::onEnableVRAMWriteDumpingChanged);
 
   // Debugging Tab
@@ -270,7 +270,7 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
     tr("Changes the aspect ratio used to display the console's output to the screen. The default is Auto (Game Native) "
        "which automatically adjusts the aspect ratio to match how a game would be shown on a typical TV of the era."));
   dialog->registerWidgetHelp(
-    m_ui.displayCropMode, tr("Deinterlacing"),
+    m_ui.displayDeinterlacing, tr("Deinterlacing"),
     QString::fromUtf8(Settings::GetDisplayDeinterlacingModeName(Settings::DEFAULT_DISPLAY_DEINTERLACING_MODE)),
     tr("Determines which algorithm is used to convert interlaced frames to progressive for display on your system. "
        "Generally, the \"Disable Interlacing\" enhancement provides better quality output, but some games require "
@@ -284,10 +284,6 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
   dialog->registerWidgetHelp(
     m_ui.displayScaling, tr("Scaling"), tr("Bilinear (Smooth)"),
     tr("Determines how the emulated console's output is upscaled or downscaled to your monitor's resolution."));
-  dialog->registerWidgetHelp(
-    m_ui.displaySyncMode, tr("VSync"), tr("Unchecked"),
-    tr("Enable this option to match DuckStation's refresh rate with your current monitor or screen. "
-       "VSync is automatically disabled when it is not possible (e.g. running at non-100% speed)."));
   dialog->registerWidgetHelp(
     m_ui.trueColor, tr("True Color Rendering"), tr("Checked"),
     tr("Forces the precision of colours output to the console's framebuffer to use the full 8 bits of precision per "
@@ -346,7 +342,7 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
                                 "This can measurably improve performance in the Vulkan renderer."));
   dialog->registerWidgetHelp(
     m_ui.stretchDisplayVertically, tr("Stretch Vertically"), tr("Unchecked"),
-    tr("Prefers stretching the display vertically instead of horizontally, wheen applying the display aspect ratio."));
+    tr("Prefers stretching the display vertically instead of horizontally, when applying the display aspect ratio."));
 #ifdef _WIN32
   dialog->registerWidgetHelp(m_ui.blitSwapChain, tr("Use Blit Swap Chain"), tr("Unchecked"),
                              tr("Uses a blit presentation model instead of flipping when using the Direct3D 11 "
@@ -433,12 +429,15 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
   dialog->registerWidgetHelp(m_ui.showGPUStatistics, tr("Show GPU Statistics"), tr("Unchecked"),
                              tr("Shows information about the emulated GPU in the top-right corner of the display."));
   dialog->registerWidgetHelp(
+    m_ui.showLatencyStatistics, tr("Show Latency Statistics"), tr("Unchecked"),
+    tr("Shows information about input and audio latency in the top-right corner of the display."));
+  dialog->registerWidgetHelp(
     m_ui.showFrameTimes, tr("Show Frame Times"), tr("Unchecked"),
     tr("Shows the history of frame rendering times as a graph in the top-right corner of the display."));
   dialog->registerWidgetHelp(
     m_ui.showInput, tr("Show Controller Input"), tr("Unchecked"),
     tr("Shows the current controller state of the system in the bottom-left corner of the display."));
-  dialog->registerWidgetHelp(m_ui.showInput, tr("Show Settings"), tr("Unchecked"),
+  dialog->registerWidgetHelp(m_ui.showSettings, tr("Show Settings"), tr("Unchecked"),
                              tr("Shows a summary of current settings in the bottom-right corner of the display."));
   dialog->registerWidgetHelp(m_ui.showStatusIndicators, tr("Show Status Indicators"), tr("Checked"),
                              tr("Shows indicators on screen when the system is not running in its \"normal\" state. "
@@ -453,7 +452,7 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
     m_ui.screenshotFormat, tr("Screenshot Format"), tr("PNG"),
     tr("Selects the format which will be used to save screenshots. JPEG produces smaller files, but loses detail."));
   dialog->registerWidgetHelp(m_ui.screenshotQuality, tr("Screenshot Quality"),
-                             QStringLiteral("%1%%").arg(Settings::DEFAULT_DISPLAY_SCREENSHOT_QUALITY),
+                             QStringLiteral("%1%").arg(Settings::DEFAULT_DISPLAY_SCREENSHOT_QUALITY),
                              tr("Selects the quality at which screenshots will be compressed. Higher values preserve "
                                 "more detail for JPEG, and reduce file size for PNG."));
 
@@ -548,12 +547,6 @@ void GraphicsSettingsWidget::setupAdditionalUi()
   {
     m_ui.displayScaling->addItem(
       QString::fromUtf8(Settings::GetDisplayScalingDisplayName(static_cast<DisplayScalingMode>(i))));
-  }
-
-  for (u32 i = 0; i < static_cast<u32>(DisplaySyncMode::Count); i++)
-  {
-    m_ui.displaySyncMode->addItem(
-      QString::fromUtf8(Settings::GetDisplaySyncModeDisplayName(static_cast<DisplaySyncMode>(i))));
   }
 
   // Advanced Tab

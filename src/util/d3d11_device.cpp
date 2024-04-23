@@ -186,9 +186,11 @@ void D3D11Device::SetFeatures(FeatureMask disabled_features)
   m_features.texture_copy_to_self = false;
   m_features.supports_texture_buffers = !(disabled_features & FEATURE_MASK_TEXTURE_BUFFERS);
   m_features.texture_buffers_emulated_with_ssbo = false;
+  m_features.feedback_loops = false;
   m_features.geometry_shaders = !(disabled_features & FEATURE_MASK_GEOMETRY_SHADERS);
   m_features.partial_msaa_resolve = false;
   m_features.memory_import = false;
+  m_features.explicit_present = false;
   m_features.gpu_timing = true;
   m_features.shader_cache = true;
   m_features.pipeline_cache = false;
@@ -634,7 +636,7 @@ bool D3D11Device::BeginPresent(bool skip_present)
   if (!m_swap_chain)
   {
     // Note: Really slow on Intel...
-    m_context->Flush();
+    //m_context->Flush();
     TrimTexturePool();
     return false;
   }
@@ -655,7 +657,7 @@ bool D3D11Device::BeginPresent(bool skip_present)
   // in this configuration. It does reduce accuracy a little, but better than seeing 100% all of
   // the time, when it's more like a couple of percent.
 
-  if ((m_sync_mode == DisplaySyncMode::VSync || m_sync_mode == DisplaySyncMode::VSyncRelaxed) && m_gpu_timing_enabled)
+  if (m_vsync_enabled && m_gpu_timing_enabled)
     PopTimestampQuery();
 
   static constexpr float clear_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -668,13 +670,16 @@ bool D3D11Device::BeginPresent(bool skip_present)
   return true;
 }
 
-void D3D11Device::EndPresent()
+void D3D11Device::EndPresent(bool explicit_present)
 {
+  DebugAssert(!explicit_present);
   DebugAssert(m_num_current_render_targets == 0 && !m_current_depth_target);
 
-  if (m_sync_mode != DisplaySyncMode::VSync && m_sync_mode != DisplaySyncMode::VSyncRelaxed && m_gpu_timing_enabled)
+  if (m_vsync_enabled && m_gpu_timing_enabled)
     PopTimestampQuery();
-  if (m_sync_mode == DisplaySyncMode::VSync || m_sync_mode == DisplaySyncMode::VSyncRelaxed)
+
+  // DirectX has no concept of tear-or-sync. I guess if we measured times ourselves, we could implement it.
+  if (m_vsync_enabled)
     m_swap_chain->Present(BoolToUInt32(1), 0);
   else if (m_using_allow_tearing) // Disabled or VRR, VRR requires the allow tearing flag :/
     m_swap_chain->Present(0, DXGI_PRESENT_ALLOW_TEARING);
@@ -685,6 +690,11 @@ void D3D11Device::EndPresent()
     KickTimestampQuery();
 
   TrimTexturePool();
+}
+
+void D3D11Device::SubmitPresent()
+{
+  Panic("Not supported by this API.");
 }
 
 GPUDevice::AdapterAndModeList D3D11Device::StaticGetAdapterAndModeList()
@@ -958,9 +968,10 @@ void D3D11Device::UnmapUniformBuffer(u32 size)
   }
 }
 
-void D3D11Device::SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds)
+void D3D11Device::SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds, GPUPipeline::RenderPassFlag feedback_loop)
 {
   ID3D11RenderTargetView* rtvs[MAX_RENDER_TARGETS];
+  DebugAssert(!feedback_loop);
 
   bool changed = (m_num_current_render_targets != num_rts || m_current_depth_target != ds);
   m_current_depth_target = static_cast<D3D11Texture*>(ds);
@@ -1105,4 +1116,9 @@ void D3D11Device::DrawIndexed(u32 index_count, u32 base_index, u32 base_vertex)
   DebugAssert(!m_vertex_buffer.IsMapped() && !m_index_buffer.IsMapped());
   s_stats.num_draws++;
   m_context->DrawIndexed(index_count, base_index, base_vertex);
+}
+
+void D3D11Device::DrawIndexedWithBarrier(u32 index_count, u32 base_index, u32 base_vertex, DrawBarrier type)
+{
+  Panic("Barriers are not supported");
 }

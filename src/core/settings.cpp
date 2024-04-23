@@ -248,10 +248,6 @@ void Settings::Load(SettingsInterface& si)
   display_scaling =
     ParseDisplayScaling(si.GetStringValue("Display", "Scaling", GetDisplayScalingName(DEFAULT_DISPLAY_SCALING)).c_str())
       .value_or(DEFAULT_DISPLAY_SCALING);
-  display_sync_mode =
-    ParseDisplaySyncMode(
-      si.GetStringValue("Display", "SyncMode", GetDisplaySyncModeName(DEFAULT_DISPLAY_SYNC_MODE)).c_str())
-      .value_or(DEFAULT_DISPLAY_SYNC_MODE);
   display_exclusive_fullscreen_control =
     ParseDisplayExclusiveFullscreenControl(
       si.GetStringValue("Display", "ExclusiveFullscreenControl",
@@ -270,6 +266,11 @@ void Settings::Load(SettingsInterface& si)
       .value_or(DEFAULT_DISPLAY_SCREENSHOT_FORMAT);
   display_screenshot_quality = static_cast<u8>(
     std::clamp<u32>(si.GetUIntValue("Display", "ScreenshotQuality", DEFAULT_DISPLAY_SCREENSHOT_QUALITY), 1, 100));
+  display_optimal_frame_pacing = si.GetBoolValue("Display", "OptimalFramePacing", false);
+  display_pre_frame_sleep = si.GetBoolValue("Display", "PreFrameSleep", false);
+  display_pre_frame_sleep_buffer =
+    si.GetFloatValue("Display", "PreFrameSleepBuffer", DEFAULT_DISPLAY_PRE_FRAME_SLEEP_BUFFER);
+  display_vsync = si.GetBoolValue("Display", "VSync", false);
   display_force_4_3_for_24bit = si.GetBoolValue("Display", "Force4_3For24Bit", false);
   display_active_start_offset = static_cast<s16>(si.GetIntValue("Display", "ActiveStartOffset", 0));
   display_active_end_offset = static_cast<s16>(si.GetIntValue("Display", "ActiveEndOffset", 0));
@@ -280,13 +281,13 @@ void Settings::Load(SettingsInterface& si)
   display_show_speed = si.GetBoolValue("Display", "ShowSpeed", false);
   display_show_gpu_stats = si.GetBoolValue("Display", "ShowGPUStatistics", false);
   display_show_resolution = si.GetBoolValue("Display", "ShowResolution", false);
+  display_show_latency_stats = si.GetBoolValue("Display", "ShowLatencyStatistics", false);
   display_show_cpu_usage = si.GetBoolValue("Display", "ShowCPU", false);
   display_show_gpu_usage = si.GetBoolValue("Display", "ShowGPU", false);
   display_show_frame_times = si.GetBoolValue("Display", "ShowFrameTimes", false);
   display_show_status_indicators = si.GetBoolValue("Display", "ShowStatusIndicators", true);
   display_show_inputs = si.GetBoolValue("Display", "ShowInputs", false);
   display_show_enhancements = si.GetBoolValue("Display", "ShowEnhancements", false);
-  display_all_frames = si.GetBoolValue("Display", "DisplayAllFrames", false);
   display_stretch_vertically = si.GetBoolValue("Display", "StretchVertically", false);
   display_max_fps = si.GetFloatValue("Display", "MaxFPS", DEFAULT_DISPLAY_MAX_FPS);
   display_osd_scale = si.GetFloatValue("Display", "OSDScale", DEFAULT_OSD_SCALE);
@@ -305,21 +306,16 @@ void Settings::Load(SettingsInterface& si)
   cdrom_seek_speedup = si.GetIntValue("CDROM", "SeekSpeedup", 1);
 
   audio_backend =
-    ParseAudioBackend(si.GetStringValue("Audio", "Backend", GetAudioBackendName(DEFAULT_AUDIO_BACKEND)).c_str())
-      .value_or(DEFAULT_AUDIO_BACKEND);
+    AudioStream::ParseBackendName(
+      si.GetStringValue("Audio", "Backend", AudioStream::GetBackendName(AudioStream::DEFAULT_BACKEND)).c_str())
+      .value_or(AudioStream::DEFAULT_BACKEND);
   audio_driver = si.GetStringValue("Audio", "Driver");
   audio_output_device = si.GetStringValue("Audio", "OutputDevice");
-  audio_stretch_mode =
-    AudioStream::ParseStretchMode(
-      si.GetStringValue("Audio", "StretchMode", AudioStream::GetStretchModeName(DEFAULT_AUDIO_STRETCH_MODE)).c_str())
-      .value_or(DEFAULT_AUDIO_STRETCH_MODE);
-  audio_output_latency_ms = si.GetUIntValue("Audio", "OutputLatencyMS", DEFAULT_AUDIO_OUTPUT_LATENCY_MS);
-  audio_buffer_ms = si.GetUIntValue("Audio", "BufferMS", DEFAULT_AUDIO_BUFFER_MS);
+  audio_stream_parameters.Load(si, "Audio");
   audio_output_volume = si.GetUIntValue("Audio", "OutputVolume", 100);
   audio_fast_forward_volume = si.GetUIntValue("Audio", "FastForwardVolume", 100);
 
   audio_output_muted = si.GetBoolValue("Audio", "OutputMuted", false);
-  audio_dump_on_boot = si.GetBoolValue("Audio", "DumpOnBoot", false);
 
   use_old_mdec_routines = si.GetBoolValue("Hacks", "UseOldMDECRoutines", false);
   pcdrv_enable = si.GetBoolValue("PCDrv", "Enabled", false);
@@ -422,6 +418,9 @@ void Settings::Load(SettingsInterface& si)
     si.GetIntValue("TextureReplacements", "DumpVRAMWriteHeightThreshold", 128);
 
 #ifdef __ANDROID__
+  // No expansion due to license incompatibility.
+  audio_expansion_mode = AudioExpansionMode::Disabled;
+
   // Android users are incredibly silly and don't understand that stretch is in the aspect ratio list...
   if (si.GetBoolValue("Display", "Stretch", false))
     display_aspect_ratio = DisplayAspectRatio::MatchWindow;
@@ -523,7 +522,10 @@ void Settings::Save(SettingsInterface& si, bool ignore_base) const
   si.SetStringValue("Display", "AspectRatio", GetDisplayAspectRatioName(display_aspect_ratio));
   si.SetStringValue("Display", "Alignment", GetDisplayAlignmentName(display_alignment));
   si.SetStringValue("Display", "Scaling", GetDisplayScalingName(display_scaling));
-  si.SetStringValue("Display", "SyncMode", GetDisplaySyncModeName(display_sync_mode));
+  si.SetBoolValue("Display", "OptimalFramePacing", display_optimal_frame_pacing);
+  si.SetBoolValue("Display", "PreFrameSleep", display_pre_frame_sleep);
+  si.SetFloatValue("Display", "PreFrameSleepBuffer", display_pre_frame_sleep_buffer);
+  si.SetBoolValue("Display", "VSync", display_vsync);
   si.SetStringValue("Display", "ExclusiveFullscreenControl",
                     GetDisplayExclusiveFullscreenControlName(display_exclusive_fullscreen_control));
   si.SetStringValue("Display", "ScreenshotMode", GetDisplayScreenshotModeName(display_screenshot_mode));
@@ -537,6 +539,7 @@ void Settings::Save(SettingsInterface& si, bool ignore_base) const
     si.SetBoolValue("Display", "ShowFPS", display_show_fps);
     si.SetBoolValue("Display", "ShowSpeed", display_show_speed);
     si.SetBoolValue("Display", "ShowResolution", display_show_resolution);
+    si.SetBoolValue("Display", "ShowLatencyStatistics", display_show_latency_stats);
     si.SetBoolValue("Display", "ShowGPUStatistics", display_show_gpu_stats);
     si.SetBoolValue("Display", "ShowCPU", display_show_cpu_usage);
     si.SetBoolValue("Display", "ShowGPU", display_show_gpu_usage);
@@ -547,7 +550,6 @@ void Settings::Save(SettingsInterface& si, bool ignore_base) const
     si.SetFloatValue("Display", "OSDScale", display_osd_scale);
   }
 
-  si.SetBoolValue("Display", "DisplayAllFrames", display_all_frames);
   si.SetBoolValue("Display", "StretchVertically", display_stretch_vertically);
   si.SetFloatValue("Display", "MaxFPS", display_max_fps);
 
@@ -560,16 +562,13 @@ void Settings::Save(SettingsInterface& si, bool ignore_base) const
   si.SetIntValue("CDROM", "ReadSpeedup", cdrom_read_speedup);
   si.SetIntValue("CDROM", "SeekSpeedup", cdrom_seek_speedup);
 
-  si.SetStringValue("Audio", "Backend", GetAudioBackendName(audio_backend));
+  si.SetStringValue("Audio", "Backend", AudioStream::GetBackendName(audio_backend));
   si.SetStringValue("Audio", "Driver", audio_driver.c_str());
   si.SetStringValue("Audio", "OutputDevice", audio_output_device.c_str());
-  si.SetStringValue("Audio", "StretchMode", AudioStream::GetStretchModeName(audio_stretch_mode));
-  si.SetUIntValue("Audio", "BufferMS", audio_buffer_ms);
-  si.SetUIntValue("Audio", "OutputLatencyMS", audio_output_latency_ms);
+  audio_stream_parameters.Save(si, "Audio");
   si.SetUIntValue("Audio", "OutputVolume", audio_output_volume);
   si.SetUIntValue("Audio", "FastForwardVolume", audio_fast_forward_volume);
   si.SetBoolValue("Audio", "OutputMuted", audio_output_muted);
-  si.SetBoolValue("Audio", "DumpOnBoot", audio_dump_on_boot);
 
   si.SetBoolValue("Hacks", "UseOldMDECRoutines", use_old_mdec_routines);
 
@@ -685,7 +684,6 @@ void Settings::FixIncompatibleSettings(bool display_osd_messages)
 {
   if (g_settings.disable_all_enhancements)
   {
-    Log_WarningPrintf("All enhancements disabled by config setting.");
     g_settings.cpu_overclock_enable = false;
     g_settings.cpu_overclock_active = false;
     g_settings.enable_8mb_ram = false;
@@ -713,7 +711,9 @@ void Settings::FixIncompatibleSettings(bool display_osd_messages)
 
   if (g_settings.pcdrv_enable && g_settings.pcdrv_root.empty())
   {
-    Log_WarningPrintf("Disabling PCDrv because no root directory is specified.");
+    Host::AddKeyedOSDMessage("pcdrv_disabled_no_root",
+                             TRANSLATE_STR("OSDMessage", "Disabling PCDrv because no root directory is specified."),
+                             Host::OSD_WARNING_DURATION);
     g_settings.pcdrv_enable = false;
   }
 
@@ -757,8 +757,9 @@ void Settings::FixIncompatibleSettings(bool display_osd_messages)
 
   if (g_settings.IsRunaheadEnabled() && g_settings.rewind_enable)
   {
-    Host::AddKeyedOSDMessage("rewind_disabled_android",
-                             TRANSLATE_STR("OSDMessage", "Rewind is disabled because runahead is enabled."), 10.0f);
+    Host::AddKeyedOSDMessage("rewind_disabled",
+                             TRANSLATE_STR("OSDMessage", "Rewind is disabled because runahead is enabled."),
+                             Host::OSD_WARNING_DURATION);
     g_settings.rewind_enable = false;
   }
 
@@ -1452,47 +1453,6 @@ const char* Settings::GetDisplayScalingDisplayName(DisplayScalingMode mode)
   return Host::TranslateToCString("DisplayScalingMode", s_display_scaling_display_names[static_cast<int>(mode)]);
 }
 
-static constexpr const std::array s_display_sync_mode_names = {
-  "Disabled",
-  "VSync",
-  "VSyncRelaxed",
-#ifndef _UWP
-  "VRR",
-#endif
-};
-static constexpr const std::array s_display_sync_mode_display_names = {
-  TRANSLATE_NOOP("Settings", "Disabled"),
-  TRANSLATE_NOOP("Settings", "VSync"),
-  TRANSLATE_NOOP("Settings", "Relaxed VSync"),
-#ifndef _UWP
-  TRANSLATE_NOOP("Settings", "VRR/FreeSync/GSync"),
-#endif
-};
-
-std::optional<DisplaySyncMode> Settings::ParseDisplaySyncMode(const char* str)
-{
-  int index = 0;
-  for (const char* name : s_display_sync_mode_names)
-  {
-    if (StringUtil::Strcasecmp(name, str) == 0)
-      return static_cast<DisplaySyncMode>(index);
-
-    index++;
-  }
-
-  return std::nullopt;
-}
-
-const char* Settings::GetDisplaySyncModeName(DisplaySyncMode mode)
-{
-  return s_display_sync_mode_names[static_cast<size_t>(mode)];
-}
-
-const char* Settings::GetDisplaySyncModeDisplayName(DisplaySyncMode mode)
-{
-  return Host::TranslateToCString("Settings", s_display_sync_mode_display_names[static_cast<size_t>(mode)]);
-}
-
 static constexpr const std::array s_display_exclusive_fullscreen_mode_names = {
   "Automatic",
   "Disallowed",
@@ -1609,64 +1569,9 @@ const char* Settings::GetDisplayScreenshotFormatExtension(DisplayScreenshotForma
   return s_display_screenshot_format_extensions[static_cast<size_t>(format)];
 }
 
-static constexpr const std::array s_audio_backend_names = {
-  "Null",
-#ifdef ENABLE_CUBEB
-  "Cubeb",
-#endif
-#ifdef ENABLE_SDL2
-  "SDL",
-#endif
-#ifdef _WIN32
-  "XAudio2",
-#endif
-#ifdef __ANDROID__
-  "AAudio",  "OpenSLES",
-#endif
-};
-static constexpr const std::array s_audio_backend_display_names = {
-  TRANSLATE_NOOP("AudioBackend", "Null (No Output)"),
-#ifdef ENABLE_CUBEB
-  TRANSLATE_NOOP("AudioBackend", "Cubeb"),
-#endif
-#ifdef ENABLE_SDL2
-  TRANSLATE_NOOP("AudioBackend", "SDL"),
-#endif
-#ifdef _WIN32
-  TRANSLATE_NOOP("AudioBackend", "XAudio2"),
-#endif
-#ifdef __ANDROID__
-  "AAudio",
-  "OpenSL ES",
-#endif
-};
-
-std::optional<AudioBackend> Settings::ParseAudioBackend(const char* str)
-{
-  int index = 0;
-  for (const char* name : s_audio_backend_names)
-  {
-    if (StringUtil::Strcasecmp(name, str) == 0)
-      return static_cast<AudioBackend>(index);
-
-    index++;
-  }
-
-  return std::nullopt;
-}
-
-const char* Settings::GetAudioBackendName(AudioBackend backend)
-{
-  return s_audio_backend_names[static_cast<int>(backend)];
-}
-
-const char* Settings::GetAudioBackendDisplayName(AudioBackend backend)
-{
-  return Host::TranslateToCString("AudioBackend", s_audio_backend_display_names[static_cast<int>(backend)]);
-}
-
 static constexpr const std::array s_controller_type_names = {
-  "None", "DigitalController", "AnalogController", "AnalogJoystick", "GunCon", "PlayStationMouse", "NeGcon"};
+  "None",   "DigitalController", "AnalogController", "AnalogJoystick",
+  "GunCon", "PlayStationMouse",  "NeGcon",           "NeGconRumble"};
 static constexpr const std::array s_controller_display_names = {
   TRANSLATE_NOOP("ControllerType", "None"),
   TRANSLATE_NOOP("ControllerType", "Digital Controller"),
@@ -1674,7 +1579,8 @@ static constexpr const std::array s_controller_display_names = {
   TRANSLATE_NOOP("ControllerType", "Analog Joystick"),
   TRANSLATE_NOOP("ControllerType", "GunCon"),
   TRANSLATE_NOOP("ControllerType", "PlayStation Mouse"),
-  TRANSLATE_NOOP("ControllerType", "NeGcon")};
+  TRANSLATE_NOOP("ControllerType", "NeGcon"),
+  TRANSLATE_NOOP("ControllerType", "NeGcon Rumble")};
 
 std::optional<ControllerType> Settings::ParseControllerTypeName(std::string_view str)
 {
@@ -1860,6 +1766,7 @@ static std::string LoadPathFromSettings(SettingsInterface& si, const std::string
     value = def;
   if (!Path::IsAbsolute(value))
     value = Path::Combine(root, value);
+  value = Path::RealPath(value);
   return value;
 }
 
@@ -2068,8 +1975,9 @@ static const char* s_log_filters[] = {
   "WAVWriter",
   "WindowInfo",
 
-#ifdef ENABLE_CUBEB
+#if !defined(__ANDROID__) && !defined(_UWP)
   "CubebAudioStream",
+  "SDLAudioStream",
 #endif
 
 #ifdef ENABLE_OPENGL
@@ -2086,9 +1994,11 @@ static const char* s_log_filters[] = {
   "D3D12Device",
   "D3D12StreamBuffer",
   "D3DCommon",
+#ifndef _UWP
   "DInputSource",
   "Win32ProgressCallback",
   "Win32RawInputSource",
+#endif
   "XAudio2AudioStream",
   "XInputSource",
 #elif defined(__APPLE__)

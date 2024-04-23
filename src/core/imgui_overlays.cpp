@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2023 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #define IMGUI_DEFINE_MATH_OPERATORS
@@ -26,6 +26,7 @@
 #include "common/align.h"
 #include "common/assert.h"
 #include "common/easing.h"
+#include "common/error.h"
 #include "common/file_system.h"
 #include "common/intrin.h"
 #include "common/log.h"
@@ -206,7 +207,7 @@ void Host::DisplayLoadingScreen(const char* message, int progress_min /*= -1*/, 
   if (g_gpu_device->BeginPresent(false))
   {
     g_gpu_device->RenderImGui();
-    g_gpu_device->EndPresent();
+    g_gpu_device->EndPresent(false);
   }
 
   ImGui::NewFrame();
@@ -348,6 +349,12 @@ void ImGuiManager::DrawPerformanceOverlay()
       DRAW_LINE(fixed_font, text, IM_COL32(255, 255, 255, 255));
     }
 
+    if (g_settings.display_show_latency_stats)
+    {
+      System::FormatLatencyStats(text);
+      DRAW_LINE(fixed_font, text, IM_COL32(255, 255, 255, 255));
+    }
+
     if (g_settings.display_show_cpu_usage)
     {
       text.format("{:.2f}ms | {:.2f}ms | {:.2f}ms", System::GetMinimumFrameTime(), System::GetAverageFrameTime(),
@@ -409,15 +416,6 @@ void ImGuiManager::DrawPerformanceOverlay()
         FormatProcessorStat(text, System::GetSWThreadUsage(), System::GetSWThreadAverageTime());
         DRAW_LINE(fixed_font, text, IM_COL32(255, 255, 255, 255));
       }
-
-#if 0
-      {
-        AudioStream* stream = g_spu.GetOutputStream();
-        const u32 frames = stream->GetBufferedFramesRelaxed();
-        text.fmt("Audio: {:<4u}f/{:<3u}ms", frames, AudioStream::GetMSForBufferSize(stream->GetSampleRate(), frames));
-        DRAW_LINE(fixed_font, text, IM_COL32(255, 255, 255, 255));
-      }
-#endif
     }
 
     if (g_settings.display_show_gpu_usage && g_gpu_device->IsGPUTimingEnabled())
@@ -837,19 +835,19 @@ void SaveStateSelectorUI::DestroyTextures()
 
 void SaveStateSelectorUI::RefreshHotkeyLegend()
 {
-  auto format_legend_entry = [](std::string binding, std::string_view caption) {
+  auto format_legend_entry = [](SmallString binding, std::string_view caption) {
     InputManager::PrettifyInputBinding(binding);
     return fmt::format("{} - {}", binding, caption);
   };
 
-  s_load_legend = format_legend_entry(Host::GetStringSettingValue("Hotkeys", "LoadSelectedSaveState"),
-                                      TRANSLATE_STR("SaveStateSelectorUI", "Load"));
-  s_save_legend = format_legend_entry(Host::GetStringSettingValue("Hotkeys", "SaveSelectedSaveState"),
-                                      TRANSLATE_STR("SaveStateSelectorUI", "Save"));
-  s_prev_legend = format_legend_entry(Host::GetStringSettingValue("Hotkeys", "SelectPreviousSaveStateSlot"),
-                                      TRANSLATE_STR("SaveStateSelectorUI", "Select Previous"));
-  s_next_legend = format_legend_entry(Host::GetStringSettingValue("Hotkeys", "SelectNextSaveStateSlot"),
-                                      TRANSLATE_STR("SaveStateSelectorUI", "Select Next"));
+  s_load_legend = format_legend_entry(Host::GetSmallStringSettingValue("Hotkeys", "LoadSelectedSaveState"),
+                                      TRANSLATE_SV("SaveStateSelectorUI", "Load"));
+  s_save_legend = format_legend_entry(Host::GetSmallStringSettingValue("Hotkeys", "SaveSelectedSaveState"),
+                                      TRANSLATE_SV("SaveStateSelectorUI", "Save"));
+  s_prev_legend = format_legend_entry(Host::GetSmallStringSettingValue("Hotkeys", "SelectPreviousSaveStateSlot"),
+                                      TRANSLATE_SV("SaveStateSelectorUI", "Select Previous"));
+  s_next_legend = format_legend_entry(Host::GetSmallStringSettingValue("Hotkeys", "SelectNextSaveStateSlot"),
+                                      TRANSLATE_SV("SaveStateSelectorUI", "Select Next"));
 }
 
 void SaveStateSelectorUI::SelectNextSlot(bool open_selector)
@@ -1056,18 +1054,19 @@ void SaveStateSelectorUI::Draw()
                         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground);
     {
       ImGui::SetCursorPosX(padding);
-      ImGui::BeginTable("table", 2);
+      if (ImGui::BeginTable("table", 2))
+      {
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(s_load_legend.c_str());
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(s_prev_legend.c_str());
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(s_save_legend.c_str());
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(s_next_legend.c_str());
 
-      ImGui::TableNextColumn();
-      ImGui::TextUnformatted(s_load_legend.c_str());
-      ImGui::TableNextColumn();
-      ImGui::TextUnformatted(s_prev_legend.c_str());
-      ImGui::TableNextColumn();
-      ImGui::TextUnformatted(s_save_legend.c_str());
-      ImGui::TableNextColumn();
-      ImGui::TextUnformatted(s_next_legend.c_str());
-
-      ImGui::EndTable();
+        ImGui::EndTable();
+      }
     }
     ImGui::EndChild();
   }
@@ -1114,7 +1113,14 @@ void SaveStateSelectorUI::LoadCurrentSlot()
   {
     if (FileSystem::FileExists(path.c_str()))
     {
-      System::LoadState(path.c_str());
+      Error error;
+      if (!System::LoadState(path.c_str(), &error))
+      {
+        Host::AddKeyedOSDMessage("LoadState",
+                                 fmt::format(TRANSLATE_FS("OSDMessage", "Failed to load state from slot {0}:\n{1}"),
+                                             GetCurrentSlot(), error.GetDescription()),
+                                 Host::OSD_ERROR_DURATION);
+      }
     }
     else
     {
@@ -1133,7 +1139,16 @@ void SaveStateSelectorUI::LoadCurrentSlot()
 void SaveStateSelectorUI::SaveCurrentSlot()
 {
   if (std::string path = GetCurrentSlotPath(); !path.empty())
-    System::SaveState(path.c_str(), g_settings.create_save_state_backups);
+  {
+    Error error;
+    if (!System::SaveState(path.c_str(), &error, g_settings.create_save_state_backups))
+    {
+      Host::AddKeyedOSDMessage("SaveState",
+                               fmt::format(TRANSLATE_FS("OSDMessage", "Failed to save state to slot {0}:\n{1}"),
+                                           GetCurrentSlot(), error.GetDescription()),
+                               Host::OSD_ERROR_DURATION);
+    }
+  }
 
   Close();
 }

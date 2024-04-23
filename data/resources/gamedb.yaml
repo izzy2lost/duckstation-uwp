@@ -8835,6 +8835,7 @@ SLPS-00948:
   controllers:
     - DigitalController
     - PlayStationMouse
+    - NeGcon
   metadata:
     publisher: "Taito"
     developer: "Taito"
@@ -18492,6 +18493,8 @@ SLES-00754:
   name: "Brahma Force (Europe)"
   controllers:
     - DigitalController
+  traits:
+    - ForceRecompilerICache
   metadata:
     publisher: "JVC Digital Studios"
     developer: "Genki Co. Ltd"
@@ -18510,6 +18513,8 @@ SLUS-00444:
   name: "Brahma Force - The Assault on Beltlogger 9 (USA)"
   controllers:
     - DigitalController
+  traits:
+    - ForceRecompilerICache
   metadata:
     publisher: "Jaleco"
     developer: "Genki Co. Ltd."
@@ -22746,6 +22751,8 @@ SLES-01182:
     - AnalogController
     - DigitalController
     - NeGcon
+  settings:
+    dmaMaxSliceTicks: 100
   metadata:
     publisher: "THQ"
     developer: "Interactive Entertainment"
@@ -22766,9 +22773,9 @@ SLES-01182:
 SLUS-00882:
   name: "Castrol Honda Superbike Racing (USA)"
   compatibility:
-    rating: GraphicalAudioIssues
-    versionTested: "0.1-2499-g770dd5a6"
-    comments: "Graphical issues in loading screens (Issue #181)"
+    rating: NoIssues
+  settings:
+    dmaMaxSliceTicks: 100
   controllers:
     - AnalogController
     - DigitalController
@@ -37978,6 +37985,7 @@ SLES-03221:
     - DigitalController
   traits:
     - DisableWidescreen
+    - ForceRecompilerICache
   metadata:
     publisher: "Virgin Interactive"
     developer: "Capcom"
@@ -37999,6 +38007,7 @@ SLES-03222:
     - DigitalController
   traits:
     - DisableWidescreen
+    - ForceRecompilerICache
   metadata:
     publisher: "Virgin Interactive"
     developer: "Capcom"
@@ -38020,6 +38029,7 @@ SLES-03223:
     - DigitalController
   traits:
     - DisableWidescreen
+    - ForceRecompilerICache
   metadata:
     publisher: "Virgin Interactive"
     developer: "Capcom"
@@ -38041,6 +38051,7 @@ SLES-03224:
     - DigitalController
   traits:
     - DisableWidescreen
+    - ForceRecompilerICache
   metadata:
     publisher: "Virgin Interactive"
     developer: "Capcom"
@@ -38093,6 +38104,7 @@ SLES-03225:
     - DigitalController
   traits:
     - DisableWidescreen
+    - ForceRecompilerICache
   metadata:
     publisher: "Virgin Interactive"
     developer: "Capcom"
@@ -59543,6 +59555,8 @@ SCPS-10101:
     - NeGcon
   traits:
     - ForceInterpreter
+  codes:
+    - HASH-E379E77CF0C4F433
   metadata:
     publisher: "Sony"
     developer: "Studio 33"
@@ -65084,9 +65098,7 @@ SLPM-86031:
   controllers:
     - DigitalController
   codes:
-    - SLPM-86031
-    - SLPM-87329
-    - SLPS-00002
+    - HASH-4B6CD9BD936C3CCE
   metadata:
     publisher: "Konami"
     developer: "Konami Computer Entertainment Tokyo, Inc"
@@ -76740,6 +76752,7 @@ SLPS-00079:
   name: "J.League Soccer - Prime Goal EX (Japan)"
   controllers:
     - DigitalController
+    - NeGcon
   metadata:
     publisher: "Namco"
     developer: "Namco"
@@ -87855,6 +87868,9 @@ SLPS-02832:
   controllers:
     - AnalogController
     - DigitalController
+  settings:
+    dmaMaxSliceTicks: 100 # Fixes unaligned loads/crash.
+    dmaHaltTicks: 150
   metadata:
     publisher: "ArtDink"
     developer: "ArtDink"
@@ -90449,13 +90465,12 @@ SLPS-02376:
   name: "Little Princess - Marl Oukoku no Ningyou-hime 2 (Japan)"
   compatibility:
     rating: NoIssues
-    versionTested: "0.1-1641-gb2057ac6"
-    comments: "Can't pass the first screen of the game."
+    versionTested: "0.1-6598-g2b7de1f8e"
   controllers:
     - DigitalController
   settings:
     dmaMaxSliceTicks: 100
-    gpuMaxRunAhead: 1
+    dmaHaltTicks: 200
   codes:
     - SLPS-02376
     - SLPS-02356
@@ -103670,8 +103685,13 @@ SCPS-10001:
     - NeGcon
   traits:
     - ForcePGXPCPUMode
+    - ForceRecompilerICache # Fixes crash in pause screen.
+  settings:
+    dmaMaxSliceTicks: 400 # Fixes random hang.
+    dmaHaltTicks: 155 # Fixes random hang.
   codes:
     - HASH-58C38FDD4440E3DB
+    - HASH-71CB04066AE13303
   metadata:
     publisher: "Sony"
     developer: "Sony"
@@ -111271,6 +111291,8 @@ SLES-00933:
     - AnalogController
     - DigitalController
     - NeGcon
+  traits:
+    - ForcePGXPCPUMode
   metadata:
     publisher: "Psygnosis"
     developer: "Studio 33 Ltd"
@@ -111290,12 +111312,20 @@ SLES-00933:
     linkCable: false
 SLED-01196:
   name: "Newman Haas Racing (Europe) (En,Fr,De,It) (Demo)"
+  controllers:
+    - AnalogController
+    - DigitalController
+    - NeGcon
+  traits:
+    - ForcePGXPCPUMode
 SLUS-00602:
   name: "Newman Haas Racing (USA)"
   controllers:
     - AnalogController
     - DigitalController
     - NeGcon
+  traits:
+    - ForcePGXPCPUMode
   metadata:
     publisher: "Psygnosis"
     developer: "Studio 33 Ltd"
@@ -130662,7 +130692,6 @@ SLUS-01265:
     rating: NoIssues
     versionTested: "0.1-1337-gcaf9943"
   controllers:
-    - AnalogController
     - DigitalController
   metadata:
     publisher: "UBI Soft Entertainment"
@@ -133182,8 +133211,7 @@ SLPS-00001:
     - DigitalController
     - NeGcon
   codes:
-    - SLPS-00001
-    - SLPS-91001
+    - HASH-4521886FA4C26DE6
   metadata:
     publisher: "Namco"
     developer: "Namco"
@@ -140355,6 +140383,9 @@ SLES-02510:
   controllers:
     - AnalogController
     - DigitalController
+  settings:
+    dmaMaxSliceTicks: 100
+    dmaHaltTicks: 150
   metadata:
     publisher: "Ubi Soft Entertaiment"
     developer: "Realtime Associates Inc"
@@ -140374,6 +140405,9 @@ SLUS-00621:
   controllers:
     - AnalogController
     - DigitalController
+  settings:
+    dmaMaxSliceTicks: 100
+    dmaHaltTicks: 150
   metadata:
     publisher: "NewKidCo LLC"
     developer: "Realtime Associates Inc"
@@ -154547,6 +154581,8 @@ SLPS-02035:
   controllers:
     - AnalogController
     - DigitalController
+  codes:
+    - HASH-47E4F9A32562A162
   metadata:
     publisher: "Robot"
     developer: "Robot"
@@ -156170,6 +156206,7 @@ SLPS-00403:
   name: "Studio P (Japan)"
   controllers:
     - DigitalController
+    - NeGcon
   metadata:
     publisher: "Argent"
     developer: "Agenda"
@@ -163937,10 +163974,10 @@ SLUS-00283:
   compatibility:
     rating: NoIssues
     versionTested: "0.1-1969-g671033fd"
-    comments: "Surprisingly, even the Melt-O-Vision effect depicted on the Interplay logo in the Credits screen works! (tested in PGXP mode)"
   controllers:
     - DigitalController
     - PlayStationMouse
+    - NeGcon
   metadata:
     publisher: "Interplay"
     developer: "High Voltage Software"
@@ -166191,7 +166228,6 @@ SLUS-01019:
   compatibility:
     rating: NoIssues
     versionTested: "0.1-1419-g34a515cd"
-    comments: "Messy graphics in \"Recompiler mode\". Use \"Interpreter mode\" to fix for now (Issue #710)."
   controllers:
     - AnalogController
     - DigitalController
@@ -171749,6 +171785,7 @@ SLPS-00025:
     - ForceRecompilerICache
   codes:
     - HASH-A8647D688C39B63F
+    - HASH-21D86F0985C11667
   metadata:
     publisher: "Takara"
     developer: "Takara"
@@ -176386,6 +176423,8 @@ SLES-02731:
   controllers:
     - AnalogController
     - DigitalController
+  settings:
+    dmaMaxSliceTicks: 100
   metadata:
     publisher: "JVC"
     developer: "Victor Interactive Software, Inc"
@@ -176407,6 +176446,8 @@ SLPS-02477:
   controllers:
     - AnalogController
     - DigitalController
+  settings:
+    dmaMaxSliceTicks: 100
   metadata:
     publisher: "Victor Interactive Software"
     developer: "Victor Interactive Software, Inc"
@@ -176426,6 +176467,8 @@ SLPS-03198:
   controllers:
     - AnalogController
     - DigitalController
+  settings:
+    dmaMaxSliceTicks: 100
   metadata:
     publisher: "Victor Interactive Software"
     developer: "Victor Interactive Software, Inc"
@@ -176449,8 +176492,7 @@ SLUS-01138:
     - AnalogController
     - DigitalController
   settings:
-    dmaMaxSliceTicks: 200
-    gpuMaxRunAhead: 1
+    dmaMaxSliceTicks: 100
   metadata:
     publisher: "Jaleco USA, Inc"
     developer: "Victor Interactive Software, Inc"
@@ -176470,6 +176512,8 @@ SLPS-91523:
   controllers:
     - AnalogController
     - DigitalController
+  settings:
+    dmaMaxSliceTicks: 100
   metadata:
     publisher: "Jaleco Entertainment"
     developer: "Victor Interactive Software, Inc"

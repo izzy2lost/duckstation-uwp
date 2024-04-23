@@ -89,9 +89,10 @@ static bool InitializeConfig(std::string settings_filename);
 static bool ShouldUsePortableMode();
 static void SetAppRoot();
 static void SetResourcesDirectory();
-static void SetDataDirectory();
+static bool SetDataDirectory();
 static bool SetCriticalFolders();
 static void SetDefaultSettings(SettingsInterface& si, bool system, bool controller);
+static void MigrateSettings();
 static void SaveSettings();
 static bool RunSetupWizard();
 static std::string GetResourcePath(std::string_view name, bool allow_override);
@@ -163,6 +164,11 @@ QString QtHost::GetAppConfigSuffix()
 QString QtHost::GetResourcesBasePath()
 {
   return QString::fromStdString(EmuFolders::Resources);
+}
+
+INISettingsInterface* QtHost::GetBaseSettingsInterface()
+{
+  return s_base_settings_interface.get();
 }
 
 QIcon QtHost::GetAppIcon()
@@ -335,13 +341,13 @@ bool QtHost::InitializeConfig(std::string settings_filename)
   if (settings_filename.empty())
     settings_filename = Path::Combine(EmuFolders::DataRoot, "settings.ini");
 
-  Log_InfoPrintf("Loading config from %s.", settings_filename.c_str());
-  s_run_setup_wizard = s_run_setup_wizard || !FileSystem::FileExists(settings_filename.c_str());
+  const bool settings_exists = FileSystem::FileExists(settings_filename.c_str());
+  Log_InfoFmt("Loading config from {}.", settings_filename);
   s_base_settings_interface = std::make_unique<INISettingsInterface>(std::move(settings_filename));
   Host::Internal::SetBaseSettingsLayer(s_base_settings_interface.get());
 
   uint settings_version;
-  if (!s_base_settings_interface->Load() ||
+  if (!settings_exists || !s_base_settings_interface->Load() ||
       !s_base_settings_interface->GetUIntValue("Main", "SettingsVersion", &settings_version) ||
       settings_version != SETTINGS_VERSION)
   {
@@ -353,12 +359,24 @@ bool QtHost::InitializeConfig(std::string settings_filename)
     }
 
     s_base_settings_interface->SetUIntValue("Main", "SettingsVersion", SETTINGS_VERSION);
-    s_base_settings_interface->SetBoolValue("ControllerPorts", "ControllerSettingsMigrated", true);
     SetDefaultSettings(*s_base_settings_interface, true, true);
 
-    // Don't save if we're running the setup wizard. We want to run it next time if they don't finish it.
-    if (!s_run_setup_wizard)
-      s_base_settings_interface->Save();
+    // Flag for running the setup wizard if this is our first run. We want to run it next time if they don't finish it.
+    s_base_settings_interface->SetBoolValue("Main", "SetupWizardIncomplete", true);
+
+    // Make sure we can actually save the config, and the user doesn't have some permission issue.
+    Error error;
+    if (!s_base_settings_interface->Save(&error))
+    {
+      QMessageBox::critical(
+        nullptr, QStringLiteral("DuckStation"),
+        QStringLiteral(
+          "Failed to save configuration to\n\n%1\n\nThe error was: %2\n\nPlease ensure this directory is writable. You "
+          "can also try portable mode by creating portable.txt in the same directory you installed DuckStation into.")
+          .arg(QString::fromStdString(s_base_settings_interface->GetFileName()))
+          .arg(QString::fromStdString(error.GetDescription())));
+      return false;
+    }
   }
 
   // Setup wizard was incomplete last time?
@@ -367,20 +385,13 @@ bool QtHost::InitializeConfig(std::string settings_filename)
 
   EmuFolders::LoadConfig(*s_base_settings_interface.get());
   EmuFolders::EnsureFoldersExist();
+  MigrateSettings();
 
   // We need to create the console window early, otherwise it appears behind the main window.
   if (!Log::IsConsoleOutputEnabled() &&
       s_base_settings_interface->GetBoolValue("Logging", "LogToConsole", Settings::DEFAULT_LOG_TO_CONSOLE))
   {
     Log::SetConsoleOutputParams(true, s_base_settings_interface->GetBoolValue("Logging", "LogTimestamps", true));
-  }
-
-  // TEMPORARY: Migrate controller settings to new interface.
-  if (!s_base_settings_interface->GetBoolValue("ControllerPorts", "ControllerSettingsMigrated", false))
-  {
-    s_base_settings_interface->SetBoolValue("ControllerPorts", "ControllerSettingsMigrated", true);
-    if (InputManager::MigrateBindings(*s_base_settings_interface.get()))
-      s_base_settings_interface->Save();
   }
 
   InstallTranslator(nullptr);
@@ -391,7 +402,8 @@ bool QtHost::SetCriticalFolders()
 {
   SetAppRoot();
   SetResourcesDirectory();
-  SetDataDirectory();
+  if (!SetDataDirectory())
+    return false;
 
   // logging of directories in case something goes wrong super early
   Log_DevPrintf("AppRoot Directory: %s", EmuFolders::AppRoot.c_str());
@@ -438,16 +450,16 @@ void QtHost::SetResourcesDirectory()
 #endif
 }
 
-void QtHost::SetDataDirectory()
+bool QtHost::SetDataDirectory()
 {
   // Already set, e.g. by -portable.
   if (!EmuFolders::DataRoot.empty())
-    return;
+    return true;
 
   if (ShouldUsePortableMode())
   {
     EmuFolders::DataRoot = EmuFolders::AppRoot;
-    return;
+    return true;
   }
 
 #if defined(_WIN32)
@@ -491,13 +503,26 @@ void QtHost::SetDataDirectory()
   if (!EmuFolders::DataRoot.empty() && !FileSystem::DirectoryExists(EmuFolders::DataRoot.c_str()))
   {
     // we're in trouble if we fail to create this directory... but try to hobble on with portable
-    if (!FileSystem::EnsureDirectoryExists(EmuFolders::DataRoot.c_str(), false))
-      EmuFolders::DataRoot.clear();
+    Error error;
+    if (!FileSystem::EnsureDirectoryExists(EmuFolders::DataRoot.c_str(), false, &error))
+    {
+      // no point translating, config isn't loaded
+      QMessageBox::critical(
+        nullptr, QStringLiteral("DuckStation"),
+        QStringLiteral("Failed to create data directory at path\n\n%1\n\nThe error was: %2\nPlease ensure this "
+                       "directory is writable. You can also try portable mode by creating portable.txt in the same "
+                       "directory you installed DuckStation into.")
+          .arg(QString::fromStdString(EmuFolders::DataRoot))
+          .arg(QString::fromStdString(error.GetDescription())));
+      return false;
+    }
   }
 
   // couldn't determine the data directory? fallback to portable.
   if (EmuFolders::DataRoot.empty())
     EmuFolders::DataRoot = EmuFolders::AppRoot;
+
+  return true;
 }
 
 void Host::LoadSettings(SettingsInterface& si, std::unique_lock<std::mutex>& lock)
@@ -575,6 +600,21 @@ void QtHost::SetDefaultSettings(SettingsInterface& si, bool system, bool control
     InputManager::SetDefaultSourceConfig(si);
     Settings::SetDefaultControllerConfig(si);
     Settings::SetDefaultHotkeyConfig(si);
+  }
+}
+
+void QtHost::MigrateSettings()
+{
+  SmallString value;
+  if (s_base_settings_interface->GetStringValue("Display", "SyncMode", &value))
+  {
+    s_base_settings_interface->SetBoolValue("Display", "VSync", (value == "VSync" || value == "VSyncRelaxed"));
+    s_base_settings_interface->SetBoolValue(
+      "Display", "OptimalFramePacing",
+      (value == "VRR" || s_base_settings_interface->GetBoolValue("Display", "DisplayAllFrames", false)));
+    s_base_settings_interface->DeleteValue("Display", "SyncMode");
+    s_base_settings_interface->DeleteValue("Display", "DisplayAllFrames");
+    s_base_settings_interface->Save();
   }
 }
 
@@ -669,8 +709,7 @@ void EmuThread::stopFullscreenUI()
     return;
   }
 
-  if (System::IsValid())
-    shutdownSystem();
+  setFullscreen(false, true);
 
   if (m_run_fullscreen_ui)
   {
@@ -696,7 +735,12 @@ void EmuThread::bootSystem(std::shared_ptr<SystemBootParameters> params)
 
   setInitialState(params->override_fullscreen);
 
-  System::BootSystem(std::move(*params));
+  Error error;
+  if (!System::BootSystem(std::move(*params), &error))
+  {
+    emit errorReported(tr("Error"),
+                       tr("Failed to boot system: %1").arg(QString::fromStdString(error.GetDescription())));
+  }
 }
 
 void EmuThread::bootOrLoadState(std::string path)
@@ -705,7 +749,12 @@ void EmuThread::bootOrLoadState(std::string path)
 
   if (System::IsValid())
   {
-    System::LoadState(path.c_str());
+    Error error;
+    if (!System::LoadState(path.c_str(), &error))
+    {
+      emit errorReported(tr("Error"),
+                         tr("Failed to load state: %1").arg(QString::fromStdString(error.GetDescription())));
+    }
   }
   else
   {
@@ -1018,23 +1067,72 @@ void EmuThread::enumerateVibrationMotors()
   onVibrationMotorsEnumerated(qmotors);
 }
 
-void EmuThread::shutdownSystem(bool save_state /* = true */)
+void EmuThread::confirmActionIfMemoryCardBusy(const QString& action, bool cancel_resume_on_accept,
+                                              std::function<void(bool)> callback) const
+{
+  DebugAssert(isOnThread());
+
+  if (!System::IsValid() || !System::IsSavingMemoryCards())
+  {
+    callback(true);
+    return;
+  }
+
+  QtHost::RunOnUIThread([action, cancel_resume_on_accept, callback = std::move(callback)]() mutable {
+    auto lock = g_main_window->pauseAndLockSystem();
+
+    const bool result =
+      (QMessageBox::question(lock.getDialogParent(), tr("Memory Card Busy"),
+                             tr("WARNING: Your game is still saving to the memory card. Continuing to %1 may "
+                                "IRREVERSIBLY DESTROY YOUR MEMORY CARD. We recommend resuming your game and waiting 5 "
+                                "seconds for it to finish saving.\n\nDo you want to %1 anyway?")
+                               .arg(action)) != QMessageBox::No);
+
+    if (cancel_resume_on_accept)
+      lock.cancelResume();
+
+    Host::RunOnCPUThread([result, callback = std::move(callback)]() { callback(result); });
+  });
+}
+
+void EmuThread::shutdownSystem(bool save_state, bool check_memcard_busy)
 {
   if (!isOnThread())
   {
     System::CancelPendingStartup();
-    QMetaObject::invokeMethod(this, "shutdownSystem", Qt::QueuedConnection, Q_ARG(bool, save_state));
+    QMetaObject::invokeMethod(this, "shutdownSystem", Qt::QueuedConnection, Q_ARG(bool, save_state),
+                              Q_ARG(bool, check_memcard_busy));
+    return;
+  }
+
+  if (check_memcard_busy && System::IsSavingMemoryCards())
+  {
+    confirmActionIfMemoryCardBusy(tr("shut down"), true, [save_state](bool result) {
+      if (result)
+        g_emu_thread->shutdownSystem(save_state, false);
+      else
+        g_emu_thread->setSystemPaused(false);
+    });
     return;
   }
 
   System::ShutdownSystem(save_state);
 }
 
-void EmuThread::resetSystem()
+void EmuThread::resetSystem(bool check_memcard_busy)
 {
   if (!isOnThread())
   {
-    QMetaObject::invokeMethod(this, &EmuThread::resetSystem, Qt::QueuedConnection);
+    QMetaObject::invokeMethod(this, "resetSystem", Qt::QueuedConnection, Q_ARG(bool, check_memcard_busy));
+    return;
+  }
+
+  if (check_memcard_busy && System::IsSavingMemoryCards())
+  {
+    confirmActionIfMemoryCardBusy(tr("reset"), false, [](bool result) {
+      if (result)
+        g_emu_thread->resetSystem(false);
+    });
     return;
   }
 
@@ -1054,11 +1152,21 @@ void EmuThread::setSystemPaused(bool paused, bool wait_until_paused /* = false *
   System::PauseSystem(paused);
 }
 
-void EmuThread::changeDisc(const QString& new_disc_filename)
+void EmuThread::changeDisc(const QString& new_disc_filename, bool reset_system, bool check_memcard_busy)
 {
   if (!isOnThread())
   {
-    QMetaObject::invokeMethod(this, "changeDisc", Qt::QueuedConnection, Q_ARG(const QString&, new_disc_filename));
+    QMetaObject::invokeMethod(this, "changeDisc", Qt::QueuedConnection, Q_ARG(const QString&, new_disc_filename),
+                              Q_ARG(bool, reset_system), Q_ARG(bool, check_memcard_busy));
+    return;
+  }
+
+  if (check_memcard_busy && System::IsSavingMemoryCards())
+  {
+    confirmActionIfMemoryCardBusy(tr("change disc"), false, [new_disc_filename, reset_system](bool result) {
+      if (result)
+        g_emu_thread->changeDisc(new_disc_filename, reset_system, false);
+    });
     return;
   }
 
@@ -1069,6 +1177,9 @@ void EmuThread::changeDisc(const QString& new_disc_filename)
     System::InsertMedia(new_disc_filename.toStdString().c_str());
   else
     System::RemoveMedia();
+
+  if (reset_system)
+    System::ResetSystem();
 }
 
 void EmuThread::changeDiscFromPlaylist(quint32 index)
@@ -1215,7 +1326,9 @@ void EmuThread::saveState(const QString& filename, bool block_until_done /* = fa
   if (!System::IsValid())
     return;
 
-  System::SaveState(filename.toUtf8().data(), g_settings.create_save_state_backups);
+  Error error;
+  if (!System::SaveState(filename.toUtf8().data(), &error, g_settings.create_save_state_backups))
+    emit errorReported(tr("Error"), tr("Failed to save state: %1").arg(QString::fromStdString(error.GetDescription())));
 }
 
 void EmuThread::saveState(bool global, qint32 slot, bool block_until_done /* = false */)
@@ -1230,10 +1343,14 @@ void EmuThread::saveState(bool global, qint32 slot, bool block_until_done /* = f
   if (!global && System::GetGameSerial().empty())
     return;
 
-  System::SaveState((global ? System::GetGlobalSaveStateFileName(slot) :
-                              System::GetGameSaveStateFileName(System::GetGameSerial(), slot))
-                      .c_str(),
-                    g_settings.create_save_state_backups);
+  Error error;
+  if (!System::SaveState((global ? System::GetGlobalSaveStateFileName(slot) :
+                                   System::GetGameSaveStateFileName(System::GetGameSerial(), slot))
+                           .c_str(),
+                         &error, g_settings.create_save_state_backups))
+  {
+    emit errorReported(tr("Error"), tr("Failed to save state: %1").arg(QString::fromStdString(error.GetDescription())));
+  }
 }
 
 void EmuThread::undoLoadState()
@@ -1517,8 +1634,8 @@ void EmuThread::run()
       System::Internal::IdlePollUpdate();
       if (g_gpu_device)
       {
-        System::PresentDisplay(false);
-        if (!g_gpu_device->IsVSyncActive())
+        System::PresentDisplay(false, false);
+        if (!g_gpu_device->IsVSyncEnabled())
           g_gpu_device->ThrottlePresentation();
       }
     }
@@ -1793,13 +1910,17 @@ void QtHost::SaveSettings()
   AssertMsg(!g_emu_thread->isOnThread(), "Saving should happen on the UI thread.");
 
   {
+    Error error;
     auto lock = Host::GetSettingsLock();
-    if (!s_base_settings_interface->Save())
-      Log_ErrorPrintf("Failed to save settings.");
+    if (!s_base_settings_interface->Save(&error))
+      Log_ErrorFmt("Failed to save settings: {}", error.GetDescription());
   }
 
-  s_settings_save_timer->deleteLater();
-  s_settings_save_timer.release();
+  if (s_settings_save_timer)
+  {
+    s_settings_save_timer->deleteLater();
+    s_settings_save_timer.release();
+  }
 }
 
 void QtHost::QueueSettingsSave()
@@ -1833,9 +1954,14 @@ void Host::RequestSystemShutdown(bool allow_confirm, bool save_state)
                             Q_ARG(bool, true), Q_ARG(bool, save_state));
 }
 
-void Host::RequestExit(bool allow_confirm)
+void Host::RequestExitApplication(bool allow_confirm)
 {
   QMetaObject::invokeMethod(g_main_window, "requestExit", Qt::QueuedConnection, Q_ARG(bool, allow_confirm));
+}
+
+void Host::RequestExitBigPicture()
+{
+  g_emu_thread->stopFullscreenUI();
 }
 
 std::optional<WindowInfo> Host::GetTopLevelWindowInfo()
@@ -2212,10 +2338,6 @@ bool QtHost::ParseCommandLineParametersAndInitializeConfig(QApplication& app,
 
 bool QtHost::RunSetupWizard()
 {
-  // Set a flag in the config so that even though we created the ini, we'll run the wizard next time.
-  Host::SetBaseBoolSettingValue("Main", "SetupWizardIncomplete", true);
-  Host::CommitBaseSettingChanges();
-
   SetupWizardDialog dialog;
   if (dialog.exec() == QDialog::Rejected)
     return false;

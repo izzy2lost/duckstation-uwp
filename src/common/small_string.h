@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2023 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #pragma once
@@ -98,29 +98,37 @@ public:
   template<typename... T>
   void format(fmt::format_string<T...> fmt, T&&... args);
 
+  void vformat(fmt::string_view fmt, fmt::format_args args);
+
   // compare one string to another
   bool equals(const char* str) const;
   bool equals(const SmallStringBase& str) const;
   bool equals(const std::string_view str) const;
+  bool equals(const std::string& str) const;
   bool iequals(const char* str) const;
   bool iequals(const SmallStringBase& str) const;
   bool iequals(const std::string_view str) const;
+  bool iequals(const std::string& str) const;
 
   // numerical compares
   int compare(const char* str) const;
   int compare(const SmallStringBase& str) const;
   int compare(const std::string_view str) const;
+  int compare(const std::string& str) const;
   int icompare(const char* str) const;
   int icompare(const SmallStringBase& str) const;
   int icompare(const std::string_view str) const;
+  int icompare(const std::string& str) const;
 
   // starts with / ends with
   bool starts_with(const char* str, bool case_sensitive = true) const;
-  bool starts_with(const std::string_view str, bool case_sensitive = true) const;
   bool starts_with(const SmallStringBase& str, bool case_sensitive = true) const;
+  bool starts_with(const std::string_view str, bool case_sensitive = true) const;
+  bool starts_with(const std::string& str, bool case_sensitive = true) const;
   bool ends_with(const char* str, bool case_sensitive = true) const;
-  bool ends_with(const std::string_view str, bool case_sensitive = true) const;
   bool ends_with(const SmallStringBase& str, bool case_sensitive = true) const;
+  bool ends_with(const std::string_view str, bool case_sensitive = true) const;
+  bool ends_with(const std::string& str, bool case_sensitive = true) const;
 
   // searches for a character inside a string
   // rfind is the same except it starts at the end instead of the start
@@ -132,6 +140,9 @@ public:
   // rfind is the same except it starts at the end instead of the start
   // returns -1 if it is not found, otherwise the offset in the string
   s32 find(const char* str, u32 offset = 0) const;
+
+  // returns the number of instances of the specified character
+  u32 count(char ch) const;
 
   // removes characters from string
   void erase(s32 offset, s32 count = std::numeric_limits<s32>::max());
@@ -165,7 +176,12 @@ public:
   ALWAYS_INLINE const char* end_ptr() const { return m_buffer + m_length; }
 
   // STL adapters
+  ALWAYS_INLINE char& front() { return m_buffer[0]; }
+  ALWAYS_INLINE const char& front() const { return m_buffer[0]; }
+  ALWAYS_INLINE char& back() { return m_buffer[m_length - 1]; }
+  ALWAYS_INLINE const char& back() const { return m_buffer[m_length - 1]; }
   ALWAYS_INLINE void push_back(value_type&& val) { append(val); }
+  ALWAYS_INLINE void pop_back() { erase(-1); }
 
   // returns a string view for this string
   std::string_view view() const;
@@ -182,15 +198,19 @@ public:
   ALWAYS_INLINE bool operator==(const char* str) const { return equals(str); }
   ALWAYS_INLINE bool operator==(const SmallStringBase& str) const { return equals(str); }
   ALWAYS_INLINE bool operator==(const std::string_view str) const { return equals(str); }
+  ALWAYS_INLINE bool operator==(const std::string& str) const { return equals(str); }
   ALWAYS_INLINE bool operator!=(const char* str) const { return !equals(str); }
   ALWAYS_INLINE bool operator!=(const SmallStringBase& str) const { return !equals(str); }
   ALWAYS_INLINE bool operator!=(const std::string_view str) const { return !equals(str); }
+  ALWAYS_INLINE bool operator!=(const std::string& str) const { return !equals(str); }
   ALWAYS_INLINE bool operator<(const char* str) const { return (compare(str) < 0); }
   ALWAYS_INLINE bool operator<(const SmallStringBase& str) const { return (compare(str) < 0); }
   ALWAYS_INLINE bool operator<(const std::string_view str) const { return (compare(str) < 0); }
+  ALWAYS_INLINE bool operator<(const std::string& str) const { return (compare(str) < 0); }
   ALWAYS_INLINE bool operator>(const char* str) const { return (compare(str) > 0); }
   ALWAYS_INLINE bool operator>(const SmallStringBase& str) const { return (compare(str) > 0); }
   ALWAYS_INLINE bool operator>(const std::string_view str) const { return (compare(str) > 0); }
+  ALWAYS_INLINE bool operator>(const std::string& str) const { return (compare(str) > 0); }
 
   SmallStringBase& operator=(const SmallStringBase& copy);
   SmallStringBase& operator=(const char* str);
@@ -303,6 +323,8 @@ public:
   template<typename... T>
   static SmallStackString from_format(fmt::format_string<T...> fmt, T&&... args);
 
+  static SmallStackString from_vformat(fmt::string_view fmt, fmt::format_args args);
+
 private:
   char m_stack_buffer[L + 1];
 
@@ -325,7 +347,7 @@ private:
 #endif
 
 template<u32 L>
-ALWAYS_INLINE SmallStackString<L> SmallStackString<L>::from_sprintf(const char* format, ...)
+SmallStackString<L> SmallStackString<L>::from_sprintf(const char* format, ...)
 {
   std::va_list ap;
   va_start(ap, format);
@@ -344,6 +366,14 @@ ALWAYS_INLINE SmallStackString<L> SmallStackString<L>::from_format(fmt::format_s
 {
   SmallStackString<L> ret;
   fmt::vformat_to(std::back_inserter(ret), fmt, fmt::make_format_args(args...));
+  return ret;
+}
+
+template<u32 L>
+ALWAYS_INLINE SmallStackString<L> SmallStackString<L>::from_vformat(fmt::string_view fmt, fmt::format_args args)
+{
+  SmallStackString<L> ret;
+  fmt::vformat_to(std::back_inserter(ret), fmt, args);
   return ret;
 }
 
