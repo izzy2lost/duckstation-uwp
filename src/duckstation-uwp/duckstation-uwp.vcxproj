@@ -465,6 +465,12 @@
     <Image Include="resources\images\duck.png" />
     <Image Include="resources\images\placeholder.png" />
     <Image Include="resources\no-save.png" />
+	<Image Include="resources\fullscreenui\start-bios.png" />
+	<Image Include="resources\fullscreenui\start-file.png" />
+	<Image Include="resources\fullscreenui\drive-cdrom.png" />
+	<Image Include="resources\fullscreenui\exit.png" />
+	<Image Include="resources\fullscreenui\back-icon.png" />
+	<Image Include="resources\fullscreenui\desktop-mode.png" />
     <Image Include="resources\shaders\reshade\Textures\crt-newpixie\crtframe.png" />
     <Image Include="resources\shaders\reshade\Textures\FontAtlas.png" />
     <Image Include="resources\shaders\reshade\Textures\lut.png" />
