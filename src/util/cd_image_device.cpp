@@ -177,7 +177,7 @@ enum class SCSIReadMode : u8
   return !Host::GetBaseBoolSettingValue("CDROM", "IgnoreHostSubcode", false);
 }
 
-#if defined(_WIN32)
+#if defined(_WIN32) && !defined(_UWP)
 
 // The include order here is critical.
 // clang-format off

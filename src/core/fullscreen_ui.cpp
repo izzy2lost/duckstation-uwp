@@ -244,6 +244,7 @@ static bool s_tried_to_initialize = false;
 static bool s_pause_menu_was_open = false;
 static bool s_was_paused_on_quick_menu_open = false;
 static bool s_about_window_open = false;
+static bool s_achievements_login_window_open = false;
 
 //////////////////////////////////////////////////////////////////////////
 // Resources
@@ -307,6 +308,7 @@ static void DrawMemoryCardSettingsPage();
 static void DrawControllerSettingsPage();
 static void DrawHotkeySettingsPage();
 static void DrawAchievementsSettingsPage();
+static void DrawAchievementsLoginWindow();
 static void DrawAdvancedSettingsPage();
 
 static bool IsEditingGameSettings(SettingsInterface* bsi);
@@ -616,7 +618,7 @@ bool FullscreenUI::HasActiveWindow()
 
 bool FullscreenUI::AreAnyDialogsOpen()
 {
-  return (s_save_state_selector_open || s_about_window_open ||
+  return (s_save_state_selector_open || s_about_window_open || s_achievements_login_window_open ||
           s_input_binding_type != InputBindingInfo::Type::Unknown || ImGuiFullscreen::IsChoiceDialogOpen() ||
           ImGuiFullscreen::IsFileSelectorOpen());
 }
@@ -821,6 +823,9 @@ void FullscreenUI::Render()
   if (s_about_window_open)
     DrawAboutWindow();
 
+  if (s_achievements_login_window_open)
+    DrawAchievementsLoginWindow();
+
   if (s_input_binding_type != InputBindingInfo::Type::Unknown)
     DrawInputBindingWindow();
 
@@ -994,9 +999,14 @@ void FullscreenUI::DoStartDisc()
   std::vector<std::pair<std::string, std::string>> devices = CDImage::GetDeviceList();
   if (devices.empty())
   {
+#ifndef _UWP
     ShowToast(std::string(),
               FSUI_STR("Could not find any CD/DVD-ROM devices. Please ensure you have a drive connected and sufficient "
                        "permissions to access it."));
+#else
+    ShowToast(std::string(), "Playing games from CD-ROM is not possible on UWP.");
+#endif
+
     return;
   }
 
@@ -1498,8 +1508,11 @@ void FullscreenUI::DrawExitWindow()
   DrawLandingTemplate(&menu_pos, &menu_size);
 
   ImGui::PushStyleColor(ImGuiCol_Text, UIBackgroundTextColor);
-
+#ifndef _UWP
   if (BeginHorizontalMenu("exit_window", menu_pos, menu_size, 3))
+#else
+  if (BeginHorizontalMenu("exit_window", menu_pos, menu_size, 2))
+#endif
   {
     ResetFocusHere();
 
@@ -1518,12 +1531,15 @@ void FullscreenUI::DrawExitWindow()
       DoRequestExit();
     }
 
+#ifndef _UWP
     if (HorizontalMenuItem(GetCachedTexture("fullscreenui/desktop-mode.png"), FSUI_CSTR("Desktop Mode"),
                            FSUI_CSTR("Exits Big Picture mode, returning to the desktop interface.")))
     {
       DoDesktopMode();
     }
+#endif
   }
+
   EndHorizontalMenu();
 
   ImGui::PopStyleColor();
@@ -4124,6 +4140,7 @@ void FullscreenUI::DrawDisplaySettingsPage()
   std::optional<SmallString> strvalue =
     bsi->GetOptionalSmallStringValue("GPU", "Adapter", game_settings ? std::nullopt : std::optional<const char*>(""));
 
+#ifndef _UWP
   if (MenuButtonWithValue(FSUI_CSTR("GPU Adapter"), FSUI_CSTR("Selects the GPU to use for rendering."),
                           strvalue.has_value() ? (strvalue->empty() ? FSUI_CSTR("Default") : strvalue->c_str()) :
                                                  FSUI_CSTR("Use Global Setting")))
@@ -4164,10 +4181,12 @@ void FullscreenUI::DrawDisplaySettingsPage()
     };
     OpenChoiceDialog(FSUI_ICONSTR(ICON_FA_TV, "GPU Adapter"), false, std::move(options), std::move(callback));
   }
+#endif
 
   strvalue = bsi->GetOptionalSmallStringValue("GPU", "FullscreenMode",
                                               game_settings ? std::nullopt : std::optional<const char*>(""));
 
+#ifndef _UWP
   if (MenuButtonWithValue(
         FSUI_CSTR("Fullscreen Resolution"), FSUI_CSTR("Selects the resolution to use in fullscreen modes."),
         strvalue.has_value() ? (strvalue->empty() ? FSUI_CSTR("Borderless Fullscreen") : strvalue->c_str()) :
@@ -4209,6 +4228,7 @@ void FullscreenUI::DrawDisplaySettingsPage()
     };
     OpenChoiceDialog(FSUI_ICONSTR(ICON_FA_TV, "Fullscreen Resolution"), false, std::move(options), std::move(callback));
   }
+#endif
 
   switch (renderer)
   {
@@ -6836,23 +6856,24 @@ void FullscreenUI::DrawAboutWindow()
 {
   ImGui::SetNextWindowSize(LayoutScale(1000.0f, 540.0f));
   ImGui::SetNextWindowPos(ImGui::GetIO().DisplaySize * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-  ImGui::OpenPopup(FSUI_CSTR("About DuckStation"));
+  ImGui::OpenPopup("About DuckStation-UWP");
 
   ImGui::PushFont(g_large_font);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, LayoutScale(10.0f));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, LayoutScale(30.0f, 30.0f));
 
-  if (ImGui::BeginPopupModal(FSUI_CSTR("About DuckStation"), &s_about_window_open,
+  if (ImGui::BeginPopupModal("About DuckStation-UWP", &s_about_window_open,
                              ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize))
   {
-    ImGui::TextWrapped("%s",
-                       FSUI_CSTR("DuckStation is a free and open-source simulator/emulator of the Sony PlayStation(TM) "
-                                 "console, focusing on playability, speed, and long-term maintainability."));
+    ImGui::TextWrapped("DuckStation is a free and open-source simulator/emulator of the Sony PlayStation(TM) "
+                       "console, focusing on playability, speed, and long-term maintainability. This is a "
+                       "modified fork intended to support UWP/Xbox in DEV MODE ONLY.");
     ImGui::NewLine();
+#ifndef _UWP
     ImGui::TextWrapped("Version: %s", g_scm_tag_str);
     ImGui::NewLine();
-    ImGui::TextWrapped(
-      "%s", FSUI_CSTR("Duck icon by icons8 (https://icons8.com/icon/74847/platforms.undefined.short-title)"));
+#endif
+    ImGui::TextWrapped("Duck icon by icons8 (https://icons8.com/icon/74847/platforms.undefined.short-title) modified by irixaligned for UWP");
     ImGui::NewLine();
     ImGui::TextWrapped(
       "%s", FSUI_CSTR("\"PlayStation\" and \"PSX\" are registered trademarks of Sony Interactive Entertainment Europe "
@@ -6861,12 +6882,15 @@ void FullscreenUI::DrawAboutWindow()
     ImGui::NewLine();
 
     BeginMenuButtons();
+
+#ifndef _UWP
     if (ActiveButton(FSUI_ICONSTR(ICON_FA_GLOBE, "GitHub Repository"), false))
-      ExitFullscreenAndOpenURL("https://github.com/stenzek/duckstation/");
+      ExitFullscreenAndOpenURL("https://github.com/irixaligned/duckstation-uwp/");
     if (ActiveButton(FSUI_ICONSTR(ICON_FA_COMMENT, "Discord Server"), false))
-      ExitFullscreenAndOpenURL("https://www.duckstation.org/discord.html");
+      ExitFullscreenAndOpenURL("https://discord.gg/xboxemus");
     if (ActiveButton(FSUI_ICONSTR(ICON_FA_PEOPLE_CARRY, "Contributor List"), false))
-      ExitFullscreenAndOpenURL("https://github.com/stenzek/duckstation/blob/master/CONTRIBUTORS.md");
+      ExitFullscreenAndOpenURL("https://github.com/irixaligned/duckstation-uwp/blob/master/CONTRIBUTORS.md");
+#endif
 
     if (ActiveButton(FSUI_ICONSTR(ICON_FA_WINDOW_CLOSE, "Close"), false) || WantsToCloseMenu())
     {
@@ -6953,6 +6977,78 @@ void FullscreenUI::OpenLeaderboardsWindow()
 bool FullscreenUI::IsLeaderboardsWindowOpen()
 {
   return (s_current_main_window == MainWindowType::Leaderboards);
+}
+
+void FullscreenUI::OpenAchievementsLoginWindow()
+{
+  s_achievements_login_window_open = true;
+}
+
+void FullscreenUI::DrawAchievementsLoginWindow()
+{
+  ImGui::SetNextWindowSize(LayoutScale(700.0f, 0.0f));
+  ImGui::SetNextWindowPos(ImGui::GetIO().DisplaySize * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::OpenPopup("Achievements Login");
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, LayoutScale(10.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, LayoutScale(20.0f, 20.0f));
+  ImGui::PushFont(g_large_font);
+
+  if (ImGui::BeginPopupModal("Achievements Login", &s_achievements_login_window_open,
+                             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize))
+  {
+    ImGui::TextWrapped("Please enter your user name and password for retroachievements.org.");
+    ImGui::NewLine();
+    ImGui::TextWrapped(
+      "Your password will not be saved in DuckStation-UWP, an access token will be generated and used instead.");
+
+    ImGui::NewLine();
+
+    static char username[256] = {};
+    static char password[256] = {};
+    ImGui::Text("User Name: ");
+    ImGui::SameLine(LayoutScale(200.0f));
+    ImGui::InputText("##username", username, sizeof(username));
+
+    ImGui::Text("Password: ");
+    ImGui::SameLine(LayoutScale(200.0f));
+    ImGui::InputText("##password", password, sizeof(password), ImGuiInputTextFlags_Password);
+
+    ImGui::NewLine();
+
+    BeginMenuButtons();
+
+    const bool login_enabled = (std::strlen(username) > 0 && std::strlen(password) > 0);
+
+    if (ActiveButton(ICON_FA_KEY "  Login", false, login_enabled))
+    {
+      Error error;
+      const bool result = Achievements::Login(username, password, &error);
+      if (!result)
+      {
+        Host::AddIconOSDMessage("uwp_achievements_login_failure", ICON_FA_EXCLAMATION_TRIANGLE,
+                                fmt::format("Login failed: {}", error.GetDescription()));
+      }
+      std::memset(username, 0, sizeof(username));
+      std::memset(password, 0, sizeof(password));
+      s_achievements_login_window_open = false;
+      ImGui::CloseCurrentPopup();
+    }
+
+    if (ActiveButton(ICON_FA_TIMES "  Cancel", false))
+    {
+      std::memset(username, 0, sizeof(username));
+      std::memset(password, 0, sizeof(password));
+      s_achievements_login_window_open = false;
+      ImGui::CloseCurrentPopup();
+    }
+
+    EndMenuButtons();
+
+    ImGui::EndPopup();
+  }
+
+  ImGui::PopFont();
+  ImGui::PopStyleVar(2);
 }
 
 #endif // __ANDROID__
