@@ -29,14 +29,8 @@ public:
     TransparencyDisabled,
     TransparentAndOpaque,
     OnlyOpaque,
-    OnlyTransparent
-  };
-
-  enum class InterlacedRenderMode : u8
-  {
-    None,
-    InterleavedFields,
-    SeparateFields
+    OnlyTransparent,
+    ShaderBlend
   };
 
   GPU_HW();
@@ -56,7 +50,6 @@ public:
   std::tuple<u32, u32> GetEffectiveDisplayResolution(bool scaled = true) override final;
   std::tuple<u32, u32> GetFullDisplayResolution(bool scaled = true) override final;
 
-  void ClearDisplay() override;
   void UpdateDisplay() override;
 
 private:
@@ -123,6 +116,9 @@ private:
     u32 num_uniform_buffer_updates;
   };
 
+  /// Returns true if a depth buffer should be created.
+  bool NeedsDepthBuffer() const;
+
   bool CreateBuffers();
   void ClearFramebuffer();
   void DestroyBuffers();
@@ -139,6 +135,7 @@ private:
   void UpdateDepthBufferFromMaskBit();
   void ClearDepthBuffer();
   void SetScissor();
+  void SetVRAMRenderTarget();
   void MapGPUBuffer(u32 required_vertices, u32 required_indices);
   void UnmapGPUBuffer(u32 used_vertices, u32 used_indices);
   void DrawBatchVertices(BatchRenderMode render_mode, u32 num_indices, u32 base_index, u32 base_vertex);
@@ -162,14 +159,11 @@ private:
   /// Returns the value to be written to the depth buffer for the current operation for mask bit emulation.
   float GetCurrentNormalizedVertexDepth() const;
 
-  /// Returns the interlaced mode to use when scanning out/displaying.
-  InterlacedRenderMode GetInterlacedRenderMode() const;
-
   /// Returns if the draw needs to be broken into opaque/transparent passes.
   bool NeedsTwoPassRendering() const;
 
   /// Returns true if the draw is going to use shader blending/framebuffer fetch.
-  bool NeedsShaderBlending(GPUTransparencyMode transparency) const;
+  bool NeedsShaderBlending(GPUTransparencyMode transparency, bool check_mask) const;
 
   void FillBackendCommandParameters(GPUBackendCommand* cmd) const;
   void FillDrawCommand(GPUBackendDrawCommand* cmd, GPURenderCommand rc) const;
@@ -212,7 +206,6 @@ private:
   std::unique_ptr<GPUTexture> m_vram_readback_texture;
   std::unique_ptr<GPUDownloadTexture> m_vram_readback_download_texture;
   std::unique_ptr<GPUTexture> m_vram_replacement_texture;
-  std::unique_ptr<GPUTexture> m_display_private_texture; // TODO: Move to base.
 
   std::unique_ptr<GPUTextureBuffer> m_vram_upload_buffer;
   std::unique_ptr<GPUTexture> m_vram_write_texture;
@@ -237,7 +230,6 @@ private:
   bool m_supports_framebuffer_fetch : 1 = false;
   bool m_per_sample_shading : 1 = false;
   bool m_scaled_dithering : 1 = false;
-  bool m_chroma_smoothing : 1 = false;
   bool m_disable_color_perspective : 1 = false;
 
   GPUTextureFilter m_texture_filtering = GPUTextureFilter::Nearest;
@@ -249,6 +241,8 @@ private:
   bool m_clamp_uvs : 1 = false;
   bool m_compute_uv_range : 1 = false;
   bool m_pgxp_depth_buffer : 1 = false;
+  bool m_allow_shader_blend : 1 = false;
+  bool m_prefer_shader_blend : 1 = false;
   u8 m_texpage_dirty = 0;
 
   BatchConfig m_batch;
@@ -262,8 +256,6 @@ private:
   Common::Rectangle<u32> m_vram_dirty_write_rect;
   Common::Rectangle<u32> m_current_uv_range;
 
-  // [depth_test][render_mode][texture_mode][transparency_mode][dithering][interlacing]
-  DimensionalArray<std::unique_ptr<GPUPipeline>, 2, 2, 5, 9, 4, 3> m_batch_pipelines{};
   std::unique_ptr<GPUPipeline> m_wireframe_pipeline;
 
   // [wrapped][interlaced]
@@ -275,11 +267,10 @@ private:
 
   std::unique_ptr<GPUPipeline> m_vram_readback_pipeline;
   std::unique_ptr<GPUPipeline> m_vram_update_depth_pipeline;
-
-  // [depth_24][interlace_mode]
-  DimensionalArray<std::unique_ptr<GPUPipeline>, 3, 2> m_display_pipelines{};
-
   std::unique_ptr<GPUPipeline> m_vram_write_replacement_pipeline;
+
+  std::array<std::unique_ptr<GPUPipeline>, 2> m_vram_extract_pipeline; // [24bit]
+  std::unique_ptr<GPUTexture> m_vram_extract_texture;
 
   std::unique_ptr<GPUTexture> m_downsample_texture;
   std::unique_ptr<GPUPipeline> m_downsample_first_pass_pipeline;
@@ -289,4 +280,7 @@ private:
   std::unique_ptr<GPUSampler> m_downsample_lod_sampler;
   std::unique_ptr<GPUSampler> m_downsample_composite_sampler;
   u32 m_downsample_scale_or_levels = 0;
+
+  // [depth_test][transparency_mode][render_mode][texture_mode][dithering][interlacing][check_mask]
+  DimensionalArray<std::unique_ptr<GPUPipeline>, 2, 2, 2, 9, 5, 5, 2> m_batch_pipelines{};
 };

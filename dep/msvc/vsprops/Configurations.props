@@ -69,10 +69,6 @@
       <Configuration>DebugUWP</Configuration>
       <Platform>ARM64</Platform>
     </ProjectConfiguration>
-    <ProjectConfiguration Include="DebugUWP|Win32">
-      <Configuration>DebugUWP</Configuration>
-      <Platform>Win32</Platform>
-    </ProjectConfiguration>
     <ProjectConfiguration Include="DebugUWP|x64">
       <Configuration>DebugUWP</Configuration>
       <Platform>x64</Platform>
@@ -80,10 +76,6 @@
     <ProjectConfiguration Include="ReleaseUWP|ARM64">
       <Configuration>ReleaseUWP</Configuration>
       <Platform>ARM64</Platform>
-    </ProjectConfiguration>
-    <ProjectConfiguration Include="ReleaseUWP|Win32">
-      <Configuration>ReleaseUWP</Configuration>
-      <Platform>Win32</Platform>
     </ProjectConfiguration>
     <ProjectConfiguration Include="ReleaseUWP|x64">
       <Configuration>ReleaseUWP</Configuration>

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #pragma once
@@ -21,6 +21,7 @@
 class SettingsInterface;
 struct WindowInfo;
 enum class AudioBackend : u8;
+enum class AudioExpansionMode : u8;
 enum class AudioStretchMode : u8;
 enum class RenderAPI : u32;
 class AudioStream;
@@ -29,6 +30,8 @@ class CDImage;
 namespace Host {
 // Base setting retrieval, bypasses layers.
 std::string GetBaseStringSettingValue(const char* section, const char* key, const char* default_value = "");
+SmallString GetBaseSmallStringSettingValue(const char* section, const char* key, const char* default_value = "");
+TinyString GetBaseTinyStringSettingValue(const char* section, const char* key, const char* default_value = "");
 bool GetBaseBoolSettingValue(const char* section, const char* key, bool default_value = false);
 s32 GetBaseIntSettingValue(const char* section, const char* key, s32 default_value = 0);
 u32 GetBaseUIntSettingValue(const char* section, const char* key, u32 default_value = 0);
@@ -53,6 +56,8 @@ void CommitBaseSettingChanges();
 
 // Settings access, thread-safe.
 std::string GetStringSettingValue(const char* section, const char* key, const char* default_value = "");
+SmallString GetSmallStringSettingValue(const char* section, const char* key, const char* default_value = "");
+TinyString GetTinyStringSettingValue(const char* section, const char* key, const char* default_value = "");
 bool GetBoolSettingValue(const char* section, const char* key, bool default_value = false);
 int GetIntSettingValue(const char* section, const char* key, s32 default_value = 0);
 u32 GetUIntSettingValue(const char* section, const char* key, u32 default_value = 0);
@@ -67,11 +72,6 @@ SettingsInterface* GetSettingsInterface();
 /// Returns the settings interface that controller bindings should be loaded from.
 /// If an input profile is being used, this will be the input layer, otherwise the layered interface.
 SettingsInterface* GetSettingsInterfaceForBindings();
-
-
-
-std::unique_ptr<AudioStream> CreateAudioStream(AudioBackend backend, u32 sample_rate, u32 channels, u32 buffer_ms,
-                                               u32 latency_ms, AudioStretchMode stretch);
 
 /// Debugger feedback.
 void ReportDebuggerMessage(const std::string_view& message);
@@ -89,10 +89,6 @@ void DisplayLoadingScreen(const char* message, int progress_min = -1, int progre
 
 /// Safely executes a function on the VM thread.
 void RunOnCPUThread(std::function<void()> function, bool block = false);
-
-/// Requests shut down and exit of the hosting application. This may not actually exit,
-/// if the user cancels the shutdown confirmation.
-void RequestExit(bool allow_confirm);
 
 /// Attempts to create the rendering device backend.
 bool CreateGPUDevice(RenderAPI api);

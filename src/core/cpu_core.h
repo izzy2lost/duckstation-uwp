@@ -125,6 +125,7 @@ void Shutdown();
 void Reset();
 bool DoState(StateWrapper& sw);
 void ClearICache();
+bool UpdateDebugDispatcherFlag();
 void UpdateMemoryPointers();
 void ExecutionModeChanged();
 
@@ -176,8 +177,7 @@ bool SafeWriteMemoryHalfWord(VirtualMemoryAddress addr, u16 value);
 bool SafeWriteMemoryWord(VirtualMemoryAddress addr, u32 value);
 
 // External IRQs
-void SetExternalInterrupt(u8 bit);
-void ClearExternalInterrupt(u8 bit);
+void SetIRQRequest(bool state);
 
 void DisassembleAndPrint(u32 addr);
 void DisassembleAndLog(u32 addr);

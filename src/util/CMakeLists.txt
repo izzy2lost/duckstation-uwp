@@ -28,7 +28,6 @@ add_library(util
   gpu_shader_cache.h
   gpu_texture.cpp
   gpu_texture.h
-  gpu_types.h
   host.cpp
   host.h
   http_downloader.cpp
@@ -77,15 +76,7 @@ target_precompile_headers(util PRIVATE "pch.h")
 target_include_directories(util PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_include_directories(util PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(util PUBLIC common simpleini imgui)
-target_link_libraries(util PRIVATE libchdr JPEG::JPEG PNG::PNG ZLIB::ZLIB soundtouch xxhash Zstd::Zstd reshadefx)
-
-if(ENABLE_CUBEB)
-  target_sources(util PRIVATE
-    cubeb_audio_stream.cpp
-  )
-  target_compile_definitions(util PUBLIC "ENABLE_CUBEB=1")
-  target_link_libraries(util PRIVATE cubeb)
-endif()
+target_link_libraries(util PRIVATE libchdr JPEG::JPEG PNG::PNG WebP::libwebp ZLIB::ZLIB soundtouch xxhash Zstd::Zstd reshadefx)
 
 if(ENABLE_X11)
   target_compile_definitions(util PRIVATE "-DENABLE_X11=1")
@@ -154,17 +145,6 @@ if(ENABLE_OPENGL)
   endif()
 endif()
 
-if(ENABLE_VULKAN OR APPLE)
-  target_sources(util PRIVATE
-    spirv_compiler.cpp
-    spirv_compiler.h
-  )
-  target_link_libraries(util PRIVATE glslang)
-  if(APPLE)
-    target_link_libraries(util PRIVATE spirv-cross)
-  endif()
-endif()
-
 if(ENABLE_VULKAN)
   target_sources(util PRIVATE
     vulkan_builders.cpp
@@ -188,25 +168,22 @@ if(ENABLE_VULKAN)
   target_link_libraries(util PUBLIC vulkan-headers)
 endif()
 
-if(ENABLE_SDL2)
-  target_sources(util PRIVATE 
+if(ENABLE_VULKAN OR APPLE)
+  target_link_libraries(util PUBLIC Shaderc::shaderc_shared)
+endif()
+
+if(NOT ANDROID)
+  target_sources(util PRIVATE
+    cubeb_audio_stream.cpp
+    sdl_audio_stream.cpp
     sdl_input_source.cpp
     sdl_input_source.h
   )
-  target_compile_definitions(util PUBLIC "ENABLE_SDL2=1")
-  target_link_libraries(util PUBLIC SDL2::SDL2)
-
-  # Copy bundled SDL2 to output on Windows.
-  if(WIN32)
-    # Copy SDL2 DLL to binary directory.
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-      get_property(SDL2_DLL_PATH TARGET SDL2::SDL2 PROPERTY IMPORTED_LOCATION_DEBUG)
-    else()
-      get_property(SDL2_DLL_PATH TARGET SDL2::SDL2 PROPERTY IMPORTED_LOCATION_RELEASE)
-    endif()
-    add_custom_command(TARGET util POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SDL2_DLL_PATH}" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/SDL2.dll")
-  endif()
+  target_link_libraries(util PUBLIC
+    cubeb
+    freesurround
+    SDL2::SDL2
+  )
 endif()
 
 if(WIN32)
@@ -245,7 +222,7 @@ if(WIN32)
     xinput_source.h
   )
   target_link_libraries(util PRIVATE d3d12ma)
-  target_link_libraries(util PRIVATE d3d11.lib d3d12.lib d3dcompiler.lib dxgi.lib winmm.lib Dwmapi.lib winhttp.lib)
+  target_link_libraries(util PRIVATE d3d11.lib d3d12.lib d3dcompiler.lib dxgi.lib winmm.lib Dwmapi.lib winhttp.lib xaudio2.lib)
 
   if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     target_link_libraries(util PRIVATE WinPixEventRuntime::WinPixEventRuntime)
@@ -269,7 +246,7 @@ elseif(APPLE)
   find_library(IOK_LIBRARY IOKit REQUIRED)
   find_library(METAL_LIBRARY Metal)
   find_library(QUARTZCORE_LIBRARY QuartzCore)
-  target_link_libraries(util PRIVATE ${METAL_LIBRARY} ${QUARTZCORE_LIBRARY} ${IOK_LIBRARY})
+  target_link_libraries(util PRIVATE ${METAL_LIBRARY} ${QUARTZCORE_LIBRARY} ${IOK_LIBRARY} spirv-cross-c-shared)
   set_source_files_properties(${MAC_SOURCES} PROPERTIES SKIP_PRECOMPILE_HEADERS TRUE)
 elseif(NOT ANDROID)
   target_sources(util PRIVATE

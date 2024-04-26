@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "metal_device.h"
-#include "spirv_compiler.h"
 
 #include "common/align.h"
 #include "common/assert.h"
@@ -10,11 +9,15 @@
 #include "common/file_system.h"
 #include "common/log.h"
 #include "common/path.h"
+#include "common/scoped_guard.h"
 #include "common/string_util.h"
 
 // TODO FIXME...
 #define FMT_EXCEPTIONS 0
 #include "fmt/format.h"
+
+#include "shaderc/shaderc.hpp"
+#include "spirv_cross_c.h"
 
 #include <array>
 #include <pthread.h>
@@ -56,7 +59,7 @@ static constexpr std::array<MTLPixelFormat, static_cast<u32>(GPUTexture::Format:
   MTLPixelFormatBGR10A2Unorm, // RGB10A2
 };
 
-static unsigned s_next_bad_shader_id = 1;
+static std::unique_ptr<shaderc::Compiler> s_shaderc_compiler;
 
 static NSString* StringViewToNSString(const std::string_view& str)
 {
@@ -124,15 +127,14 @@ bool MetalDevice::GetHostRefreshRate(float* refresh_rate)
   return GPUDevice::GetHostRefreshRate(refresh_rate);
 }
 
-void MetalDevice::SetSyncMode(DisplaySyncMode mode)
+void MetalDevice::SetVSyncEnabled(bool enabled)
 {
-  m_sync_mode = mode;
+  if (m_vsync_enabled == enabled)
+    return;
 
+  m_vsync_enabled = enabled;
   if (m_layer != nil)
-  {
-    const bool enabled = (mode == DisplaySyncMode::VSync || mode == DisplaySyncMode::VSyncRelaxed);
     [m_layer setDisplaySyncEnabled:enabled];
-  }
 }
 
 bool MetalDevice::CreateDevice(const std::string_view& adapter, bool threaded_presentation,
@@ -220,6 +222,13 @@ void MetalDevice::SetFeatures(FeatureMask disabled_features)
     m_max_texture_size = 8192;
   }
 
+  // Framebuffer fetch requires MSL 2.3 and an Apple GPU family.
+  const bool supports_fbfetch = [m_device supportsFamily:MTLGPUFamilyApple1];
+
+  // If fbfetch is disabled, barriers aren't supported on Apple GPUs.
+  const bool supports_barriers =
+    ([m_device supportsFamily:MTLGPUFamilyMac1] && ![m_device supportsFamily:MTLGPUFamilyApple3]);
+
   m_max_multisamples = 0;
   for (u32 multisamples = 1; multisamples < 16; multisamples *= 2)
   {
@@ -229,15 +238,17 @@ void MetalDevice::SetFeatures(FeatureMask disabled_features)
   }
 
   m_features.dual_source_blend = !(disabled_features & FEATURE_MASK_DUAL_SOURCE_BLEND);
-  m_features.framebuffer_fetch = !(disabled_features & FEATURE_MASK_FRAMEBUFFER_FETCH) && false; // TODO
+  m_features.framebuffer_fetch = !(disabled_features & FEATURE_MASK_FRAMEBUFFER_FETCH) && supports_fbfetch;
   m_features.per_sample_shading = true;
   m_features.noperspective_interpolation = true;
   m_features.texture_copy_to_self = !(disabled_features & FEATURE_MASK_TEXTURE_COPY_TO_SELF);
   m_features.supports_texture_buffers = !(disabled_features & FEATURE_MASK_TEXTURE_BUFFERS);
   m_features.texture_buffers_emulated_with_ssbo = true;
+  m_features.feedback_loops = (m_features.framebuffer_fetch || supports_barriers);
   m_features.geometry_shaders = false;
   m_features.partial_msaa_resolve = false;
   m_features.memory_import = true;
+  m_features.explicit_present = false;
   m_features.shader_cache = true;
   m_features.pipeline_cache = false;
   m_features.prefer_unused_textures = true;
@@ -330,12 +341,24 @@ void MetalDevice::DestroyDevice()
     [it.second release];
   m_cleanup_objects.clear();
 
+  for (auto& it : m_depth_states)
+  {
+    if (it.second != nil)
+      [it.second release];
+  }
+  m_depth_states.clear();
   for (auto& it : m_resolve_pipelines)
   {
     if (it.second != nil)
       [it.second release];
   }
   m_resolve_pipelines.clear();
+  for (auto& it : m_clear_pipelines)
+  {
+    if (it.second != nil)
+      [it.second release];
+  }
+  m_clear_pipelines.clear();
   if (m_shaders != nil)
   {
     [m_shaders release];
@@ -385,8 +408,7 @@ bool MetalDevice::CreateLayer()
       }
     });
 
-    const bool sync_enabled = (m_sync_mode == DisplaySyncMode::VSync || m_sync_mode == DisplaySyncMode::VSyncRelaxed);
-    [m_layer setDisplaySyncEnabled:sync_enabled];
+    [m_layer setDisplaySyncEnabled:m_vsync_enabled];
 
     DebugAssert(m_layer_pass_desc == nil);
     m_layer_pass_desc = [[MTLRenderPassDescriptor renderPassDescriptor] retain];
@@ -508,13 +530,6 @@ void MetalDevice::DestroyBuffers()
   m_uniform_buffer.Destroy();
   m_vertex_buffer.Destroy();
   m_index_buffer.Destroy();
-
-  for (auto& it : m_depth_states)
-  {
-    if (it.second != nil)
-      [it.second release];
-  }
-  m_depth_states.clear();
 }
 
 bool MetalDevice::IsRenderTargetBound(const GPUTexture* tex) const
@@ -614,18 +629,8 @@ std::unique_ptr<GPUShader> MetalDevice::CreateShaderFromMSL(GPUShaderStage stage
     {
       LogNSError(error, "Failed to compile %s shader", GPUShader::GetStageName(stage));
 
-      auto fp = FileSystem::OpenManagedCFile(
-        Path::Combine(EmuFolders::DataRoot, fmt::format("bad_shader_{}.txt", s_next_bad_shader_id++)).c_str(), "wb");
-      if (fp)
-      {
-        std::fwrite(source.data(), source.size(), 1, fp.get());
-        std::fprintf(fp.get(), "\n\nCompile %s failed: %u\n", GPUShader::GetStageName(stage),
-                     static_cast<u32>(error.code));
-
-        const char* utf_error = [error.description UTF8String];
-        std::fwrite(utf_error, std::strlen(utf_error), 1, fp.get());
-      }
-
+      const char* utf_error = [error.description UTF8String];
+      DumpBadShader(source, fmt::format("Error {}: {}", static_cast<u32>(error.code), utf_error ? utf_error : ""));
       return {};
     }
 
@@ -650,42 +655,177 @@ std::unique_ptr<GPUShader> MetalDevice::CreateShaderFromSource(GPUShaderStage st
                                                                const char* entry_point,
                                                                DynamicHeapArray<u8>* out_binary /* = nullptr */)
 {
-  const u32 options = (m_debug_device ? SPIRVCompiler::DebugInfo : 0) | SPIRVCompiler::VulkanRules;
   static constexpr bool dump_shaders = false;
 
-  if (std::strcmp(entry_point, "main") != 0)
+  static constexpr const std::array<shaderc_shader_kind, static_cast<size_t>(GPUShaderStage::MaxCount)> stage_kinds = {{
+    shaderc_glsl_vertex_shader,
+    shaderc_glsl_fragment_shader,
+    shaderc_glsl_geometry_shader,
+    shaderc_glsl_compute_shader,
+  }};
+
+  // TODO: NOT thread safe, yet.
+  if (!s_shaderc_compiler)
+    s_shaderc_compiler = std::make_unique<shaderc::Compiler>();
+
+  shaderc::CompileOptions spv_options;
+  spv_options.SetSourceLanguage(shaderc_source_language_glsl);
+  spv_options.SetTargetEnvironment(shaderc_target_env_vulkan, 0);
+
+  if (m_debug_device)
   {
-    Log_ErrorPrintf("Entry point must be 'main', but got '%s' instead.", entry_point);
+    spv_options.SetOptimizationLevel(shaderc_optimization_level_zero);
+    spv_options.SetGenerateDebugInfo();
+  }
+  else
+  {
+    spv_options.SetOptimizationLevel(shaderc_optimization_level_performance);
+  }
+
+  const shaderc::SpvCompilationResult result = s_shaderc_compiler->CompileGlslToSpv(
+    source.data(), source.length(), stage_kinds[static_cast<size_t>(stage)], "source", entry_point, spv_options);
+  if (result.GetCompilationStatus() != shaderc_compilation_status_success)
+  {
+    const std::string errors = result.GetErrorMessage();
+    DumpBadShader(source, errors);
+    Log_ErrorFmt("Failed to compile shader to SPIR-V:\n{}", errors);
+    return {};
+  }
+  else if (result.GetNumWarnings() > 0)
+  {
+    Log_WarningFmt("Shader compiled with warnings:\n{}", result.GetErrorMessage());
+  }
+
+  spvc_context sctx;
+  spvc_result sres;
+  if ((sres = spvc_context_create(&sctx)) != SPVC_SUCCESS)
+  {
+    Log_ErrorFmt("spvc_context_create() failed: {}", static_cast<int>(sres));
     return {};
   }
 
-  std::optional<SPIRVCompiler::SPIRVCodeVector> spirv = SPIRVCompiler::CompileShader(stage, source, options);
-  if (!spirv.has_value())
+  const ScopedGuard sctx_guard = [&sctx]() { spvc_context_destroy(sctx); };
+
+  spvc_context_set_error_callback(
+    sctx, [](void*, const char* error) { Log_ErrorFmt("SPIRV-Cross reported an error: {}", error); }, nullptr);
+
+  spvc_parsed_ir sir;
+  if ((sres = spvc_context_parse_spirv(sctx, result.cbegin(), std::distance(result.cbegin(), result.cend()), &sir)) !=
+      SPVC_SUCCESS)
   {
-    Log_ErrorPrintf("Failed to compile shader to SPIR-V.");
+    Log_ErrorFmt("spvc_context_parse_spirv() failed: {}", static_cast<int>(sres));
+    DumpBadShader(source, std::string_view());
     return {};
   }
 
-  std::optional<std::string> msl = SPIRVCompiler::CompileSPIRVToMSL(stage, spirv.value());
-  if (!msl.has_value())
+  spvc_compiler scompiler;
+  if ((sres = spvc_context_create_compiler(sctx, SPVC_BACKEND_MSL, sir, SPVC_CAPTURE_MODE_TAKE_OWNERSHIP,
+                                           &scompiler)) != SPVC_SUCCESS)
   {
-    Log_ErrorPrintf("Failed to compile SPIR-V to MSL.");
+    Log_ErrorFmt("spvc_context_create_compiler() failed: {}", static_cast<int>(sres));
     return {};
   }
+
+  spvc_compiler_options soptions;
+  if ((sres = spvc_compiler_create_compiler_options(scompiler, &soptions)) != SPVC_SUCCESS)
+  {
+    Log_ErrorFmt("spvc_compiler_create_compiler_options() failed: {}", static_cast<int>(sres));
+    return {};
+  }
+
+  if ((sres = spvc_compiler_options_set_bool(soptions, SPVC_COMPILER_OPTION_MSL_PAD_FRAGMENT_OUTPUT_COMPONENTS,
+                                             true)) != SPVC_SUCCESS)
+  {
+    Log_ErrorFmt("spvc_compiler_options_set_bool(SPVC_COMPILER_OPTION_MSL_PAD_FRAGMENT_OUTPUT_COMPONENTS) failed: {}",
+                 static_cast<int>(sres));
+    return {};
+  }
+
+  if ((sres = spvc_compiler_options_set_bool(soptions, SPVC_COMPILER_OPTION_MSL_FRAMEBUFFER_FETCH_SUBPASS,
+                                             m_features.framebuffer_fetch)) != SPVC_SUCCESS)
+  {
+    Log_ErrorFmt("spvc_compiler_options_set_bool(SPVC_COMPILER_OPTION_MSL_FRAMEBUFFER_FETCH_SUBPASS) failed: {}",
+                 static_cast<int>(sres));
+    return {};
+  }
+
+  if (m_features.framebuffer_fetch &&
+      ((sres = spvc_compiler_options_set_uint(soptions, SPVC_COMPILER_OPTION_MSL_VERSION,
+                                              SPVC_MAKE_MSL_VERSION(2, 3, 0))) != SPVC_SUCCESS))
+  {
+    Log_ErrorFmt("spvc_compiler_options_set_uint(SPVC_COMPILER_OPTION_MSL_VERSION) failed: {}", static_cast<int>(sres));
+    return {};
+  }
+
+  if (stage == GPUShaderStage::Fragment)
+  {
+    for (u32 i = 0; i < MAX_TEXTURE_SAMPLERS; i++)
+    {
+      const spvc_msl_resource_binding rb = {.stage = SpvExecutionModelFragment,
+                                            .desc_set = 1,
+                                            .binding = i,
+                                            .msl_buffer = i,
+                                            .msl_texture = i,
+                                            .msl_sampler = i};
+
+      if ((sres = spvc_compiler_msl_add_resource_binding(scompiler, &rb)) != SPVC_SUCCESS)
+      {
+        Log_ErrorFmt("spvc_compiler_msl_add_resource_binding() failed: {}", static_cast<int>(sres));
+        return {};
+      }
+    }
+
+    if (!m_features.framebuffer_fetch)
+    {
+      const spvc_msl_resource_binding rb = {
+        .stage = SpvExecutionModelFragment, .desc_set = 2, .binding = 0, .msl_texture = MAX_TEXTURE_SAMPLERS};
+
+      if ((sres = spvc_compiler_msl_add_resource_binding(scompiler, &rb)) != SPVC_SUCCESS)
+      {
+        Log_ErrorFmt("spvc_compiler_msl_add_resource_binding() for FB failed: {}", static_cast<int>(sres));
+        return {};
+      }
+    }
+  }
+
+  if ((sres = spvc_compiler_install_compiler_options(scompiler, soptions)) != SPVC_SUCCESS)
+  {
+    Log_ErrorFmt("spvc_compiler_install_compiler_options() failed: {}", static_cast<int>(sres));
+    return {};
+  }
+
+  const char* msl;
+  if ((sres = spvc_compiler_compile(scompiler, &msl)) != SPVC_SUCCESS)
+  {
+    Log_ErrorFmt("spvc_compiler_compile() failed: {}", static_cast<int>(sres));
+    DumpBadShader(source, std::string_view());
+    return {};
+  }
+
+  const size_t msl_length = msl ? std::strlen(msl) : 0;
+  if (msl_length == 0)
+  {
+    Log_ErrorPrint("Failed to compile SPIR-V to MSL.");
+    DumpBadShader(source, std::string_view());
+    return {};
+  }
+
+  const std::string_view mslv(msl, msl_length);
   if constexpr (dump_shaders)
   {
-    DumpShader(s_next_bad_shader_id, "_input", source);
-    DumpShader(s_next_bad_shader_id, "_msl", msl.value());
-    s_next_bad_shader_id++;
+    static unsigned s_next_id = 0;
+    ++s_next_id;
+    DumpShader(s_next_id, "_input", source);
+    DumpShader(s_next_id, "_msl", mslv);
   }
 
   if (out_binary)
   {
-    out_binary->resize(msl->size());
-    std::memcpy(out_binary->data(), msl->data(), msl->size());
+    out_binary->resize(mslv.size());
+    std::memcpy(out_binary->data(), mslv.data(), mslv.size());
   }
 
-  return CreateShaderFromMSL(stage, msl.value(), "main0");
+  return CreateShaderFromMSL(stage, mslv, "main0");
 }
 
 MetalPipeline::MetalPipeline(id<MTLRenderPipelineState> pipeline, id<MTLDepthStencilState> depth, MTLCullMode cull_mode,
@@ -809,7 +949,23 @@ std::unique_ptr<GPUPipeline> MetalDevice::CreatePipeline(const GPUPipeline::Grap
     {
       if (config.color_formats[i] == GPUTexture::Format::Unknown)
         break;
-      desc.colorAttachments[0].pixelFormat = s_pixel_format_mapping[static_cast<u8>(config.color_formats[i])];
+
+      MTLRenderPipelineColorAttachmentDescriptor* ca = desc.colorAttachments[0];
+      ca.pixelFormat = s_pixel_format_mapping[static_cast<u8>(config.color_formats[i])];
+      ca.writeMask = (config.blend.write_r ? MTLColorWriteMaskRed : MTLColorWriteMaskNone) |
+                     (config.blend.write_g ? MTLColorWriteMaskGreen : MTLColorWriteMaskNone) |
+                     (config.blend.write_b ? MTLColorWriteMaskBlue : MTLColorWriteMaskNone) |
+                     (config.blend.write_a ? MTLColorWriteMaskAlpha : MTLColorWriteMaskNone);
+      ca.blendingEnabled = config.blend.enable;
+      if (config.blend.enable)
+      {
+        ca.sourceRGBBlendFactor = blend_mapping[static_cast<u8>(config.blend.src_blend.GetValue())];
+        ca.destinationRGBBlendFactor = blend_mapping[static_cast<u8>(config.blend.dst_blend.GetValue())];
+        ca.rgbBlendOperation = op_mapping[static_cast<u8>(config.blend.blend_op.GetValue())];
+        ca.sourceAlphaBlendFactor = blend_mapping[static_cast<u8>(config.blend.src_alpha_blend.GetValue())];
+        ca.destinationAlphaBlendFactor = blend_mapping[static_cast<u8>(config.blend.dst_alpha_blend.GetValue())];
+        ca.alphaBlendOperation = op_mapping[static_cast<u8>(config.blend.alpha_blend_op.GetValue())];
+      }
     }
     desc.depthAttachmentPixelFormat = s_pixel_format_mapping[static_cast<u8>(config.depth_format)];
 
@@ -846,13 +1002,6 @@ std::unique_ptr<GPUPipeline> MetalDevice::CreatePipeline(const GPUPipeline::Grap
     if (depth == nil)
       return {};
 
-    // Blending state
-    MTLRenderPipelineColorAttachmentDescriptor* ca = desc.colorAttachments[0];
-    ca.writeMask = (config.blend.write_r ? MTLColorWriteMaskRed : MTLColorWriteMaskNone) |
-                   (config.blend.write_g ? MTLColorWriteMaskGreen : MTLColorWriteMaskNone) |
-                   (config.blend.write_b ? MTLColorWriteMaskBlue : MTLColorWriteMaskNone) |
-                   (config.blend.write_a ? MTLColorWriteMaskAlpha : MTLColorWriteMaskNone);
-
     // General
     const MTLPrimitiveType primitive = primitives[static_cast<u8>(config.primitive)];
     desc.rasterSampleCount = config.samples;
@@ -864,17 +1013,6 @@ std::unique_ptr<GPUPipeline> MetalDevice::CreatePipeline(const GPUPipeline::Grap
       desc.vertexBuffers[1].mutability = MTLMutabilityImmutable;
     if (config.layout == GPUPipeline::Layout::SingleTextureBufferAndPushConstants)
       desc.fragmentBuffers[1].mutability = MTLMutabilityImmutable;
-
-    ca.blendingEnabled = config.blend.enable;
-    if (config.blend.enable)
-    {
-      ca.sourceRGBBlendFactor = blend_mapping[static_cast<u8>(config.blend.src_blend.GetValue())];
-      ca.destinationRGBBlendFactor = blend_mapping[static_cast<u8>(config.blend.dst_blend.GetValue())];
-      ca.rgbBlendOperation = op_mapping[static_cast<u8>(config.blend.blend_op.GetValue())];
-      ca.sourceAlphaBlendFactor = blend_mapping[static_cast<u8>(config.blend.src_alpha_blend.GetValue())];
-      ca.destinationAlphaBlendFactor = blend_mapping[static_cast<u8>(config.blend.dst_alpha_blend.GetValue())];
-      ca.alphaBlendOperation = op_mapping[static_cast<u8>(config.blend.alpha_blend_op.GetValue())];
-    }
 
     NSError* error = nullptr;
     id<MTLRenderPipelineState> pipeline = [m_device newRenderPipelineStateWithDescriptor:desc error:&error];
@@ -1524,7 +1662,43 @@ void MetalDevice::ClearDepth(GPUTexture* t, float d)
 {
   GPUDevice::ClearDepth(t, d);
   if (InRenderPass() && m_current_depth_target == t)
-    EndRenderPass();
+  {
+    const ClearPipelineConfig config = GetCurrentClearPipelineConfig();
+    id<MTLRenderPipelineState> pipeline = GetClearDepthPipeline(config);
+    id<MTLDepthStencilState> depth = GetDepthState(GPUPipeline::DepthState::GetAlwaysWriteState());
+
+    const Common::Rectangle<s32> rect(0, 0, t->GetWidth(), t->GetHeight());
+    const bool set_vp = (m_current_viewport != rect);
+    const bool set_scissor = (m_current_scissor != rect);
+    if (set_vp)
+    {
+      [m_render_encoder setViewport:(MTLViewport){0.0, 0.0, static_cast<double>(t->GetWidth()),
+                                                  static_cast<double>(t->GetHeight()), 0.0, 1.0}];
+    }
+    if (set_scissor)
+      [m_render_encoder setScissorRect:(MTLScissorRect){0u, 0u, t->GetWidth(), t->GetHeight()}];
+
+    [m_render_encoder setRenderPipelineState:pipeline];
+    if (m_current_cull_mode != MTLCullModeNone)
+      [m_render_encoder setCullMode:MTLCullModeNone];
+    if (depth != m_current_depth_state)
+      [m_render_encoder setDepthStencilState:depth];
+    [m_render_encoder setVertexBytes:&d length:sizeof(d) atIndex:0];
+    [m_render_encoder drawPrimitives:m_current_pipeline->GetPrimitive() vertexStart:0 vertexCount:3];
+    s_stats.num_draws++;
+
+    [m_render_encoder setVertexBuffer:m_uniform_buffer.GetBuffer() offset:m_current_uniform_buffer_position atIndex:0];
+    if (m_current_pipeline)
+      [m_render_encoder setRenderPipelineState:m_current_pipeline->GetPipelineState()];
+    if (m_current_cull_mode != MTLCullModeNone)
+      [m_render_encoder setCullMode:m_current_cull_mode];
+    if (depth != m_current_depth_state)
+      [m_render_encoder setDepthStencilState:m_current_depth_state];
+    if (set_vp)
+      SetViewportInRenderEncoder();
+    if (set_scissor)
+      SetScissorInRenderEncoder();
+  }
 }
 
 void MetalDevice::InvalidateRenderTarget(GPUTexture* t)
@@ -1571,6 +1745,51 @@ void MetalDevice::CommitClear(MetalTexture* tex)
       [encoder endEncoding];
     }
   }
+}
+
+MetalDevice::ClearPipelineConfig MetalDevice::GetCurrentClearPipelineConfig() const
+{
+  ClearPipelineConfig config = {};
+  for (u32 i = 0; i < m_num_current_render_targets; i++)
+    config.color_formats[i] = m_current_render_targets[i]->GetFormat();
+
+  config.depth_format = m_current_depth_target ? m_current_depth_target->GetFormat() : GPUTexture::Format::Unknown;
+  config.samples =
+    m_current_depth_target ? m_current_depth_target->GetSamples() : m_current_render_targets[0]->GetSamples();
+  return config;
+}
+
+id<MTLRenderPipelineState> MetalDevice::GetClearDepthPipeline(const ClearPipelineConfig& config)
+{
+  const auto iter = std::find_if(m_clear_pipelines.begin(), m_clear_pipelines.end(),
+                                 [&config](const auto& it) { return (it.first == config); });
+  if (iter != m_clear_pipelines.end())
+    return iter->second;
+
+  MTLRenderPipelineDescriptor* desc = [[MTLRenderPipelineDescriptor new] autorelease];
+  desc.vertexFunction = [GetFunctionFromLibrary(m_shaders, @"depthClearVertex") autorelease];
+  desc.fragmentFunction = [GetFunctionFromLibrary(m_shaders, @"depthClearFragment") autorelease];
+
+  for (u32 i = 0; i < MAX_RENDER_TARGETS; i++)
+  {
+    if (config.color_formats[i] == GPUTexture::Format::Unknown)
+      break;
+    desc.colorAttachments[i].pixelFormat = s_pixel_format_mapping[static_cast<u8>(config.color_formats[i])];
+    desc.colorAttachments[i].writeMask = MTLColorWriteMaskNone;
+  }
+  desc.depthAttachmentPixelFormat = s_pixel_format_mapping[static_cast<u8>(config.depth_format)];
+  desc.rasterizationEnabled = TRUE;
+  desc.inputPrimitiveTopology = MTLPrimitiveTopologyClassTriangle;
+  desc.rasterSampleCount = config.samples;
+  desc.vertexBuffers[0].mutability = MTLMutabilityImmutable;
+
+  NSError* error = nullptr;
+  id<MTLRenderPipelineState> pipeline = [m_device newRenderPipelineStateWithDescriptor:desc error:&error];
+  if (pipeline == nil)
+    LogNSError(error, "Failed to create clear render pipeline state");
+
+  m_clear_pipelines.emplace_back(config, pipeline);
+  return pipeline;
 }
 
 MetalTextureBuffer::MetalTextureBuffer(Format format, u32 size_in_elements) : GPUTextureBuffer(format, size_in_elements)
@@ -1720,9 +1939,12 @@ void MetalDevice::UnmapUniformBuffer(u32 size)
   }
 }
 
-void MetalDevice::SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds)
+void MetalDevice::SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds,
+                                   GPUPipeline::RenderPassFlag feedback_loop)
 {
-  bool changed = (m_num_current_render_targets != num_rts || m_current_depth_target != ds);
+  bool changed = (m_num_current_render_targets != num_rts || m_current_depth_target != ds ||
+                  (!m_features.framebuffer_fetch && ((feedback_loop & GPUPipeline::ColorFeedbackLoop) !=
+                                                     (m_current_feedback_loop & GPUPipeline::ColorFeedbackLoop))));
   bool needs_ds_clear = (ds && ds->IsClearedOrInvalidated());
   bool needs_rt_clear = false;
 
@@ -1736,7 +1958,8 @@ void MetalDevice::SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUTextu
   }
   for (u32 i = num_rts; i < m_num_current_render_targets; i++)
     m_current_render_targets[i] = nullptr;
-  m_num_current_render_targets = num_rts;
+  m_num_current_render_targets = static_cast<u8>(num_rts);
+  m_current_feedback_loop = feedback_loop;
 
   if (changed || needs_rt_clear || needs_ds_clear)
   {
@@ -1842,7 +2065,7 @@ void MetalDevice::UnbindTexture(MetalTexture* tex)
       if (m_current_render_targets[i] == tex)
       {
         Log_WarningPrint("Unbinding current RT");
-        SetRenderTargets(nullptr, 0, m_current_depth_target);
+        SetRenderTargets(nullptr, 0, m_current_depth_target, GPUPipeline::NoRenderPassFlags); // TODO: Wrong
         break;
       }
     }
@@ -1852,7 +2075,7 @@ void MetalDevice::UnbindTexture(MetalTexture* tex)
     if (m_current_depth_target == tex)
     {
       Log_WarningPrint("Unbinding current DS");
-      SetRenderTargets(nullptr, 0, nullptr);
+      SetRenderTargets(nullptr, 0, nullptr, GPUPipeline::NoRenderPassFlags);
     }
   }
 }
@@ -2034,6 +2257,13 @@ void MetalDevice::SetInitialEncoderState()
   [m_render_encoder setFragmentSamplerStates:m_current_samplers.data() withRange:NSMakeRange(0, MAX_TEXTURE_SAMPLERS)];
   if (m_current_ssbo)
     [m_render_encoder setFragmentBuffer:m_current_ssbo offset:0 atIndex:1];
+
+  if (!m_features.framebuffer_fetch && (m_current_feedback_loop & GPUPipeline::ColorFeedbackLoop))
+  {
+    DebugAssert(m_current_render_targets[0]);
+    [m_render_encoder setFragmentTexture:m_current_render_targets[0]->GetMTLTexture() atIndex:MAX_TEXTURE_SAMPLERS];
+  }
+
   SetViewportInRenderEncoder();
   SetScissorInRenderEncoder();
 }
@@ -2091,6 +2321,122 @@ void MetalDevice::DrawIndexed(u32 index_count, u32 base_index, u32 base_vertex)
                             instanceCount:1
                                baseVertex:base_vertex
                              baseInstance:0];
+}
+
+void MetalDevice::DrawIndexedWithBarrier(u32 index_count, u32 base_index, u32 base_vertex, DrawBarrier type)
+{
+  // Shouldn't be using this with framebuffer fetch.
+  DebugAssert(!m_features.framebuffer_fetch);
+
+  const bool skip_first_barrier = !InRenderPass();
+  PreDrawCheck();
+
+  // TODO: The first barrier is unnecessary if we're starting the render pass.
+
+  u32 index_offset = base_index * sizeof(u16);
+
+  switch (type)
+  {
+    case GPUDevice::DrawBarrier::None:
+    {
+      s_stats.num_draws++;
+
+      [m_render_encoder drawIndexedPrimitives:m_current_pipeline->GetPrimitive()
+                                   indexCount:index_count
+                                    indexType:MTLIndexTypeUInt16
+                                  indexBuffer:m_index_buffer.GetBuffer()
+                            indexBufferOffset:index_offset
+                                instanceCount:1
+                                   baseVertex:base_vertex
+                                 baseInstance:0];
+    }
+    break;
+
+    case GPUDevice::DrawBarrier::One:
+    {
+      DebugAssert(m_num_current_render_targets == 1);
+      s_stats.num_draws++;
+
+      if (!skip_first_barrier)
+      {
+        s_stats.num_barriers++;
+        [m_render_encoder memoryBarrierWithScope:MTLBarrierScopeRenderTargets
+                                     afterStages:MTLRenderStageFragment
+                                    beforeStages:MTLRenderStageFragment];
+      }
+
+      [m_render_encoder drawIndexedPrimitives:m_current_pipeline->GetPrimitive()
+                                   indexCount:index_count
+                                    indexType:MTLIndexTypeUInt16
+                                  indexBuffer:m_index_buffer.GetBuffer()
+                            indexBufferOffset:index_offset
+                                instanceCount:1
+                                   baseVertex:base_vertex
+                                 baseInstance:0];
+    }
+    break;
+
+    case GPUDevice::DrawBarrier::Full:
+    {
+      DebugAssert(m_num_current_render_targets == 1);
+
+      static constexpr const u8 vertices_per_primitive[][2] = {
+        {1, 1}, // MTLPrimitiveTypePoint
+        {2, 2}, // MTLPrimitiveTypeLine
+        {2, 1}, // MTLPrimitiveTypeLineStrip
+        {3, 3}, // MTLPrimitiveTypeTriangle
+        {3, 1}, // MTLPrimitiveTypeTriangleStrip
+      };
+
+      const u32 first_step =
+        vertices_per_primitive[static_cast<size_t>(m_current_pipeline->GetPrimitive())][0] * sizeof(u16);
+      const u32 index_step =
+        vertices_per_primitive[static_cast<size_t>(m_current_pipeline->GetPrimitive())][1] * sizeof(u16);
+      const u32 end_offset = (base_index + index_count) * sizeof(u16);
+
+      // first primitive
+      if (!skip_first_barrier)
+      {
+        s_stats.num_barriers++;
+        [m_render_encoder memoryBarrierWithScope:MTLBarrierScopeRenderTargets
+                                     afterStages:MTLRenderStageFragment
+                                    beforeStages:MTLRenderStageFragment];
+      }
+      s_stats.num_draws++;
+      [m_render_encoder drawIndexedPrimitives:m_current_pipeline->GetPrimitive()
+                                   indexCount:index_count
+                                    indexType:MTLIndexTypeUInt16
+                                  indexBuffer:m_index_buffer.GetBuffer()
+                            indexBufferOffset:index_offset
+                                instanceCount:1
+                                   baseVertex:base_vertex
+                                 baseInstance:0];
+
+      index_offset += first_step;
+
+      // remaining primitices
+      for (; index_offset < end_offset; index_offset += index_step)
+      {
+        s_stats.num_barriers++;
+        s_stats.num_draws++;
+
+        [m_render_encoder memoryBarrierWithScope:MTLBarrierScopeRenderTargets
+                                     afterStages:MTLRenderStageFragment
+                                    beforeStages:MTLRenderStageFragment];
+        [m_render_encoder drawIndexedPrimitives:m_current_pipeline->GetPrimitive()
+                                     indexCount:index_count
+                                      indexType:MTLIndexTypeUInt16
+                                    indexBuffer:m_index_buffer.GetBuffer()
+                              indexBufferOffset:index_offset
+                                  instanceCount:1
+                                     baseVertex:base_vertex
+                                   baseInstance:0];
+      }
+    }
+    break;
+
+      DefaultCaseIsUnreachable();
+  }
 }
 
 id<MTLBlitCommandEncoder> MetalDevice::GetBlitEncoder(bool is_inline)
@@ -2151,6 +2497,7 @@ bool MetalDevice::BeginPresent(bool skip_present)
     s_stats.num_render_passes++;
     std::memset(m_current_render_targets.data(), 0, sizeof(m_current_render_targets));
     m_num_current_render_targets = 0;
+    m_current_feedback_loop = GPUPipeline::NoRenderPassFlags;
     m_current_depth_target = nullptr;
     m_current_pipeline = nullptr;
     m_current_depth_state = nil;
@@ -2159,8 +2506,11 @@ bool MetalDevice::BeginPresent(bool skip_present)
   }
 }
 
-void MetalDevice::EndPresent()
+void MetalDevice::EndPresent(bool explicit_present)
 {
+  DebugAssert(!explicit_present);
+
+  // TODO: Explicit present
   DebugAssert(m_num_current_render_targets == 0 && !m_current_depth_target);
   EndAnyEncoding();
 
@@ -2169,6 +2519,11 @@ void MetalDevice::EndPresent()
   m_layer_drawable = nil;
   SubmitCommandBuffer();
   TrimTexturePool();
+}
+
+void MetalDevice::SubmitPresent()
+{
+  Panic("Not supported by this API.");
 }
 
 void MetalDevice::CreateCommandBuffer()

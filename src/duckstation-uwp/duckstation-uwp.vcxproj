@@ -70,12 +70,6 @@
     <ProjectReference Include="..\..\dep\xxhash\xxhash.vcxproj">
       <Project>{09553c96-9f39-49bf-8ae6-7acbd07c410c}</Project>
     </ProjectReference>
-    <ProjectReference Include="..\..\dep\zlib\zlib.vcxproj">
-      <Project>{7ff9fdb9-d504-47db-a16a-b08071999620}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\..\dep\zstd\zstd.vcxproj">
-      <Project>{73ee0c55-6ffe-44e7-9c12-baa52434a797}</Project>
-    </ProjectReference>
     <ProjectReference Include="..\..\dep\zydis\zydis.vcxproj" Condition="'$(Platform)'=='x64' And $(Configuration.Contains('Debug'))">
       <Project>{c51a346a-86b2-46df-9bb3-d0aa7e5d8699}</Project>
     </ProjectReference>
@@ -391,7 +385,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">
     <Link>
       <GenerateWindowsMetadata>false</GenerateWindowsMetadata>
-      <AdditionalDependencies>$(RootBuildDir)common\common.lib;$(RootBuildDir)core\core.lib;$(RootBuildDir)util\util.lib;$(RootBuildDir)d3d12ma\d3d12ma.lib;$(RootBuildDir)fmt\fmt.lib;$(RootBuildDir)imgui\imgui.lib;$(RootBuildDir)libchdr\libchdr.lib;$(RootBuildDir)lzma\lzma.lib;$(RootBuildDir)rcheevos\rcheevos.lib;$(RootBuildDir)reshadefx\reshadefx.lib;$(RootBuildDir)scmversion\scmversion.lib;$(RootBuildDir)soundtouch\soundtouch.lib;$(RootBuildDir)libpng\libpng.lib;$(RootBuildDir)libjpeg\libjpeg.lib;$(RootBuildDir)xxhash\xxhash.lib;$(RootBuildDir)zlib\zlib.lib;$(RootBuildDir)zstd\zstd.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(RootBuildDir)common\common.lib;$(RootBuildDir)core\core.lib;$(RootBuildDir)util\util.lib;$(RootBuildDir)d3d12ma\d3d12ma.lib;$(RootBuildDir)fmt\fmt.lib;$(RootBuildDir)imgui\imgui.lib;$(RootBuildDir)libchdr\libchdr.lib;$(RootBuildDir)lzma\lzma.lib;$(RootBuildDir)rcheevos\rcheevos.lib;$(RootBuildDir)reshadefx\reshadefx.lib;$(RootBuildDir)scmversion\scmversion.lib;$(RootBuildDir)soundtouch\soundtouch.lib;$(RootBuildDir)xxhash\xxhash.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories); $(RootBuildDir); $(VCInstallDir)\lib\store\amd64; $(VCInstallDir)\lib\amd64</AdditionalLibraryDirectories>
     </Link>
     <PreBuildEvent>
@@ -471,6 +465,12 @@
     <Image Include="resources\images\duck.png" />
     <Image Include="resources\images\placeholder.png" />
     <Image Include="resources\no-save.png" />
+	<Image Include="resources\fullscreenui\start-bios.png" />
+	<Image Include="resources\fullscreenui\start-file.png" />
+	<Image Include="resources\fullscreenui\drive-cdrom.png" />
+	<Image Include="resources\fullscreenui\exit.png" />
+	<Image Include="resources\fullscreenui\back-icon.png" />
+	<Image Include="resources\fullscreenui\desktop-mode.png" />
     <Image Include="resources\shaders\reshade\Textures\crt-newpixie\crtframe.png" />
     <Image Include="resources\shaders\reshade\Textures\FontAtlas.png" />
     <Image Include="resources\shaders\reshade\Textures\lut.png" />
@@ -513,6 +513,51 @@
     <Text Include="resources\sounds\achievements\README.txt" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="..\..\dep\msvc\deps-x64\bin\libwebp.dll">
+      <ExcludedFromBuild>false</ExcludedFromBuild>
+      <DeploymentContent>true</DeploymentContent>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\dep\msvc\deps-x64\bin\freetype.dll">
+      <ExcludedFromBuild>false</ExcludedFromBuild>
+      <DeploymentContent>true</DeploymentContent>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\dep\msvc\deps-x64\bin\harfbuzz.dll">
+      <ExcludedFromBuild>false</ExcludedFromBuild>
+      <DeploymentContent>true</DeploymentContent>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\dep\msvc\deps-x64\bin\shaderc_shared.dll">
+      <ExcludedFromBuild>false</ExcludedFromBuild>
+      <DeploymentContent>true</DeploymentContent>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\dep\msvc\deps-x64\bin\libjpeg.dll">
+      <ExcludedFromBuild>false</ExcludedFromBuild>
+      <DeploymentContent>true</DeploymentContent>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\dep\msvc\deps-x64\bin\libpng16.dll">
+      <ExcludedFromBuild>false</ExcludedFromBuild>
+      <DeploymentContent>true</DeploymentContent>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\dep\msvc\deps-x64\bin\libsharpyuv.dll">
+      <ExcludedFromBuild>false</ExcludedFromBuild>
+      <DeploymentContent>true</DeploymentContent>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\dep\msvc\deps-x64\bin\zlib1.dll">
+      <ExcludedFromBuild>false</ExcludedFromBuild>
+      <DeploymentContent>true</DeploymentContent>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\dep\msvc\deps-x64\bin\zstd.dll">
+      <ExcludedFromBuild>false</ExcludedFromBuild>
+      <DeploymentContent>true</DeploymentContent>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
     <None Include="duckstation-uwp_TemporaryKey.pfx" />
     <None Include="resources\gamedb.yaml">
       <DeploymentContent>true</DeploymentContent>

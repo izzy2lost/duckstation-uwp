@@ -170,6 +170,7 @@ void CPU::Initialize()
   s_break_after_instruction = false;
 
   UpdateMemoryPointers();
+  UpdateDebugDispatcherFlag();
 
   GTE::Initialize();
 }
@@ -182,8 +183,6 @@ void CPU::Shutdown()
 
 void CPU::Reset()
 {
-  g_state.pending_ticks = 0;
-  g_state.downcount = 0;
   g_state.exception_raised = false;
   g_state.bus_error = false;
 
@@ -207,8 +206,11 @@ void CPU::Reset()
   if (g_settings.gpu_pgxp_enable)
     PGXP::Reset();
 
-  // TODO: This consumes cycles...
+  // This consumes cycles, so do it first.
   SetPC(RESET_VECTOR);
+
+  g_state.pending_ticks = 0;
+  g_state.downcount = 0;
 }
 
 bool CPU::DoState(StateWrapper& sw)
@@ -398,15 +400,14 @@ void CPU::RaiseBreakException(u32 CAUSE_bits, u32 EPC, u32 instruction_bits)
   RaiseException(CAUSE_bits, EPC, GetExceptionVector());
 }
 
-void CPU::SetExternalInterrupt(u8 bit)
+void CPU::SetIRQRequest(bool state)
 {
-  g_state.cop0_regs.cause.Ip |= static_cast<u8>(1u << bit);
-  CheckForPendingInterrupt();
-}
-
-void CPU::ClearExternalInterrupt(u8 bit)
-{
-  g_state.cop0_regs.cause.Ip &= static_cast<u8>(~(1u << bit));
+  // Only uses bit 10.
+  constexpr u32 bit = (1u << 10);
+  const u32 old_cause = g_state.cop0_regs.cause.bits;
+  g_state.cop0_regs.cause.bits = (g_state.cop0_regs.cause.bits & ~bit) | (state ? bit : 0u);
+  if (old_cause ^ g_state.cop0_regs.cause.bits && state)
+    CheckForPendingInterrupt();
 }
 
 ALWAYS_INLINE_RELEASE void CPU::UpdateLoadDelay()
@@ -1973,7 +1974,6 @@ bool CPU::UpdateDebugDispatcherFlag()
 {
   const bool has_any_breakpoints = HasAnyBreakpoints() || s_single_step;
 
-  // TODO: cop0 breakpoints
   const auto& dcic = g_state.cop0_regs.dcic;
   const bool has_cop0_breakpoints = dcic.super_master_enable_1 && dcic.super_master_enable_2 &&
                                     dcic.execution_breakpoint_enable && IsCop0ExecutionBreakpointUnmasked();

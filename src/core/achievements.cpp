@@ -129,6 +129,7 @@ static void ClearGameHash();
 static std::string GetGameHash(CDImage* image);
 static void SetHardcoreMode(bool enabled, bool force_display_message);
 static bool IsLoggedInOrLoggingIn();
+static bool CanEnableHardcoreMode();
 static void ShowLoginSuccess(const rc_client_t* client);
 static void ShowLoginNotification();
 static void IdentifyGame(const std::string& path, CDImage* image);
@@ -497,7 +498,7 @@ void Achievements::UpdateSettings(const Settings& old_config)
     // Hardcore mode can only be enabled through reset (ResetChallengeMode()).
     if (s_hardcore_mode && !g_settings.achievements_hardcore_mode)
     {
-      ResetHardcoreMode();
+      ResetHardcoreMode(false);
     }
     else if (!s_hardcore_mode && g_settings.achievements_hardcore_mode)
     {
@@ -927,13 +928,21 @@ void Achievements::ClientLoadGameCallback(int result, const char* error_message,
     return;
   }
 
+  const bool has_achievements = rc_client_has_achievements(client);
+  const bool has_leaderboards = rc_client_has_leaderboards(client);
+
+  // If the game has a RetroAchievements entry but no achievements or leaderboards,
+  // enforcing hardcore mode is pointless.
+  if (!has_achievements && !has_leaderboards)
+    DisableHardcoreMode();
+
   // We should have matched hardcore mode state.
   Assert(s_hardcore_mode == (rc_client_get_hardcore_enabled(client) != 0));
 
   s_game_id = info->id;
   s_game_title = info->title;
-  s_has_achievements = rc_client_has_achievements(client);
-  s_has_leaderboards = rc_client_has_leaderboards(client);
+  s_has_achievements = has_achievements;
+  s_has_leaderboards = has_leaderboards;
   s_has_rich_presence = rc_client_has_rich_presence(client);
   s_game_icon = {};
 
@@ -1373,7 +1382,7 @@ void Achievements::DisableHardcoreMode()
   SetHardcoreMode(false, true);
 }
 
-bool Achievements::ResetHardcoreMode()
+bool Achievements::ResetHardcoreMode(bool is_booting)
 {
   if (!IsActive())
     return false;
@@ -1385,6 +1394,9 @@ bool Achievements::ResetHardcoreMode()
   const bool wanted_hardcore_mode =
     (IsLoggedInOrLoggingIn() || s_load_game_request) && g_settings.achievements_hardcore_mode;
   if (s_hardcore_mode == wanted_hardcore_mode)
+    return false;
+
+  if (!is_booting && wanted_hardcore_mode && !CanEnableHardcoreMode())
     return false;
 
   SetHardcoreMode(wanted_hardcore_mode, false);
@@ -1597,6 +1609,11 @@ bool Achievements::IsLoggedInOrLoggingIn()
   return (rc_client_get_user_info(s_client) != nullptr || s_login_request);
 }
 
+bool Achievements::CanEnableHardcoreMode()
+{
+  return (s_load_game_request || s_has_achievements || s_has_leaderboards);
+}
+
 bool Achievements::Login(const char* username, const char* password, Error* error)
 {
   auto lock = GetLock();
@@ -1725,25 +1742,47 @@ void Achievements::ShowLoginNotification()
 
   if (g_settings.achievements_notifications && FullscreenUI::Initialize())
   {
-    std::string badge_path = GetUserBadgePath(user->username);
-    if (!FileSystem::FileExists(badge_path.c_str()))
-    {
-      char url[512];
-      const int res = rc_client_user_get_image_url(user, url, std::size(url));
-      if (res == RC_OK)
-        DownloadImage(url, badge_path);
-      else
-        ReportRCError(res, "rc_client_user_get_image_url() failed: ");
-    }
+    std::string badge_path = GetLoggedInUserBadgePath();
+    std::string title = user->display_name;
 
     //: Summary for login notification.
-    std::string title = user->display_name;
     std::string summary = fmt::format(TRANSLATE_FS("Achievements", "Score: {} ({} softcore)\nUnread messages: {}"),
                                       user->score, user->score_softcore, user->num_unread_messages);
 
     ImGuiFullscreen::AddNotification("achievements_login", LOGIN_NOTIFICATION_TIME, std::move(title),
                                      std::move(summary), std::move(badge_path));
   }
+}
+
+const char* Achievements::GetLoggedInUserName()
+{
+  const rc_client_user_t* user = rc_client_get_user_info(s_client);
+  if (!user) [[unlikely]]
+    return nullptr;
+
+  return user->username;
+}
+
+std::string Achievements::GetLoggedInUserBadgePath()
+{
+  std::string badge_path;
+
+  const rc_client_user_t* user = rc_client_get_user_info(s_client);
+  if (!user) [[unlikely]]
+    return badge_path;
+
+  badge_path = GetUserBadgePath(user->username);
+  if (!FileSystem::FileExists(badge_path.c_str())) [[unlikely]]
+  {
+    char url[512];
+    const int res = rc_client_user_get_image_url(user, url, std::size(url));
+    if (res == RC_OK)
+      DownloadImage(url, badge_path);
+    else
+      ReportRCError(res, "rc_client_user_get_image_url() failed: ");
+  }
+
+  return badge_path;
 }
 
 void Achievements::Logout()
@@ -2247,9 +2286,10 @@ void Achievements::DrawAchievementsWindow()
 
   ImGui::SetNextWindowBgAlpha(alpha);
 
-  if (ImGuiFullscreen::BeginFullscreenWindow(ImVec2(0.0f, heading_height),
-                                             ImVec2(display_size.x, display_size.y - heading_height), "achievements",
-                                             background, 0.0f, 0.0f, 0))
+  if (ImGuiFullscreen::BeginFullscreenWindow(
+        ImVec2(0.0f, heading_height),
+        ImVec2(display_size.x, display_size.y - heading_height - LayoutScale(ImGuiFullscreen::LAYOUT_FOOTER_HEIGHT)),
+        "achievements", background, 0.0f, 0.0f, 0))
   {
     static bool buckets_collapsed[NUM_RC_CLIENT_ACHIEVEMENT_BUCKETS] = {};
     static const char* bucket_names[NUM_RC_CLIENT_ACHIEVEMENT_BUCKETS] = {
@@ -2290,6 +2330,8 @@ void Achievements::DrawAchievementsWindow()
     ImGuiFullscreen::EndMenuButtons();
   }
   ImGuiFullscreen::EndFullscreenWindow();
+
+  FullscreenUI::SetStandardSelectionFooterText(true);
 }
 
 void Achievements::DrawAchievement(const rc_client_achievement_t* cheevo)
@@ -2705,12 +2747,14 @@ void Achievements::DrawLeaderboardsWindow()
     }
   }
   ImGuiFullscreen::EndFullscreenWindow();
+  FullscreenUI::SetStandardSelectionFooterText(true);
 
   if (!is_leaderboard_open)
   {
-    if (ImGuiFullscreen::BeginFullscreenWindow(ImVec2(0.0f, heading_height),
-                                               ImVec2(display_size.x, display_size.y - heading_height), "leaderboards",
-                                               background, 0.0f, 0.0f, 0))
+    if (ImGuiFullscreen::BeginFullscreenWindow(
+          ImVec2(0.0f, heading_height),
+          ImVec2(display_size.x, display_size.y - heading_height - LayoutScale(ImGuiFullscreen::LAYOUT_FOOTER_HEIGHT)),
+          "leaderboards", background, 0.0f, 0.0f, 0))
     {
       ImGuiFullscreen::BeginMenuButtons();
 
@@ -2727,9 +2771,10 @@ void Achievements::DrawLeaderboardsWindow()
   }
   else
   {
-    if (ImGuiFullscreen::BeginFullscreenWindow(ImVec2(0.0f, heading_height),
-                                               ImVec2(display_size.x, display_size.y - heading_height), "leaderboard",
-                                               background, 0.0f, 0.0f, 0))
+    if (ImGuiFullscreen::BeginFullscreenWindow(
+          ImVec2(0.0f, heading_height),
+          ImVec2(display_size.x, display_size.y - heading_height - LayoutScale(ImGuiFullscreen::LAYOUT_FOOTER_HEIGHT)),
+          "leaderboard", background, 0.0f, 0.0f, 0))
     {
       ImGuiFullscreen::BeginMenuButtons();
 

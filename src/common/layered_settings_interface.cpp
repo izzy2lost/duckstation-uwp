@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "layered_settings_interface.h"
@@ -9,7 +9,7 @@ LayeredSettingsInterface::LayeredSettingsInterface() = default;
 
 LayeredSettingsInterface::~LayeredSettingsInterface() = default;
 
-bool LayeredSettingsInterface::Save()
+bool LayeredSettingsInterface::Save(Error* error /* = nullptr */)
 {
   Panic("Attempting to save layered settings interface");
 }
@@ -90,6 +90,20 @@ bool LayeredSettingsInterface::GetBoolValue(const char* section, const char* key
 }
 
 bool LayeredSettingsInterface::GetStringValue(const char* section, const char* key, std::string* value) const
+{
+  for (u32 layer = FIRST_LAYER; layer <= LAST_LAYER; layer++)
+  {
+    if (SettingsInterface* sif = m_layers[layer]; sif != nullptr)
+    {
+      if (sif->GetStringValue(section, key, value))
+        return true;
+    }
+  }
+
+  return false;
+}
+
+bool LayeredSettingsInterface::GetStringValue(const char* section, const char* key, SmallStringBase* value) const
 {
   for (u32 layer = FIRST_LAYER; layer <= LAST_LAYER; layer++)
   {

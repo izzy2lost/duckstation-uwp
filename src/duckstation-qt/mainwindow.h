@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #pragma once
@@ -24,13 +24,16 @@ class QLabel;
 class QThread;
 class QProgressBar;
 
+class MainWindow;
 class GameListWidget;
 class EmuThread;
 class AutoUpdaterDialog;
 class MemoryCardEditorWindow;
-class CheatManagerDialog;
+class CheatManagerWindow;
 class DebuggerWindow;
-class MainWindow;
+class MemoryScannerWindow;
+
+struct SystemBootParameters;
 
 class GPUDevice;
 namespace Achievements {
@@ -87,11 +90,17 @@ public:
   /// Locks the system by pausing it, while a popup dialog is displayed.
   SystemLock pauseAndLockSystem();
 
+  /// Force quits the application.
+  void quit();
+
   /// Accessors for the status bar widgets, updated by the emulation thread.
   ALWAYS_INLINE QLabel* getStatusRendererWidget() const { return m_status_renderer_widget; }
   ALWAYS_INLINE QLabel* getStatusResolutionWidget() const { return m_status_resolution_widget; }
   ALWAYS_INLINE QLabel* getStatusFPSWidget() const { return m_status_fps_widget; }
   ALWAYS_INLINE QLabel* getStatusVPSWidget() const { return m_status_vps_widget; }
+
+  /// Accessors for child windows.
+  CheatManagerWindow* getCheatManagerWindow() const { return m_cheat_manager_window; }
 
 public Q_SLOTS:
   /// Updates debug menu visibility (hides if disabled).
@@ -163,8 +172,8 @@ private Q_SLOTS:
   void onAboutActionTriggered();
   void onCheckForUpdatesActionTriggered();
   void onToolsMemoryCardEditorTriggered();
+  void onToolsMemoryScannerTriggered();
   void onToolsCoverDownloaderTriggered();
-  void onToolsCheatManagerTriggered();
   void onToolsOpenDataDirectoryTriggered();
   void onSettingsTriggeredFromToolbar();
 
@@ -176,8 +185,8 @@ private Q_SLOTS:
 
   void onUpdateCheckComplete();
 
+  void openCheatManager();
   void openCPUDebugger();
-  void onCPUDebuggerClosed();
 
 protected:
   void showEvent(QShowEvent* event) override;
@@ -221,8 +230,8 @@ private:
 
   void switchToGameListView();
   void switchToEmulationView();
-  void saveGeometryToConfig();
-  void restoreGeometryFromConfig();
+  void saveStateToConfig();
+  void restoreStateFromConfig();
   void saveDisplayWindowGeometryToConfig();
   void restoreDisplayWindowGeometryFromConfig();
   void createDisplayWidget(bool fullscreen, bool render_to_main, bool use_main_window_pos);
@@ -262,6 +271,7 @@ private:
   /// Fills menu with the current cheat options.
   void populateCheatsMenu(QMenu* menu);
 
+  std::shared_ptr<SystemBootParameters> getSystemBootParameters(std::string file);
   std::optional<bool> promptForResumeState(const std::string& save_state_path);
   void startFile(std::string path, std::optional<std::string> save_path, std::optional<bool> fast_boot);
   void startFileOrChangeDisc(const QString& path);
@@ -287,8 +297,9 @@ private:
 
   AutoUpdaterDialog* m_auto_updater_dialog = nullptr;
   MemoryCardEditorWindow* m_memory_card_editor_window = nullptr;
-  CheatManagerDialog* m_cheat_manager_dialog = nullptr;
+  CheatManagerWindow* m_cheat_manager_window = nullptr;
   DebuggerWindow* m_debugger_window = nullptr;
+  MemoryScannerWindow* m_memory_scanner_window = nullptr;
 
   bool m_was_paused_by_focus_loss = false;
   bool m_open_debugger_on_start = false;

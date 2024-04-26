@@ -76,6 +76,7 @@ static constexpr const std::array<const char*, static_cast<u32>(GameDatabase::Tr
   "DisablePGXPTextureCorrection",
   "DisablePGXPColorCorrection",
   "DisablePGXPDepthBuffer",
+  "DisablePGXPPreserveProjFP",
   "ForcePGXPVertexCache",
   "ForcePGXPCPUMode",
   "ForceRecompilerMemoryExceptions",
@@ -535,6 +536,19 @@ void GameDatabase::Entry::ApplySettings(Settings& settings, bool display_osd_mes
     settings.gpu_pgxp_color_correction = false;
   }
 
+  if (HasTrait(Trait::DisablePGXPPreserveProjFP))
+  {
+    if (display_osd_messages && settings.gpu_pgxp_enable && settings.gpu_pgxp_preserve_proj_fp)
+    {
+      Host::AddIconOSDMessage(
+        "gamedb_disable_pgxp_texture", ICON_FA_MAGIC,
+        TRANSLATE_STR("OSDMessage", "PGXP projection precision preservation disabled by compatibility settings."),
+        osd_duration);
+    }
+
+    settings.gpu_pgxp_preserve_proj_fp = false;
+  }
+
   if (HasTrait(Trait::ForcePGXPVertexCache))
   {
     if (display_osd_messages && settings.gpu_pgxp_enable && !settings.gpu_pgxp_vertex_cache)
@@ -565,6 +579,14 @@ void GameDatabase::Entry::ApplySettings(Settings& settings, bool display_osd_mes
     }
 
     settings.gpu_pgxp_cpu = true;
+  }
+  else if (settings.UsingPGXPCPUMode())
+  {
+    Host::AddIconOSDMessage(
+      "gamedb_force_pgxp_cpu", ICON_FA_MICROCHIP,
+      TRANSLATE_STR("OSDMessage",
+                    "PGXP CPU mode is enabled, but it is not required for this game. This may cause rendering errors."),
+      osd_duration);
   }
 
   if (HasTrait(Trait::DisablePGXPDepthBuffer))

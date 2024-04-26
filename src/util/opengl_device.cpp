@@ -20,7 +20,9 @@
 
 Log_SetChannel(OpenGLDevice);
 
-static constexpr std::array<float, 4> s_clear_color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+static constexpr const std::array<float, 4> s_clear_color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+static constexpr const std::array<GLenum, GPUDevice::MAX_RENDER_TARGETS> s_draw_buffers = {
+  {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3}};
 
 OpenGLDevice::OpenGLDevice()
 {
@@ -236,12 +238,12 @@ void OpenGLDevice::InsertDebugMessage(const char* msg)
 #endif
 }
 
-void OpenGLDevice::SetSyncMode(DisplaySyncMode mode)
+void OpenGLDevice::SetVSyncEnabled(bool enabled)
 {
-  if (m_sync_mode == mode)
+  if (m_vsync_enabled == enabled)
     return;
 
-  m_sync_mode = mode;
+  m_vsync_enabled = enabled;
   SetSwapInterval();
 }
 
@@ -401,8 +403,9 @@ bool OpenGLDevice::CheckFeatures(FeatureMask disabled_features)
     !(disabled_features & FEATURE_MASK_DUAL_SOURCE_BLEND) && (max_dual_source_draw_buffers > 0) &&
     (GLAD_GL_VERSION_3_3 || GLAD_GL_ARB_blend_func_extended || GLAD_GL_EXT_blend_func_extended);
 
-  m_features.framebuffer_fetch = !(disabled_features & FEATURE_MASK_FRAMEBUFFER_FETCH) &&
-                                 (GLAD_GL_EXT_shader_framebuffer_fetch || GLAD_GL_ARM_shader_framebuffer_fetch);
+  m_features.framebuffer_fetch =
+    !(disabled_features & (FEATURE_MASK_FEEDBACK_LOOPS | FEATURE_MASK_FRAMEBUFFER_FETCH)) &&
+    (GLAD_GL_EXT_shader_framebuffer_fetch || GLAD_GL_ARM_shader_framebuffer_fetch);
 
 #ifdef __APPLE__
   // Partial texture buffer uploads appear to be broken in macOS's OpenGL driver.
@@ -467,6 +470,8 @@ bool OpenGLDevice::CheckFeatures(FeatureMask disabled_features)
   // So, blit from the shadow texture, like in the other renderers.
   m_features.texture_copy_to_self = !vendor_id_arm && !(disabled_features & FEATURE_MASK_TEXTURE_COPY_TO_SELF);
 
+  m_features.feedback_loops = m_features.framebuffer_fetch;
+
   m_features.geometry_shaders =
     !(disabled_features & FEATURE_MASK_GEOMETRY_SHADERS) && (GLAD_GL_VERSION_3_2 || GLAD_GL_ES_VERSION_3_2);
 
@@ -474,6 +479,7 @@ bool OpenGLDevice::CheckFeatures(FeatureMask disabled_features)
                             (!GLAD_GL_EXT_disjoint_timer_query || !glGetQueryObjectivEXT || !glGetQueryObjectui64vEXT));
   m_features.partial_msaa_resolve = true;
   m_features.memory_import = true;
+  m_features.explicit_present = false;
 
   m_features.shader_cache = false;
 
@@ -577,14 +583,13 @@ void OpenGLDevice::SetSwapInterval()
     return;
 
   // Window framebuffer has to be bound to call SetSwapInterval.
-  const s32 interval =
-    (m_sync_mode == DisplaySyncMode::VSync) ? 1 : ((m_sync_mode == DisplaySyncMode::VSyncRelaxed) ? -1 : 0);
+  const s32 interval = m_vsync_enabled ? (m_gl_context->SupportsNegativeSwapInterval() ? -1 : 1) : 0;
   GLint current_fbo = 0;
   glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &current_fbo);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 
   if (!m_gl_context->SetSwapInterval(interval))
-    Log_WarningPrintf("Failed to set swap interval to %d", interval);
+    Log_WarningFmt("Failed to set swap interval to {}", interval);
 
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, current_fbo);
 }
@@ -632,6 +637,8 @@ GLuint OpenGLDevice::CreateFramebuffer(GPUTexture* const* rts, u32 num_rts, GPUT
     OpenGLTexture* const DS = static_cast<OpenGLTexture*>(ds);
     glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, DS->GetGLTarget(), DS->GetGLId(), 0);
   }
+
+  glDrawBuffers(num_rts, s_draw_buffers.data());
 
   if (glGetError() != GL_NO_ERROR || glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
   {
@@ -768,8 +775,9 @@ bool OpenGLDevice::BeginPresent(bool skip_present)
   return true;
 }
 
-void OpenGLDevice::EndPresent()
+void OpenGLDevice::EndPresent(bool explicit_present)
 {
+  DebugAssert(!explicit_present);
   DebugAssert(m_current_fbo == 0);
 
   if (m_gpu_timing_enabled)
@@ -781,6 +789,11 @@ void OpenGLDevice::EndPresent()
     KickTimestampQuery();
 
   TrimTexturePool();
+}
+
+void OpenGLDevice::SubmitPresent()
+{
+  Panic("Not supported by this API.");
 }
 
 void OpenGLDevice::CreateTimestampQueries()
@@ -1031,6 +1044,11 @@ void OpenGLDevice::DrawIndexed(u32 index_count, u32 base_index, u32 base_vertex)
   glDrawElements(m_current_pipeline->GetTopology(), index_count, GL_UNSIGNED_SHORT, indices);
 }
 
+void OpenGLDevice::DrawIndexedWithBarrier(u32 index_count, u32 base_index, u32 base_vertex, DrawBarrier type)
+{
+  Panic("Barriers are not supported");
+}
+
 void OpenGLDevice::MapVertexBuffer(u32 vertex_size, u32 vertex_count, void** map_ptr, u32* map_space,
                                    u32* map_base_vertex)
 {
@@ -1084,8 +1102,10 @@ void OpenGLDevice::UnmapUniformBuffer(u32 size)
   glBindBufferRange(GL_UNIFORM_BUFFER, 1, m_uniform_buffer->GetGLBufferId(), pos, size);
 }
 
-void OpenGLDevice::SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds)
+void OpenGLDevice::SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds,
+                                    GPUPipeline::RenderPassFlag feedback_loop)
 {
+  // DebugAssert(!feedback_loop); TODO
   bool changed = (m_num_current_render_targets != num_rts || m_current_depth_target != ds);
   bool needs_ds_clear = (ds && ds->IsClearedOrInvalidated());
   bool needs_rt_clear = false;

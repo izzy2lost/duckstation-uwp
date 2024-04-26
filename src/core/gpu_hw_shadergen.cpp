@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "gpu_hw_shadergen.h"
@@ -7,13 +7,14 @@
 
 GPU_HW_ShaderGen::GPU_HW_ShaderGen(RenderAPI render_api, u32 resolution_scale, u32 multisamples,
                                    bool per_sample_shading, bool true_color, bool scaled_dithering,
-                                   GPUTextureFilter texture_filtering, bool uv_limits, bool pgxp_depth,
+                                   GPUTextureFilter texture_filtering, bool uv_limits, bool write_mask_as_depth,
                                    bool disable_color_perspective, bool supports_dual_source_blend,
                                    bool supports_framebuffer_fetch, bool debanding)
   : ShaderGen(render_api, supports_dual_source_blend, supports_framebuffer_fetch), m_resolution_scale(resolution_scale),
     m_multisamples(multisamples), m_per_sample_shading(per_sample_shading), m_true_color(true_color),
     m_scaled_dithering(scaled_dithering), m_texture_filter(texture_filtering), m_uv_limits(uv_limits),
-    m_pgxp_depth(pgxp_depth), m_disable_color_perspective(disable_color_perspective), m_debanding(debanding)
+    m_write_mask_as_depth(write_mask_as_depth), m_disable_color_perspective(disable_color_perspective),
+    m_debanding(debanding)
 {
 }
 
@@ -25,7 +26,6 @@ void GPU_HW_ShaderGen::WriteCommonFunctions(std::stringstream& ss)
 
   ss << "CONSTANT uint RESOLUTION_SCALE = " << m_resolution_scale << "u;\n";
   ss << "CONSTANT uint2 VRAM_SIZE = uint2(" << VRAM_WIDTH << ", " << VRAM_HEIGHT << ") * RESOLUTION_SCALE;\n";
-  ss << "CONSTANT float2 RCP_VRAM_SIZE = float2(1.0, 1.0) / float2(VRAM_SIZE);\n";
   ss << "CONSTANT uint MULTISAMPLES = " << m_multisamples << "u;\n";
   ss << "CONSTANT bool PER_SAMPLE_SHADING = " << (m_per_sample_shading ? "true" : "false") << ";\n";
   ss << R"(
@@ -59,13 +59,13 @@ void GPU_HW_ShaderGen::WriteBatchUniformBuffer(std::stringstream& ss)
                        false);
 }
 
-std::string GPU_HW_ShaderGen::GenerateBatchVertexShader(bool textured)
+std::string GPU_HW_ShaderGen::GenerateBatchVertexShader(bool textured, bool pgxp_depth)
 {
   std::stringstream ss;
   WriteHeader(ss);
   DefineMacro(ss, "TEXTURED", textured);
   DefineMacro(ss, "UV_LIMITS", m_uv_limits);
-  DefineMacro(ss, "PGXP_DEPTH", m_pgxp_depth);
+  DefineMacro(ss, "PGXP_DEPTH", pgxp_depth);
 
   WriteCommonFunctions(ss);
   WriteBatchUniformBuffer(ss);
@@ -633,19 +633,20 @@ void FilteredSampleFromVRAM(uint4 texpage, float2 coords, float4 uv_limits,
 
 std::string GPU_HW_ShaderGen::GenerateBatchFragmentShader(GPU_HW::BatchRenderMode render_mode,
                                                           GPUTransparencyMode transparency, GPUTextureMode texture_mode,
-                                                          bool dithering, bool interlacing)
+                                                          bool dithering, bool interlacing, bool check_mask)
 {
-  // Shouldn't be using shader blending without fbfetch.
-  DebugAssert(m_supports_framebuffer_fetch || transparency == GPUTransparencyMode::Disabled);
+  // TODO: don't write depth for shader blend
+  DebugAssert(transparency == GPUTransparencyMode::Disabled || render_mode == GPU_HW::BatchRenderMode::ShaderBlend);
 
   const GPUTextureMode actual_texture_mode = texture_mode & ~GPUTextureMode::RawTextureBit;
   const bool raw_texture = (texture_mode & GPUTextureMode::RawTextureBit) == GPUTextureMode::RawTextureBit;
   const bool textured = (texture_mode != GPUTextureMode::Disabled);
-  const bool use_framebuffer_fetch = (m_supports_framebuffer_fetch && transparency != GPUTransparencyMode::Disabled);
-  const bool use_dual_source = !use_framebuffer_fetch && m_supports_dual_source_blend &&
-                               ((render_mode != GPU_HW::BatchRenderMode::TransparencyDisabled &&
-                                 render_mode != GPU_HW::BatchRenderMode::OnlyOpaque) ||
-                                m_texture_filter != GPUTextureFilter::Nearest);
+  const bool shader_blending = (render_mode == GPU_HW::BatchRenderMode::ShaderBlend &&
+                                (transparency != GPUTransparencyMode::Disabled || check_mask));
+  const bool use_dual_source = (!shader_blending && m_supports_dual_source_blend &&
+                                ((render_mode != GPU_HW::BatchRenderMode::TransparencyDisabled &&
+                                  render_mode != GPU_HW::BatchRenderMode::OnlyOpaque) ||
+                                 m_texture_filter != GPUTextureFilter::Nearest));
 
   std::stringstream ss;
   WriteHeader(ss);
@@ -653,7 +654,8 @@ std::string GPU_HW_ShaderGen::GenerateBatchFragmentShader(GPU_HW::BatchRenderMod
   DefineMacro(ss, "TRANSPARENCY_ONLY_OPAQUE", render_mode == GPU_HW::BatchRenderMode::OnlyOpaque);
   DefineMacro(ss, "TRANSPARENCY_ONLY_TRANSPARENT", render_mode == GPU_HW::BatchRenderMode::OnlyTransparent);
   DefineMacro(ss, "TRANSPARENCY_MODE", static_cast<s32>(transparency));
-  DefineMacro(ss, "SHADER_BLENDING", use_framebuffer_fetch);
+  DefineMacro(ss, "SHADER_BLENDING", shader_blending);
+  DefineMacro(ss, "CHECK_MASK_BIT", check_mask);
   DefineMacro(ss, "TEXTURED", textured);
   DefineMacro(ss, "PALETTE",
               actual_texture_mode == GPUTextureMode::Palette4Bit || actual_texture_mode == GPUTextureMode::Palette8Bit);
@@ -669,7 +671,7 @@ std::string GPU_HW_ShaderGen::GenerateBatchFragmentShader(GPU_HW::BatchRenderMod
   DefineMacro(ss, "TEXTURE_FILTERING", m_texture_filter != GPUTextureFilter::Nearest);
   DefineMacro(ss, "UV_LIMITS", m_uv_limits);
   DefineMacro(ss, "USE_DUAL_SOURCE", use_dual_source);
-  DefineMacro(ss, "PGXP_DEPTH", m_pgxp_depth);
+  DefineMacro(ss, "WRITE_MASK_AS_DEPTH", m_write_mask_as_depth);
 
   WriteCommonFunctions(ss);
   WriteBatchUniformBuffer(ss);
@@ -746,26 +748,27 @@ float4 SampleFromVRAM(uint4 texpage, float2 coords)
     uint2 vicoord = texpage.xy + (index_coord * uint2(RESOLUTION_SCALE, RESOLUTION_SCALE));
 
     // load colour/palette
-    float4 texel = SAMPLE_TEXTURE(samp0, float2(vicoord) * RCP_VRAM_SIZE);
+    float4 texel = LOAD_TEXTURE(samp0, int2(vicoord), 0);
     uint vram_value = RGBA8ToRGBA5551(texel);
 
     // apply palette
     #if PALETTE_4_BIT
       uint subpixel = icoord.x & 3u;
       uint palette_index = (vram_value >> (subpixel * 4u)) & 0x0Fu;
+      uint2 palette_icoord = uint2((texpage.z + palette_index) * RESOLUTION_SCALE, texpage.w);
     #elif PALETTE_8_BIT
+      // can only wrap in X direction for 8-bit, 4-bit will fit in texpage size.
       uint subpixel = icoord.x & 1u;
       uint palette_index = (vram_value >> (subpixel * 8u)) & 0xFFu;
+      uint2 palette_icoord = uint2(((texpage.z + palette_index) & 0x3FFu) * RESOLUTION_SCALE, texpage.w);
     #endif
 
-    // sample palette. can wrap in X direction
-    uint2 palette_icoord = uint2(((texpage.z + palette_index) & 0x3FFu) * RESOLUTION_SCALE, texpage.w);
-    return SAMPLE_TEXTURE(samp0, float2(palette_icoord) * RCP_VRAM_SIZE);
+    return LOAD_TEXTURE(samp0, int2(palette_icoord), 0);
   #else
     // Direct texturing. Render-to-texture effects. Use upscaled coordinates.
     uint2 icoord = ApplyUpscaledTextureWindow(FloatToIntegerCoords(coords));
     uint2 direct_icoord = texpage.xy + icoord;
-    return SAMPLE_TEXTURE(samp0, float2(direct_icoord) * RCP_VRAM_SIZE);
+    return LOAD_TEXTURE(samp0, int2(direct_icoord), 0);
   #endif
 }
 
@@ -799,20 +802,20 @@ float3 ApplyDebanding(float2 frag_coord)
     {
       DeclareFragmentEntryPoint(ss, 1, 1,
                                 {{"nointerpolation", "uint4 v_texpage"}, {"nointerpolation", "float4 v_uv_limits"}},
-                                true, use_dual_source ? 2 : 1, !m_pgxp_depth, UsingMSAA(), UsingPerSampleShading(),
-                                false, m_disable_color_perspective, use_framebuffer_fetch);
+                                true, use_dual_source ? 2 : 1, m_write_mask_as_depth, UsingMSAA(),
+                                UsingPerSampleShading(), false, m_disable_color_perspective, shader_blending);
     }
     else
     {
       DeclareFragmentEntryPoint(ss, 1, 1, {{"nointerpolation", "uint4 v_texpage"}}, true, use_dual_source ? 2 : 1,
-                                !m_pgxp_depth, UsingMSAA(), UsingPerSampleShading(), false, m_disable_color_perspective,
-                                use_framebuffer_fetch);
+                                m_write_mask_as_depth, UsingMSAA(), UsingPerSampleShading(), false,
+                                m_disable_color_perspective, shader_blending);
     }
   }
   else
   {
-    DeclareFragmentEntryPoint(ss, 1, 0, {}, true, use_dual_source ? 2 : 1, !m_pgxp_depth, UsingMSAA(),
-                              UsingPerSampleShading(), false, m_disable_color_perspective, use_framebuffer_fetch);
+    DeclareFragmentEntryPoint(ss, 1, 0, {}, true, use_dual_source ? 2 : 1, m_write_mask_as_depth, UsingMSAA(),
+                              UsingPerSampleShading(), false, m_disable_color_perspective, shader_blending);
   }
 
   ss << R"(
@@ -930,6 +933,11 @@ float3 ApplyDebanding(float2 frag_coord)
     float4 bg_col = LAST_FRAG_COLOR;
     float4 fg_col = float4(color, oalpha);
 
+    #if CHECK_MASK_BIT
+      if (bg_col.a != 0.0)
+        discard;
+    #endif
+
     #if TEXTURE_FILTERING
       #if TRANSPARENCY_MODE == 0 || TRANSPARENCY_MODE == 3
         bg_col.rgb /= ialpha;
@@ -964,7 +972,7 @@ float3 ApplyDebanding(float2 frag_coord)
         o_col0 = float4(color, oalpha);
       #endif
 
-      #if !PGXP_DEPTH
+      #if WRITE_MASK_AS_DEPTH
         o_depth = oalpha * v_pos.z;
       #endif
 
@@ -981,7 +989,7 @@ float3 ApplyDebanding(float2 frag_coord)
         o_col0 = float4(color, oalpha);
       #endif
 
-      #if !PGXP_DEPTH
+      #if WRITE_MASK_AS_DEPTH
         o_depth = oalpha * v_pos.z;
       #endif
 
@@ -998,7 +1006,7 @@ float3 ApplyDebanding(float2 frag_coord)
       o_col0 = float4(color, oalpha);
     #endif
 
-    #if !PGXP_DEPTH
+    #if WRITE_MASK_AS_DEPTH
       o_depth = oalpha * v_pos.z;
     #endif
   #else
@@ -1009,7 +1017,7 @@ float3 ApplyDebanding(float2 frag_coord)
       o_col1 = float4(0.0, 0.0, 0.0, 1.0 - ialpha);
     #endif
 
-    #if !PGXP_DEPTH
+    #if WRITE_MASK_AS_DEPTH
       o_depth = oalpha * v_pos.z;
     #endif
   #endif
@@ -1019,36 +1027,18 @@ float3 ApplyDebanding(float2 frag_coord)
   return ss.str();
 }
 
-std::string GPU_HW_ShaderGen::GenerateDisplayFragmentShader(bool depth_24bit,
-                                                            GPU_HW::InterlacedRenderMode interlace_mode,
-                                                            bool smooth_chroma)
+std::string GPU_HW_ShaderGen::GenerateVRAMExtractFragmentShader(bool depth_24bit)
 {
   std::stringstream ss;
   WriteHeader(ss);
   DefineMacro(ss, "DEPTH_24BIT", depth_24bit);
-  DefineMacro(ss, "INTERLACED", interlace_mode != GPU_HW::InterlacedRenderMode::None);
-  DefineMacro(ss, "INTERLEAVED", interlace_mode == GPU_HW::InterlacedRenderMode::InterleavedFields);
-  DefineMacro(ss, "SMOOTH_CHROMA", smooth_chroma);
+  DefineMacro(ss, "MULTISAMPLED", UsingMSAA());
 
   WriteCommonFunctions(ss);
-  DeclareUniformBuffer(ss, {"uint2 u_vram_offset", "uint u_crop_left", "uint u_field_offset"}, true);
+  DeclareUniformBuffer(ss, {"uint2 u_vram_offset", "uint u_skip_x", "uint u_line_skip"}, true);
   DeclareTexture(ss, "samp0", 0, UsingMSAA());
 
   ss << R"(
-float3 RGBToYUV(float3 rgb)
-{
-  return float3(dot(rgb.rgb, float3(0.299f, 0.587f, 0.114f)),
-                dot(rgb.rgb, float3(-0.14713f, -0.28886f, 0.436f)),
-                dot(rgb.rgb, float3(0.615f, -0.51499f, -0.10001f)));
-}
-
-float3 YUVToRGB(float3 yuv)
-{
-  return float3(dot(yuv, float3(1.0f, 0.0f, 1.13983f)),
-                dot(yuv, float3(1.0f, -0.39465f, -0.58060f)),
-                dot(yuv, float3(1.0f, 2.03211f, 0.0f)));
-}
-
 float4 LoadVRAM(int2 coords)
 {
 #if MULTISAMPLING
@@ -1079,61 +1069,15 @@ float3 SampleVRAM24(uint2 icoords)
   return float3(float(s1s0 & 0xFFu) / 255.0, float((s1s0 >> 8u) & 0xFFu) / 255.0,
                 float((s1s0 >> 16u) & 0xFFu) / 255.0);
 }
-
-float3 SampleVRAMAverage2x2(uint2 icoords)
-{
-  float3 value = SampleVRAM24(icoords);
-  value += SampleVRAM24(icoords + uint2(0, 1));
-  value += SampleVRAM24(icoords + uint2(1, 0));
-  value += SampleVRAM24(icoords + uint2(1, 1));
-  return value * 0.25;
-}
-
-float3 SampleVRAM24Smoothed(uint2 icoords)
-{
-  int2 base = int2(icoords) - 1;
-  uint2 low = uint2(max(base & ~1, int2(0, 0)));
-  uint2 high = low + 2u;
-  float2 coeff = vec2(base & 1) * 0.5 + 0.25;
-
-  float3 p = SampleVRAM24(icoords);
-  float3 p00 = SampleVRAMAverage2x2(low);
-  float3 p01 = SampleVRAMAverage2x2(uint2(low.x, high.y));
-  float3 p10 = SampleVRAMAverage2x2(uint2(high.x, low.y));
-  float3 p11 = SampleVRAMAverage2x2(high);
-
-  float3 s = lerp(lerp(p00, p10, coeff.x),
-                  lerp(p01, p11, coeff.x),
-                  coeff.y);
-
-  float y = RGBToYUV(p).x;
-  float2 uv = RGBToYUV(s).yz;
-  return YUVToRGB(float3(y, uv));
-}
 )";
 
   DeclareFragmentEntryPoint(ss, 0, 1, {}, true, 1);
   ss << R"(
 {
-  uint2 icoords = uint2(v_pos.xy) + uint2(u_crop_left, 0u);
-
-  #if INTERLACED
-    if ((icoords.y & 1u) != u_field_offset)
-      discard;
-
-    #if !INTERLEAVED
-      icoords.y /= 2u;
-    #else
-      icoords.y &= ~1u;
-    #endif
-  #endif
+  uint2 icoords = uint2(uint(v_pos.x) + u_skip_x, uint(v_pos.y) << u_line_skip);
 
   #if DEPTH_24BIT
-    #if SMOOTH_CHROMA
-      o_col0 = float4(SampleVRAM24Smoothed(icoords), 1.0);
-    #else
-      o_col0 = float4(SampleVRAM24(icoords), 1.0);
-    #endif
+    o_col0 = float4(SampleVRAM24(icoords), 1.0);
   #else
     o_col0 = float4(LoadVRAM(int2((icoords + u_vram_offset) % VRAM_SIZE)).rgb, 1.0);
   #endif
@@ -1297,7 +1241,7 @@ std::string GPU_HW_ShaderGen::GenerateVRAMWriteFragmentShader(bool use_buffer, b
   std::stringstream ss;
   WriteHeader(ss);
   WriteCommonFunctions(ss);
-  DefineMacro(ss, "PGXP_DEPTH", m_pgxp_depth);
+  DefineMacro(ss, "WRITE_MASK_AS_DEPTH", m_write_mask_as_depth);
   DefineMacro(ss, "USE_BUFFER", use_buffer);
   DeclareUniformBuffer(ss,
                        {"uint2 u_base_coords", "uint2 u_end_coords", "uint2 u_size", "uint u_buffer_base_offset",
@@ -1330,7 +1274,7 @@ std::string GPU_HW_ShaderGen::GenerateVRAMWriteFragmentShader(bool use_buffer, b
     ss << "#define GET_VALUE(buffer_offset) (LOAD_TEXTURE_BUFFER(samp0, int(buffer_offset)).r)\n\n";
   }
 
-  DeclareFragmentEntryPoint(ss, 0, 1, {}, true, 1, true);
+  DeclareFragmentEntryPoint(ss, 0, 1, {}, true, 1, m_write_mask_as_depth);
   ss << R"(
 {
   uint2 coords = uint2(v_pos.xy) / uint2(RESOLUTION_SCALE, RESOLUTION_SCALE);
@@ -1355,10 +1299,8 @@ std::string GPU_HW_ShaderGen::GenerateVRAMWriteFragmentShader(bool use_buffer, b
 #endif
 
   o_col0 = RGBA5551ToRGBA8(value);
-#if !PGXP_DEPTH
+#if WRITE_MASK_AS_DEPTH
   o_depth = (o_col0.a == 1.0) ? u_depth_value : 0.0;
-#else
-  o_depth = 1.0;
 #endif
 })";
 
@@ -1373,7 +1315,7 @@ std::string GPU_HW_ShaderGen::GenerateVRAMCopyFragmentShader()
   std::stringstream ss;
   WriteHeader(ss);
   WriteCommonFunctions(ss);
-  DefineMacro(ss, "PGXP_DEPTH", m_pgxp_depth);
+  DefineMacro(ss, "WRITE_MASK_AS_DEPTH", m_write_mask_as_depth);
   DeclareUniformBuffer(ss,
                        {"uint2 u_src_coords", "uint2 u_dst_coords", "uint2 u_end_coords", "uint2 u_size",
                         "bool u_set_mask_bit", "float u_depth_value"},
@@ -1381,7 +1323,7 @@ std::string GPU_HW_ShaderGen::GenerateVRAMCopyFragmentShader()
 
   DeclareTexture(ss, "samp0", 0, msaa);
   DefineMacro(ss, "MSAA_COPY", msaa);
-  DeclareFragmentEntryPoint(ss, 0, 1, {}, true, 1, true, false, false, msaa);
+  DeclareFragmentEntryPoint(ss, 0, 1, {}, true, 1, m_write_mask_as_depth, false, false, msaa);
   ss << R"(
 {
   uint2 dst_coords = uint2(v_pos.xy);
@@ -1408,10 +1350,8 @@ std::string GPU_HW_ShaderGen::GenerateVRAMCopyFragmentShader()
   float4 color = LOAD_TEXTURE(samp0, int2(src_coords), 0);
 #endif
   o_col0 = float4(color.xyz, u_set_mask_bit ? 1.0 : color.a);
-#if !PGXP_DEPTH
+#if WRITE_MASK_AS_DEPTH
   o_depth = (u_set_mask_bit ? 1.0f : ((o_col0.a == 1.0) ? u_depth_value : 0.0));
-#else
-  o_depth = 1.0f;
 #endif
 })";
 
@@ -1423,14 +1363,14 @@ std::string GPU_HW_ShaderGen::GenerateVRAMFillFragmentShader(bool wrapped, bool 
   std::stringstream ss;
   WriteHeader(ss);
   WriteCommonFunctions(ss);
-  DefineMacro(ss, "PGXP_DEPTH", m_pgxp_depth);
+  DefineMacro(ss, "WRITE_MASK_AS_DEPTH", m_write_mask_as_depth);
   DefineMacro(ss, "WRAPPED", wrapped);
   DefineMacro(ss, "INTERLACED", interlaced);
 
   DeclareUniformBuffer(
     ss, {"uint2 u_dst_coords", "uint2 u_end_coords", "float4 u_fill_color", "uint u_interlaced_displayed_field"}, true);
 
-  DeclareFragmentEntryPoint(ss, 0, 1, {}, interlaced || wrapped, 1, true, false, false, false);
+  DeclareFragmentEntryPoint(ss, 0, 1, {}, interlaced || wrapped, 1, m_write_mask_as_depth, false, false, false);
   ss << R"(
 {
 #if INTERLACED || WRAPPED
@@ -1452,10 +1392,8 @@ std::string GPU_HW_ShaderGen::GenerateVRAMFillFragmentShader(bool wrapped, bool 
 #endif
 
   o_col0 = u_fill_color;
-#if !PGXP_DEPTH
+#if WRITE_MASK_AS_DEPTH
   o_depth = u_fill_color.a;
-#else
-  o_depth = 1.0f;
 #endif
 })";
 

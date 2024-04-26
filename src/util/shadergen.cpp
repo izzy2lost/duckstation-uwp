@@ -1,12 +1,15 @@
-// SPDX-FileCopyrightText: 2019-2023 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "shadergen.h"
+
 #include "common/assert.h"
 #include "common/bitutils.h"
 #include "common/log.h"
+
 #include <cstdio>
 #include <cstring>
+#include <iomanip>
 
 #ifdef ENABLE_OPENGL
 #include "opengl_loader.h"
@@ -119,6 +122,15 @@ void ShaderGen::WriteHeader(std::stringstream& ss)
     ss << m_glsl_version_string << "\n\n";
   else if (m_spirv)
     ss << "#version 450 core\n\n";
+
+#ifdef __APPLE__
+  // TODO: Do this for Vulkan as well.
+  if (m_render_api == RenderAPI::Metal)
+  {
+    if (!m_supports_framebuffer_fetch)
+      ss << "#extension GL_EXT_samplerless_texture_functions : require\n";
+  }
+#endif
 
 #ifdef ENABLE_OPENGL
   // Extension enabling for OpenGL.
@@ -505,7 +517,7 @@ void ShaderGen::DeclareFragmentEntryPoint(
   const std::initializer_list<std::pair<const char*, const char*>>& additional_inputs,
   bool declare_fragcoord /* = false */, u32 num_color_outputs /* = 1 */, bool depth_output /* = false */,
   bool msaa /* = false */, bool ssaa /* = false */, bool declare_sample_id /* = false */,
-  bool noperspective_color /* = false */, bool framebuffer_fetch /* = false */)
+  bool noperspective_color /* = false */, bool feedback_loop /* = false */)
 {
   if (m_glsl)
   {
@@ -560,21 +572,48 @@ void ShaderGen::DeclareFragmentEntryPoint(
       ss << "#define o_depth gl_FragDepth\n";
 
     const char* target_0_qualifier = "out";
-#ifdef ENABLE_OPENGL
-    if ((m_render_api == RenderAPI::OpenGL || m_render_api == RenderAPI::OpenGLES) && m_supports_framebuffer_fetch &&
-        framebuffer_fetch)
+
+    if (feedback_loop)
     {
-      if (GLAD_GL_EXT_shader_framebuffer_fetch)
+#ifdef ENABLE_OPENGL
+      if (m_render_api == RenderAPI::OpenGL || m_render_api == RenderAPI::OpenGLES)
       {
-        target_0_qualifier = "inout";
-        ss << "#define LAST_FRAG_COLOR o_col0\n";
+        Assert(m_supports_framebuffer_fetch);
+        if (GLAD_GL_EXT_shader_framebuffer_fetch)
+        {
+          target_0_qualifier = "inout";
+          ss << "#define LAST_FRAG_COLOR o_col0\n";
+        }
+        else if (GLAD_GL_ARM_shader_framebuffer_fetch)
+        {
+          ss << "#define LAST_FRAG_COLOR gl_LastFragColorARM\n";
+        }
       }
-      else if (GLAD_GL_ARM_shader_framebuffer_fetch)
-      {
-        ss << "#define LAST_FRAG_COLOR gl_LastFragColorARM\n";
-      }
-    }
 #endif
+#ifdef ENABLE_VULKAN
+      if (m_render_api == RenderAPI::Vulkan)
+      {
+        ss << "layout(input_attachment_index = 0, set = 2, binding = 0) uniform subpassInput u_input_rt;\n";
+        ss << "#define LAST_FRAG_COLOR subpassLoad(u_input_rt)\n";
+      }
+#endif
+#ifdef __APPLE__
+      if (m_render_api == RenderAPI::Metal)
+      {
+        if (m_supports_framebuffer_fetch)
+        {
+          // Set doesn't matter, because it's transformed to color0.
+          ss << "layout(input_attachment_index = 0, set = 2, binding = 0) uniform subpassInput u_input_rt;\n";
+          ss << "#define LAST_FRAG_COLOR subpassLoad(u_input_rt)\n";
+        }
+        else
+        {
+          ss << "layout(set = 2, binding = 0) uniform texture2D u_input_rt;\n";
+          ss << "#define LAST_FRAG_COLOR texelFetch(u_input_rt, int2(gl_FragCoord.xy), 0)\n";
+        }
+      }
+#endif
+    }
 
     if (m_use_glsl_binding_layout)
     {
@@ -649,20 +688,18 @@ void ShaderGen::DeclareFragmentEntryPoint(
   }
 }
 
-std::string ShaderGen::GenerateScreenQuadVertexShader()
+std::string ShaderGen::GenerateScreenQuadVertexShader(float z /* = 0.0f */)
 {
   std::stringstream ss;
   WriteHeader(ss);
   DeclareVertexEntryPoint(ss, {}, 0, 1, {}, true);
-  ss << R"(
-{
-  v_tex0 = float2(float((v_id << 1) & 2u), float(v_id & 2u));
-  v_pos = float4(v_tex0 * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f), 0.0f, 1.0f);
-  #if API_OPENGL || API_OPENGL_ES || API_VULKAN
-    v_pos.y = -v_pos.y;
-  #endif
-}
-)";
+  ss << "{\n";
+  ss << "  v_tex0 = float2(float((v_id << 1) & 2u), float(v_id & 2u));\n";
+  ss << "  v_pos = float4(v_tex0 * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f), " << std::fixed << z << "f, 1.0f);\n";
+  ss << "  #if API_OPENGL || API_OPENGL_ES || API_VULKAN\n";
+  ss << "    v_pos.y = -v_pos.y;\n";
+  ss << "  #endif\n";
+  ss << "}\n";
 
   return ss.str();
 }

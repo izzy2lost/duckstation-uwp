@@ -66,15 +66,15 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
   SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.customAspectRatioDenominator, "Display",
                                               "CustomAspectRatioDenominator", 1);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.widescreenHack, "GPU", "WidescreenHack", false);
+  SettingWidgetBinder::BindWidgetToEnumSetting(
+    sif, m_ui.displayDeinterlacing, "Display", "DeinterlacingMode", &Settings::ParseDisplayDeinterlacingMode,
+    &Settings::GetDisplayDeinterlacingModeName, Settings::DEFAULT_DISPLAY_DEINTERLACING_MODE);
   SettingWidgetBinder::BindWidgetToEnumSetting(sif, m_ui.displayCropMode, "Display", "CropMode",
                                                &Settings::ParseDisplayCropMode, &Settings::GetDisplayCropModeName,
                                                Settings::DEFAULT_DISPLAY_CROP_MODE);
   SettingWidgetBinder::BindWidgetToEnumSetting(sif, m_ui.displayScaling, "Display", "Scaling",
                                                &Settings::ParseDisplayScaling, &Settings::GetDisplayScalingName,
                                                Settings::DEFAULT_DISPLAY_SCALING);
-  SettingWidgetBinder::BindWidgetToEnumSetting(sif, m_ui.displaySyncMode, "Display", "SyncMode",
-                                               &Settings::ParseDisplaySyncMode, &Settings::GetDisplaySyncModeName,
-                                               Settings::DEFAULT_DISPLAY_SYNC_MODE);
   SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.gpuDownsampleScale, "GPU", "DownsampleScale", 1);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.trueColor, "GPU", "TrueColor", false);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.disableInterlacing, "GPU", "DisableInterlacing", true);
@@ -94,8 +94,8 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
           &GraphicsSettingsWidget::onAspectRatioChanged);
   connect(m_ui.gpuDownsampleMode, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
           &GraphicsSettingsWidget::onDownsampleModeChanged);
-  connect(m_ui.trueColor, &QCheckBox::stateChanged, this, &GraphicsSettingsWidget::onTrueColorChanged);
-  connect(m_ui.pgxpEnable, &QCheckBox::stateChanged, this, &GraphicsSettingsWidget::updatePGXPSettingsEnabled);
+  connect(m_ui.trueColor, &QCheckBox::checkStateChanged, this, &GraphicsSettingsWidget::onTrueColorChanged);
+  connect(m_ui.pgxpEnable, &QCheckBox::checkStateChanged, this, &GraphicsSettingsWidget::updatePGXPSettingsEnabled);
 
   if (!dialog->isPerGameSettings() ||
       (dialog->containsSettingValue("GPU", "Multisamples") || dialog->containsSettingValue("GPU", "PerSampleShading")))
@@ -158,9 +158,10 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.pgxpCPU, "GPU", "PGXPCPU", false);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.pgxpVertexCache, "GPU", "PGXPVertexCache", false);
 
-  connect(m_ui.pgxpTextureCorrection, &QCheckBox::stateChanged, this,
+  connect(m_ui.pgxpTextureCorrection, &QCheckBox::checkStateChanged, this,
           &GraphicsSettingsWidget::updatePGXPSettingsEnabled);
-  connect(m_ui.pgxpDepthBuffer, &QCheckBox::stateChanged, this, &GraphicsSettingsWidget::updatePGXPSettingsEnabled);
+  connect(m_ui.pgxpDepthBuffer, &QCheckBox::checkStateChanged, this,
+          &GraphicsSettingsWidget::updatePGXPSettingsEnabled);
 
   // OSD Tab
 
@@ -173,6 +174,8 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showGPU, "Display", "ShowGPU", false);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showInput, "Display", "ShowInputs", false);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showGPUStatistics, "Display", "ShowGPUStatistics", false);
+  SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showLatencyStatistics, "Display", "ShowLatencyStatistics",
+                                               false);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showStatusIndicators, "Display", "ShowStatusIndicators", true);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showFrameTimes, "Display", "ShowFrameTimes", false);
   SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.showSettings, "Display", "ShowEnhancements", false);
@@ -206,9 +209,9 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
                                               "DumpVRAMWriteHeightThreshold",
                                               Settings::DEFAULT_VRAM_WRITE_DUMP_HEIGHT_THRESHOLD);
 
-  connect(m_ui.vramWriteReplacement, &QCheckBox::stateChanged, this,
+  connect(m_ui.vramWriteReplacement, &QCheckBox::checkStateChanged, this,
           &GraphicsSettingsWidget::onEnableAnyTextureReplacementsChanged);
-  connect(m_ui.vramWriteDumping, &QCheckBox::stateChanged, this,
+  connect(m_ui.vramWriteDumping, &QCheckBox::checkStateChanged, this,
           &GraphicsSettingsWidget::onEnableVRAMWriteDumpingChanged);
 
   // Debugging Tab
@@ -251,7 +254,7 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
   dialog->registerWidgetHelp(
     m_ui.gpuDownsampleMode, tr("Down-Sampling"), tr("Disabled"),
     tr("Downsamples the rendered image prior to displaying it. Can improve overall image quality in mixed 2D/3D games, "
-       "but should be disabled for pure 3D games. Only applies to the hardware renderers."));
+       "but should be disabled for pure 3D games."));
   dialog->registerWidgetHelp(m_ui.gpuDownsampleScale, tr("Down-Sampling Display Scale"), tr("1x"),
                              tr("Selects the resolution scale that will be applied to the final image. 1x will "
                                 "downsample to the original console resolution."));
@@ -259,15 +262,21 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
     m_ui.textureFiltering, tr("Texture Filtering"),
     QString::fromUtf8(Settings::GetTextureFilterDisplayName(Settings::DEFAULT_GPU_TEXTURE_FILTER)),
     tr("Smooths out the blockiness of magnified textures on 3D object by using filtering. <br>Will have a "
-       "greater effect on higher resolution scales. Only applies to the hardware renderers. <br>The JINC2 and "
-       "especially xBR filtering modes are very demanding, and may not be worth the speed penalty."));
+       "greater effect on higher resolution scales. <br>The JINC2 and especially xBR filtering modes are very "
+       "demanding, and may not be worth the speed penalty."));
   dialog->registerWidgetHelp(
     m_ui.displayAspectRatio, tr("Aspect Ratio"),
     QString::fromUtf8(Settings::GetDisplayAspectRatioDisplayName(Settings::DEFAULT_DISPLAY_ASPECT_RATIO)),
     tr("Changes the aspect ratio used to display the console's output to the screen. The default is Auto (Game Native) "
        "which automatically adjusts the aspect ratio to match how a game would be shown on a typical TV of the era."));
   dialog->registerWidgetHelp(
-    m_ui.displayCropMode, tr("Crop Mode"),
+    m_ui.displayDeinterlacing, tr("Deinterlacing"),
+    QString::fromUtf8(Settings::GetDisplayDeinterlacingModeName(Settings::DEFAULT_DISPLAY_DEINTERLACING_MODE)),
+    tr("Determines which algorithm is used to convert interlaced frames to progressive for display on your system. "
+       "Generally, the \"Disable Interlacing\" enhancement provides better quality output, but some games require "
+       "interlaced rendering."));
+  dialog->registerWidgetHelp(
+    m_ui.displayCropMode, tr("Crop"),
     QString::fromUtf8(Settings::GetDisplayCropModeDisplayName(Settings::DEFAULT_DISPLAY_CROP_MODE)),
     tr("Determines how much of the area typically not visible on a consumer TV set to crop/hide. Some games display "
        "content in the overscan area, or use it for screen effects. May not display correctly with the \"All Borders\" "
@@ -276,25 +285,20 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
     m_ui.displayScaling, tr("Scaling"), tr("Bilinear (Smooth)"),
     tr("Determines how the emulated console's output is upscaled or downscaled to your monitor's resolution."));
   dialog->registerWidgetHelp(
-    m_ui.displaySyncMode, tr("VSync"), tr("Unchecked"),
-    tr("Enable this option to match DuckStation's refresh rate with your current monitor or screen. "
-       "VSync is automatically disabled when it is not possible (e.g. running at non-100% speed)."));
-  dialog->registerWidgetHelp(
     m_ui.trueColor, tr("True Color Rendering"), tr("Checked"),
     tr("Forces the precision of colours output to the console's framebuffer to use the full 8 bits of precision per "
        "channel. This produces nicer looking gradients at the cost of making some colours look slightly different. "
        "Disabling the option also enables dithering, which makes the transition between colours less sharp by applying "
        "a pattern around those pixels. Most games are compatible with this option, but there is a number which aren't "
-       "and will have broken effects with it enabled. Only applies to the hardware renderers."));
+       "and will have broken effects with it enabled."));
   dialog->registerWidgetHelp(
     m_ui.widescreenHack, tr("Widescreen Rendering"), tr("Unchecked"),
     tr("Scales vertex positions in screen-space to a widescreen aspect ratio, essentially "
        "increasing the field of view from 4:3 to the chosen display aspect ratio in 3D games. <b><u>May not be "
        "compatible with all games.</u></b>"));
-  dialog->registerWidgetHelp(
-    m_ui.pgxpEnable, tr("PGXP Geometry Correction"), tr("Unchecked"),
-    tr("Reduces \"wobbly\" polygons and \"warping\" textures that are common in PS1 games. <br>Only "
-       "works with the hardware renderers. <b><u>May not be compatible with all games.</u></b>"));
+  dialog->registerWidgetHelp(m_ui.pgxpEnable, tr("PGXP Geometry Correction"), tr("Unchecked"),
+                             tr("Reduces \"wobbly\" polygons and \"warping\" textures that are common in PS1 games. "
+                                "<strong>May not be compatible with all games.</strong>"));
   dialog->registerWidgetHelp(
     m_ui.pgxpDepthBuffer, tr("PGXP Depth Buffer"), tr("Unchecked"),
     tr("Attempts to reduce polygon Z-fighting by testing pixels against the depth values from PGXP. Low compatibility, "
@@ -303,8 +307,7 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
     m_ui.force43For24Bit, tr("Force 4:3 For FMVs"), tr("Unchecked"),
     tr("Switches back to 4:3 display aspect ratio when displaying 24-bit content, usually FMVs."));
   dialog->registerWidgetHelp(m_ui.chromaSmoothingFor24Bit, tr("FMV Chroma Smoothing"), tr("Unchecked"),
-                             tr("Smooths out blockyness between colour transitions in 24-bit content, usually FMVs. "
-                                "Only applies to the hardware renderers."));
+                             tr("Smooths out blockyness between colour transitions in 24-bit content, usually FMVs."));
   dialog->registerWidgetHelp(
     m_ui.disableInterlacing, tr("Disable Interlacing"), tr("Checked"),
     tr(
@@ -339,7 +342,7 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
                                 "This can measurably improve performance in the Vulkan renderer."));
   dialog->registerWidgetHelp(
     m_ui.stretchDisplayVertically, tr("Stretch Vertically"), tr("Unchecked"),
-    tr("Prefers stretching the display vertically instead of horizontally, wheen applying the display aspect ratio."));
+    tr("Prefers stretching the display vertically instead of horizontally, when applying the display aspect ratio."));
 #ifdef _WIN32
   dialog->registerWidgetHelp(m_ui.blitSwapChain, tr("Use Blit Swap Chain"), tr("Unchecked"),
                              tr("Uses a blit presentation model instead of flipping when using the Direct3D 11 "
@@ -364,7 +367,7 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
   dialog->registerWidgetHelp(
     m_ui.scaledDithering, tr("Scaled Dithering"), tr("Checked"),
     tr("Scales the dither pattern to the resolution scale of the emulated GPU. This makes the dither pattern much less "
-       "obvious at higher resolutions. <br>Usually safe to enable, and only supported by the hardware renderers."));
+       "obvious at higher resolutions. Usually safe to enable."));
   dialog->registerWidgetHelp(
     m_ui.useSoftwareRendererForReadbacks, tr("Software Renderer Readbacks"), tr("Unchecked"),
     tr("Runs the software renderer in parallel for VRAM readbacks. On some systems, this may result in greater "
@@ -426,12 +429,15 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
   dialog->registerWidgetHelp(m_ui.showGPUStatistics, tr("Show GPU Statistics"), tr("Unchecked"),
                              tr("Shows information about the emulated GPU in the top-right corner of the display."));
   dialog->registerWidgetHelp(
+    m_ui.showLatencyStatistics, tr("Show Latency Statistics"), tr("Unchecked"),
+    tr("Shows information about input and audio latency in the top-right corner of the display."));
+  dialog->registerWidgetHelp(
     m_ui.showFrameTimes, tr("Show Frame Times"), tr("Unchecked"),
     tr("Shows the history of frame rendering times as a graph in the top-right corner of the display."));
   dialog->registerWidgetHelp(
     m_ui.showInput, tr("Show Controller Input"), tr("Unchecked"),
     tr("Shows the current controller state of the system in the bottom-left corner of the display."));
-  dialog->registerWidgetHelp(m_ui.showInput, tr("Show Settings"), tr("Unchecked"),
+  dialog->registerWidgetHelp(m_ui.showSettings, tr("Show Settings"), tr("Unchecked"),
                              tr("Shows a summary of current settings in the bottom-right corner of the display."));
   dialog->registerWidgetHelp(m_ui.showStatusIndicators, tr("Show Status Indicators"), tr("Checked"),
                              tr("Shows indicators on screen when the system is not running in its \"normal\" state. "
@@ -446,7 +452,7 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
     m_ui.screenshotFormat, tr("Screenshot Format"), tr("PNG"),
     tr("Selects the format which will be used to save screenshots. JPEG produces smaller files, but loses detail."));
   dialog->registerWidgetHelp(m_ui.screenshotQuality, tr("Screenshot Quality"),
-                             QStringLiteral("%1%%").arg(Settings::DEFAULT_DISPLAY_SCREENSHOT_QUALITY),
+                             QStringLiteral("%1%").arg(Settings::DEFAULT_DISPLAY_SCREENSHOT_QUALITY),
                              tr("Selects the quality at which screenshots will be compressed. Higher values preserve "
                                 "more detail for JPEG, and reduce file size for PNG."));
 
@@ -525,6 +531,12 @@ void GraphicsSettingsWidget::setupAdditionalUi()
       QString::fromUtf8(Settings::GetDisplayAspectRatioDisplayName(static_cast<DisplayAspectRatio>(i))));
   }
 
+  for (u32 i = 0; i < static_cast<u32>(DisplayDeinterlacingMode::Count); i++)
+  {
+    m_ui.displayDeinterlacing->addItem(
+      QString::fromUtf8(Settings::GetDisplayDeinterlacingModeDisplayName(static_cast<DisplayDeinterlacingMode>(i))));
+  }
+
   for (u32 i = 0; i < static_cast<u32>(DisplayCropMode::Count); i++)
   {
     m_ui.displayCropMode->addItem(
@@ -535,12 +547,6 @@ void GraphicsSettingsWidget::setupAdditionalUi()
   {
     m_ui.displayScaling->addItem(
       QString::fromUtf8(Settings::GetDisplayScalingDisplayName(static_cast<DisplayScalingMode>(i))));
-  }
-
-  for (u32 i = 0; i < static_cast<u32>(DisplaySyncMode::Count); i++)
-  {
-    m_ui.displaySyncMode->addItem(
-      QString::fromUtf8(Settings::GetDisplaySyncModeDisplayName(static_cast<DisplaySyncMode>(i))));
   }
 
   // Advanced Tab
@@ -641,7 +647,6 @@ void GraphicsSettingsWidget::updateRendererDependentOptions()
   m_ui.gpuDownsampleScale->setEnabled(is_hardware);
   m_ui.trueColor->setEnabled(is_hardware);
   m_ui.pgxpEnable->setEnabled(is_hardware);
-  m_ui.chromaSmoothingFor24Bit->setEnabled(is_hardware);
 
   m_ui.gpuLineDetectMode->setEnabled(is_hardware);
   m_ui.gpuLineDetectModeLabel->setEnabled(is_hardware);

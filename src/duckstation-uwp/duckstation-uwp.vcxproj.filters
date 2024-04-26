@@ -54,6 +54,24 @@
     <Image Include="resources\fullscreenui\multimedia-player.png">
       <Filter>Assets</Filter>
     </Image>
+	<Image Include="resources\fullscreenui\start-bios.png">
+      <Filter>Assets</Filter>
+    </Image>
+	<Image Include="resources\fullscreenui\start-file.png">
+      <Filter>Assets</Filter>
+    </Image>
+	<Image Include="resources\fullscreenui\drive-cdrom.png">
+      <Filter>Assets</Filter>
+    </Image>
+	<Image Include="resources\fullscreenui\exit.png">
+      <Filter>Assets</Filter>
+    </Image>
+	<Image Include="resources\fullscreenui\back-icon.png">
+      <Filter>Assets</Filter>
+    </Image>
+	<Image Include="resources\fullscreenui\desktop-mode.png">
+      <Filter>Assets</Filter>
+    </Image>
     <Image Include="resources\fullscreenui\NTSC-J.png">
       <Filter>Assets</Filter>
     </Image>

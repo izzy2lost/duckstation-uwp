@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #pragma once
-#include "common/timer.h"
+
 #include "settings.h"
 #include "timing_event.h"
 #include "types.h"
+
+#include "common/timer.h"
+
 #include <memory>
 #include <optional>
 #include <string>
@@ -13,6 +16,7 @@
 class ByteStream;
 class CDImage;
 class Error;
+class SmallStringBase;
 class StateWrapper;
 
 class Controller;
@@ -52,6 +56,7 @@ struct SystemBootParameters
   bool force_software_renderer = false;
   bool fast_forward_to_first_frame = false;
   bool disable_achievements_hardcore_mode = false;
+  bool start_audio_dump = false;
 };
 
 struct SaveStateInfo
@@ -191,6 +196,7 @@ void UpdateOverclock();
 /// direct execution to this executable.
 bool InjectEXEFromBuffer(const void* buffer, u32 buffer_size, bool patch_loader = true);
 
+u32 GetGlobalTickCounter();
 u32 GetFrameNumber();
 u32 GetInternalFrameNumber();
 void IncrementInternalFrameNumber();
@@ -229,6 +235,7 @@ float GetGPUUsage();
 float GetGPUAverageTime();
 const FrameTimeHistory& GetFrameTimeHistory();
 u32 GetFrameTimeHistoryPos();
+void FormatLatencyStats(SmallStringBase& str);
 
 /// Loads global settings (i.e. EmuConfig).
 void LoadSettings(bool display_osd_messages);
@@ -240,14 +247,14 @@ void ApplySettings(bool display_osd_messages);
 /// Reloads game specific settings, and applys any changes present.
 bool ReloadGameSettings(bool display_osd_messages);
 
-bool BootSystem(SystemBootParameters parameters);
+bool BootSystem(SystemBootParameters parameters, Error* error);
 void PauseSystem(bool paused);
 void ResetSystem();
 
 /// Loads state from the specified filename.
-bool LoadState(const char* filename);
-bool SaveState(const char* filename, bool backup_existing_save);
-bool SaveResumeState();
+bool LoadState(const char* filename, Error* error);
+bool SaveState(const char* filename, Error* error, bool backup_existing_save);
+bool SaveResumeState(Error* error);
 
 /// Memory save states - only for internal use.
 struct MemorySaveState
@@ -257,8 +264,8 @@ struct MemorySaveState
 };
 bool SaveMemoryState(MemorySaveState* mss);
 bool LoadMemoryState(const MemorySaveState& mss);
-bool LoadStateFromStream(ByteStream* stream, bool update_display, bool ignore_media = false);
-bool SaveStateToStream(ByteStream* state, u32 screenshot_size = 256, u32 compression_method = 0,
+bool LoadStateFromStream(ByteStream* stream, Error* error, bool update_display, bool ignore_media = false);
+bool SaveStateToStream(ByteStream* state, Error* error, u32 screenshot_size = 256, u32 compression_method = 0,
                        bool ignore_media = false);
 
 /// Runs the VM until the CPU execution is canceled.
@@ -281,8 +288,6 @@ void SetThrottleFrequency(float frequency);
 /// Updates the throttle period, call when target emulation speed changes.
 void UpdateThrottlePeriod();
 void ResetThrottler();
-
-void UpdatePerformanceCounters();
 void ResetPerformanceCounters();
 
 /// Resets vsync/max present fps state.
@@ -296,6 +301,7 @@ void ResetControllers();
 void UpdateMemoryCardTypes();
 void UpdatePerGameMemoryCards();
 bool HasMemoryCard(u32 slot);
+bool IsSavingMemoryCards();
 
 /// Swaps memory cards in slot 1/2.
 void SwapMemoryCards();
@@ -452,7 +458,7 @@ void ToggleWidescreen();
 bool IsRunningAtNonStandardSpeed();
 
 /// Returns true if vsync should be used.
-DisplaySyncMode GetEffectiveDisplaySyncMode();
+bool IsVSyncEffectivelyEnabled();
 
 /// Quick switch between software and hardware rendering.
 void ToggleSoftwareRendering();
@@ -465,7 +471,7 @@ void RequestDisplaySize(float scale = 0.0f);
 void HostDisplayResized();
 
 /// Renders the display.
-bool PresentDisplay(bool allow_skip_present);
+bool PresentDisplay(bool allow_skip_present, bool explicit_present);
 void InvalidateDisplay();
 
 //////////////////////////////////////////////////////////////////////////

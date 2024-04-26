@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2023 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #pragma once
@@ -16,6 +16,8 @@
 #include "core/input_types.h"
 #include "window_info.h"
 
+class SmallStringBase;
+
 /// Class, or source of an input event.
 enum class InputSourceType : u32
 {
@@ -23,14 +25,17 @@ enum class InputSourceType : u32
   Pointer,
   Sensor,
 #ifdef _WIN32
+#ifndef _UWP
   DInput,
+#endif
   XInput,
+#ifndef _UWP
   RawInput,
 #endif
-#ifdef ENABLE_SDL2
-  SDL,
 #endif
-#ifdef __ANDROID__
+#if !defined(__ANDROID__) && !defined(_UWP)
+  SDL,
+#elif defined(__ANDROID__)
   Android,
 #endif
   Count,
@@ -234,7 +239,7 @@ std::string ConvertInputBindingKeysToString(InputBindingInfo::Type binding_type,
                                             size_t num_keys);
 
 /// Represents a binding with icon fonts, if available.
-bool PrettifyInputBinding(std::string& binding);
+bool PrettifyInputBinding(SmallStringBase& binding);
 
 /// Returns a list of all hotkeys.
 std::vector<const HotkeyInfo*> GetHotkeyList();
@@ -253,9 +258,6 @@ bool IsInputSourceEnabled(SettingsInterface& si, InputSourceType type);
 
 /// Re-parses the config and registers all hotkey and pad bindings.
 void ReloadBindings(SettingsInterface& si, SettingsInterface& binding_si);
-
-/// Migrates any bindings from the pre-InputManager configuration.
-bool MigrateBindings(SettingsInterface& si);
 
 /// Re-parses the sources part of the config and initializes any backends.
 void ReloadSources(SettingsInterface& si, std::unique_lock<std::mutex>& settings_lock);

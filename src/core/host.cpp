@@ -53,6 +53,21 @@ std::string Host::GetBaseStringSettingValue(const char* section, const char* key
     ->GetStringValue(section, key, default_value);
 }
 
+SmallString Host::GetBaseSmallStringSettingValue(const char* section, const char* key,
+                                                 const char* default_value /*= ""*/)
+{
+  std::unique_lock lock(s_settings_mutex);
+  return s_layered_settings_interface.GetLayer(LayeredSettingsInterface::LAYER_BASE)
+    ->GetSmallStringValue(section, key, default_value);
+}
+
+TinyString Host::GetBaseTinyStringSettingValue(const char* section, const char* key, const char* default_value /*= ""*/)
+{
+  std::unique_lock lock(s_settings_mutex);
+  return s_layered_settings_interface.GetLayer(LayeredSettingsInterface::LAYER_BASE)
+    ->GetTinyStringValue(section, key, default_value);
+}
+
 bool Host::GetBaseBoolSettingValue(const char* section, const char* key, bool default_value /*= false*/)
 {
   std::unique_lock lock(s_settings_mutex);
@@ -98,6 +113,18 @@ std::string Host::GetStringSettingValue(const char* section, const char* key, co
 {
   std::unique_lock lock(s_settings_mutex);
   return s_layered_settings_interface.GetStringValue(section, key, default_value);
+}
+
+SmallString Host::GetSmallStringSettingValue(const char* section, const char* key, const char* default_value /*= ""*/)
+{
+  std::unique_lock lock(s_settings_mutex);
+  return s_layered_settings_interface.GetSmallStringValue(section, key, default_value);
+}
+
+TinyString Host::GetTinyStringSettingValue(const char* section, const char* key, const char* default_value /*= ""*/)
+{
+  std::unique_lock lock(s_settings_mutex);
+  return s_layered_settings_interface.GetTinyStringValue(section, key, default_value);
 }
 
 bool Host::GetBoolSettingValue(const char* section, const char* key, bool default_value /*= false*/)
@@ -269,7 +296,7 @@ bool Host::CreateGPUDevice(RenderAPI api)
   if (!g_gpu_device || !g_gpu_device->Create(
                          g_settings.gpu_adapter,
                          g_settings.gpu_disable_shader_cache ? std::string_view() : std::string_view(EmuFolders::Cache),
-                         SHADER_CACHE_VERSION, g_settings.gpu_use_debug_device, System::GetEffectiveDisplaySyncMode(),
+                         SHADER_CACHE_VERSION, g_settings.gpu_use_debug_device, System::IsVSyncEffectivelyEnabled(),
                          g_settings.gpu_threaded_presentation, exclusive_fullscreen_control,
                          static_cast<GPUDevice::FeatureMask>(disabled_features), &error))
   {
@@ -353,29 +380,3 @@ void Host::ReleaseGPUDevice()
   g_gpu_device.reset();
 }
 
-#ifndef __ANDROID__
-
-std::unique_ptr<AudioStream> Host::CreateAudioStream(AudioBackend backend, u32 sample_rate, u32 channels, u32 buffer_ms,
-                                                     u32 latency_ms, AudioStretchMode stretch)
-{
-  switch (backend)
-  {
-#ifdef ENABLE_CUBEB
-    case AudioBackend::Cubeb:
-      return AudioStream::CreateCubebAudioStream(sample_rate, channels, buffer_ms, latency_ms, stretch);
-#endif
-
-#ifdef _WIN32
-    case AudioBackend::XAudio2:
-      return AudioStream::CreateXAudio2Stream(sample_rate, channels, buffer_ms, latency_ms, stretch);
-#endif
-
-    case AudioBackend::Null:
-      return AudioStream::CreateNullStream(sample_rate, channels, buffer_ms);
-
-    default:
-      return nullptr;
-  }
-}
-
-#endif

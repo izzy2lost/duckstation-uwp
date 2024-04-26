@@ -6,7 +6,6 @@
 #include "types.h"
 
 #include "util/audio_stream.h"
-#include "util/gpu_types.h"
 
 #include "common/log.h"
 #include "common/settings_interface.h"
@@ -18,6 +17,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+enum class RenderAPI : u32;
 
 struct SettingInfo
 {
@@ -87,7 +88,7 @@ struct Settings
   bool load_devices_from_save_states : 1 = false;
   bool apply_compatibility_settings : 1 = true;
   bool apply_game_settings : 1 = true;
-  bool enable_cheats : 1 = true;
+  bool enable_cheats : 1 = false;
   bool disable_all_enhancements : 1 = false;
   bool enable_discord_presence : 1 = false;
 
@@ -129,11 +130,11 @@ struct Settings
   bool gpu_pgxp_cpu : 1 = false;
   bool gpu_pgxp_preserve_proj_fp : 1 = false;
   bool gpu_pgxp_depth_buffer : 1 = false;
+  DisplayDeinterlacingMode display_deinterlacing_mode = DEFAULT_DISPLAY_DEINTERLACING_MODE;
   DisplayCropMode display_crop_mode = DEFAULT_DISPLAY_CROP_MODE;
   DisplayAspectRatio display_aspect_ratio = DEFAULT_DISPLAY_ASPECT_RATIO;
   DisplayAlignment display_alignment = DEFAULT_DISPLAY_ALIGNMENT;
   DisplayScalingMode display_scaling = DEFAULT_DISPLAY_SCALING;
-  DisplaySyncMode display_sync_mode = DEFAULT_DISPLAY_SYNC_MODE;
   DisplayExclusiveFullscreenControl display_exclusive_fullscreen_control = DEFAULT_DISPLAY_EXCLUSIVE_FULLSCREEN_CONTROL;
   DisplayScreenshotMode display_screenshot_mode = DEFAULT_DISPLAY_SCREENSHOT_MODE;
   DisplayScreenshotFormat display_screenshot_format = DEFAULT_DISPLAY_SCREENSHOT_FORMAT;
@@ -144,6 +145,9 @@ struct Settings
   s16 display_active_end_offset = 0;
   s8 display_line_start_offset = 0;
   s8 display_line_end_offset = 0;
+  bool display_optimal_frame_pacing : 1 = false;
+  bool display_pre_frame_sleep : 1 = false;
+  bool display_vsync : 1 = false;
   bool display_force_4_3_for_24bit : 1 = false;
   bool gpu_24bit_chroma_smoothing : 1 = false;
   bool display_show_osd_messages : 1 = true;
@@ -151,16 +155,21 @@ struct Settings
   bool display_show_speed : 1 = false;
   bool display_show_gpu_stats : 1 = false;
   bool display_show_resolution : 1 = false;
+  bool display_show_latency_stats : 1 = false;
   bool display_show_cpu_usage : 1 = false;
   bool display_show_gpu_usage : 1 = false;
   bool display_show_frame_times : 1 = false;
   bool display_show_status_indicators : 1 = true;
   bool display_show_inputs : 1 = false;
   bool display_show_enhancements : 1 = false;
-  bool display_all_frames : 1 = false;
   bool display_stretch_vertically : 1 = false;
-  float display_osd_scale = 200.0f;
+  float display_pre_frame_sleep_buffer = DEFAULT_DISPLAY_PRE_FRAME_SLEEP_BUFFER;
   float display_max_fps = DEFAULT_DISPLAY_MAX_FPS;
+#ifndef _UWP
+  float display_osd_scale = 100.0f;
+#else
+  float display_osd_scale = 200.0f;
+#endif
   float gpu_pgxp_tolerance = -1.0f;
   float gpu_pgxp_depth_clear_threshold = DEFAULT_GPU_PGXP_DEPTH_THRESHOLD / GPU_PGXP_DEPTH_THRESHOLD_SCALE;
 
@@ -173,16 +182,13 @@ struct Settings
   u32 cdrom_read_speedup = 1;
   u32 cdrom_seek_speedup = 1;
 
-  AudioBackend audio_backend = DEFAULT_AUDIO_BACKEND;
-  AudioStretchMode audio_stretch_mode = DEFAULT_AUDIO_STRETCH_MODE;
   std::string audio_driver;
   std::string audio_output_device;
-  u32 audio_output_latency_ms = DEFAULT_AUDIO_OUTPUT_LATENCY_MS;
-  u32 audio_buffer_ms = DEFAULT_AUDIO_BUFFER_MS;
   u32 audio_output_volume = 100;
   u32 audio_fast_forward_volume = 100;
+  AudioStreamParameters audio_stream_parameters;
+  AudioBackend audio_backend = AudioStream::DEFAULT_BACKEND;
   bool audio_output_muted : 1 = false;
-  bool audio_dump_on_boot : 1 = false;
 
   bool use_old_mdec_routines : 1 = false;
   bool pcdrv_enable : 1 = false;
@@ -340,7 +346,8 @@ struct Settings
   };
 
   void Load(SettingsInterface& si);
-  void Save(SettingsInterface& si) const;
+  void Save(SettingsInterface& si, bool ignore_base) const;
+  static void Clear(SettingsInterface& si);
 
   void FixIncompatibleSettings(bool display_osd_messages);
 
@@ -394,6 +401,10 @@ struct Settings
   static const char* GetGPUWireframeModeName(GPUWireframeMode mode);
   static const char* GetGPUWireframeModeDisplayName(GPUWireframeMode mode);
 
+  static std::optional<DisplayDeinterlacingMode> ParseDisplayDeinterlacingMode(const char* str);
+  static const char* GetDisplayDeinterlacingModeName(DisplayDeinterlacingMode mode);
+  static const char* GetDisplayDeinterlacingModeDisplayName(DisplayDeinterlacingMode mode);
+
   static std::optional<DisplayCropMode> ParseDisplayCropMode(const char* str);
   static const char* GetDisplayCropModeName(DisplayCropMode crop_mode);
   static const char* GetDisplayCropModeDisplayName(DisplayCropMode crop_mode);
@@ -410,10 +421,6 @@ struct Settings
   static const char* GetDisplayScalingName(DisplayScalingMode mode);
   static const char* GetDisplayScalingDisplayName(DisplayScalingMode mode);
 
-  static std::optional<DisplaySyncMode> ParseDisplaySyncMode(const char* str);
-  static const char* GetDisplaySyncModeName(DisplaySyncMode mode);
-  static const char* GetDisplaySyncModeDisplayName(DisplaySyncMode mode);
-
   static std::optional<DisplayExclusiveFullscreenControl> ParseDisplayExclusiveFullscreenControl(const char* str);
   static const char* GetDisplayExclusiveFullscreenControlName(DisplayExclusiveFullscreenControl mode);
   static const char* GetDisplayExclusiveFullscreenControlDisplayName(DisplayExclusiveFullscreenControl mode);
@@ -426,10 +433,6 @@ struct Settings
   static const char* GetDisplayScreenshotFormatName(DisplayScreenshotFormat mode);
   static const char* GetDisplayScreenshotFormatDisplayName(DisplayScreenshotFormat mode);
   static const char* GetDisplayScreenshotFormatExtension(DisplayScreenshotFormat mode);
-
-  static std::optional<AudioBackend> ParseAudioBackend(const char* str);
-  static const char* GetAudioBackendName(AudioBackend backend);
-  static const char* GetAudioBackendDisplayName(AudioBackend backend);
 
   static std::optional<ControllerType> ParseControllerTypeName(std::string_view str);
   static const char* GetControllerTypeName(ControllerType type);
@@ -473,26 +476,18 @@ struct Settings
   static constexpr CPUFastmemMode DEFAULT_CPU_FASTMEM_MODE = CPUFastmemMode::Disabled;
 #endif
 
-#if defined(ENABLE_CUBEB)
-  static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::Cubeb;
-#elif defined(_WIN32) || defined(_UWP)
-  static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::XAudio2;
-#elif defined(__ANDROID__)
-  static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::AAudio;
-#else
-  static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::Null;
-#endif
 
+  static constexpr DisplayDeinterlacingMode DEFAULT_DISPLAY_DEINTERLACING_MODE = DisplayDeinterlacingMode::Adaptive;
   static constexpr DisplayCropMode DEFAULT_DISPLAY_CROP_MODE = DisplayCropMode::Overscan;
   static constexpr DisplayAspectRatio DEFAULT_DISPLAY_ASPECT_RATIO = DisplayAspectRatio::Auto;
   static constexpr DisplayAlignment DEFAULT_DISPLAY_ALIGNMENT = DisplayAlignment::Center;
   static constexpr DisplayScalingMode DEFAULT_DISPLAY_SCALING = DisplayScalingMode::Nearest;
-  static constexpr DisplaySyncMode DEFAULT_DISPLAY_SYNC_MODE = DisplaySyncMode::Disabled;
   static constexpr DisplayExclusiveFullscreenControl DEFAULT_DISPLAY_EXCLUSIVE_FULLSCREEN_CONTROL =
     DisplayExclusiveFullscreenControl::Automatic;
   static constexpr DisplayScreenshotMode DEFAULT_DISPLAY_SCREENSHOT_MODE = DisplayScreenshotMode::ScreenResolution;
   static constexpr DisplayScreenshotFormat DEFAULT_DISPLAY_SCREENSHOT_FORMAT = DisplayScreenshotFormat::PNG;
   static constexpr u8 DEFAULT_DISPLAY_SCREENSHOT_QUALITY = 85;
+  static constexpr float DEFAULT_DISPLAY_PRE_FRAME_SLEEP_BUFFER = 2.0f;
   static constexpr float DEFAULT_OSD_SCALE = 200.0f;
 
   static constexpr u8 DEFAULT_CDROM_READAHEAD_SECTORS = 8;
@@ -508,15 +503,6 @@ struct Settings
   static constexpr s32 DEFAULT_LEADERBOARD_NOTIFICATION_TIME = 10;
 
   static constexpr LOGLEVEL DEFAULT_LOG_LEVEL = LOGLEVEL_INFO;
-
-#ifndef __ANDROID__
-  static constexpr u32 DEFAULT_AUDIO_BUFFER_MS = 50;
-  static constexpr u32 DEFAULT_AUDIO_OUTPUT_LATENCY_MS = 20;
-#else
-  static constexpr u32 DEFAULT_AUDIO_BUFFER_MS = 100;
-  static constexpr u32 DEFAULT_AUDIO_OUTPUT_LATENCY_MS = 20;
-#endif
-  static constexpr AudioStretchMode DEFAULT_AUDIO_STRETCH_MODE = AudioStretchMode::TimeStretch;
 
   static constexpr bool DEFAULT_SAVE_STATE_COMPRESSION = true;
 

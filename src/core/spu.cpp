@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2023 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "spu.h"
@@ -16,6 +16,7 @@
 
 #include "common/bitfield.h"
 #include "common/bitutils.h"
+#include "common/error.h"
 #include "common/fifo_queue.h"
 #include "common/log.h"
 #include "common/path.h"
@@ -43,7 +44,6 @@ namespace {
 enum : u32
 {
   SPU_BASE = 0x1F801C00,
-  NUM_CHANNELS = 2,
   NUM_VOICES = 24,
   NUM_VOICE_REGISTERS = 8,
   VOICE_ADDRESS_SHIFT = 3,
@@ -213,8 +213,9 @@ struct VolumeEnvelope
   u8 rate;
   bool decreasing;
   bool exponential;
+  bool phase_invert;
 
-  void Reset(u8 rate_, bool decreasing_, bool exponential_);
+  void Reset(u8 rate_, bool decreasing_, bool exponential_, bool phase_invert_);
   s16 Tick(s16 current_level);
 };
 
@@ -421,7 +422,7 @@ void SPU::Initialize()
                                                  &SPU::Execute, nullptr, false);
   s_transfer_event = TimingEvents::CreateTimingEvent(
     "SPU Transfer", TRANSFER_TICKS_PER_HALFWORD, TRANSFER_TICKS_PER_HALFWORD, &SPU::ExecuteTransfer, nullptr, false);
-  s_null_audio_stream = AudioStream::CreateNullStream(SAMPLE_RATE, NUM_CHANNELS, g_settings.audio_buffer_ms);
+  s_null_audio_stream = AudioStream::CreateNullStream(SAMPLE_RATE, g_settings.audio_stream_parameters.buffer_ms);
 
   CreateOutputStream();
   Reset();
@@ -429,19 +430,24 @@ void SPU::Initialize()
 
 void SPU::CreateOutputStream()
 {
-  Log_InfoPrintf(
-    "Creating '%s' audio stream, sample rate = %u, channels = %u, buffer = %u, latency = %u, stretching = %s",
-    Settings::GetAudioBackendName(g_settings.audio_backend), SAMPLE_RATE, NUM_CHANNELS, g_settings.audio_buffer_ms,
-    g_settings.audio_output_latency_ms, AudioStream::GetStretchModeName(g_settings.audio_stretch_mode));
+  Log_InfoFmt(
+    "Creating '{}' audio stream, sample rate = {}, expansion = {}, buffer = {}, latency = {}, stretching = {}",
+    AudioStream::GetBackendName(g_settings.audio_backend), static_cast<u32>(SAMPLE_RATE),
+    AudioStream::GetExpansionModeName(g_settings.audio_stream_parameters.expansion_mode),
+    g_settings.audio_stream_parameters.buffer_ms, g_settings.audio_stream_parameters.output_latency_ms,
+    AudioStream::GetStretchModeName(g_settings.audio_stream_parameters.stretch_mode));
 
+  Error error;
   s_audio_stream =
-    Host::CreateAudioStream(g_settings.audio_backend, SAMPLE_RATE, NUM_CHANNELS, g_settings.audio_buffer_ms,
-                            g_settings.audio_output_latency_ms, g_settings.audio_stretch_mode);
+    AudioStream::CreateStream(g_settings.audio_backend, SAMPLE_RATE, g_settings.audio_stream_parameters, &error);
   if (!s_audio_stream)
   {
-    Host::ReportErrorAsync("Error", "Failed to create or configure audio stream, falling back to null output.");
+    Host::ReportErrorAsync(
+      "Error",
+      fmt::format("Failed to create or configure audio stream, falling back to null output. The error was:\n{}",
+                  error.GetDescription()));
     s_audio_stream.reset();
-    s_audio_stream = AudioStream::CreateNullStream(SAMPLE_RATE, NUM_CHANNELS, g_settings.audio_buffer_ms);
+    s_audio_stream = AudioStream::CreateNullStream(SAMPLE_RATE, g_settings.audio_stream_parameters.buffer_ms);
   }
 
   s_audio_stream->SetOutputVolume(System::GetAudioOutputVolume());
@@ -516,15 +522,16 @@ void SPU::Reset()
     v.is_first_block = 0;
     v.current_block_samples.fill(s16(0));
     v.adpcm_last_samples.fill(s32(0));
-    v.adsr_envelope.Reset(0, false, false);
+    v.adsr_envelope.Reset(0, false, false, false);
     v.adsr_phase = ADSRPhase::Off;
     v.adsr_target = 0;
     v.has_samples = false;
     v.ignore_loop_address = false;
   }
 
-  s_transfer_fifo.Clear();
+  s_tick_event->Deactivate();
   s_transfer_event->Deactivate();
+  s_transfer_fifo.Clear();
   s_ram.fill(0);
   UpdateEventInterval();
 }
@@ -655,28 +662,28 @@ u16 SPU::ReadRegister(u32 offset)
       return s_reverb_registers.mBASE;
 
     case 0x1F801DA4 - SPU_BASE:
-      Log_TracePrintf("SPU IRQ address -> 0x%04X", ZeroExtend32(s_irq_address));
+      Log_TraceFmt("SPU IRQ address -> 0x{:04X}", s_irq_address);
       return s_irq_address;
 
     case 0x1F801DA6 - SPU_BASE:
-      Log_TracePrintf("SPU transfer address register -> 0x%04X", ZeroExtend32(s_transfer_address_reg));
+      Log_TraceFmt("SPU transfer address register -> 0x{:04X}", s_transfer_address_reg);
       return s_transfer_address_reg;
 
     case 0x1F801DA8 - SPU_BASE:
-      Log_TracePrintf("SPU transfer data register read");
+      Log_TraceFmt("SPU transfer data register read");
       return UINT16_C(0xFFFF);
 
     case 0x1F801DAA - SPU_BASE:
-      Log_TracePrintf("SPU control register -> 0x%04X", ZeroExtend32(s_SPUCNT.bits));
+      Log_TraceFmt("SPU control register -> 0x{:04X}", s_SPUCNT.bits);
       return s_SPUCNT.bits;
 
     case 0x1F801DAC - SPU_BASE:
-      Log_TracePrintf("SPU transfer control register -> 0x%04X", ZeroExtend32(s_transfer_control.bits));
+      Log_TraceFmt("SPU transfer control register -> 0x{:04X}", s_transfer_control.bits);
       return s_transfer_control.bits;
 
     case 0x1F801DAE - SPU_BASE:
       GeneratePendingSamples();
-      Log_TracePrintf("SPU status register -> 0x%04X", ZeroExtend32(s_SPUCNT.bits));
+      Log_TraceFmt("SPU status register -> 0x{:04X}", s_SPUCNT.bits);
       return s_SPUSTAT.bits;
 
     case 0x1F801DB0 - SPU_BASE:
@@ -717,7 +724,7 @@ u16 SPU::ReadRegister(u32 offset)
           return s_voices[voice_index].right_volume.current_level;
       }
 
-      Log_DevPrintf("Unknown SPU register read: offset 0x%X (address 0x%08X)", offset, offset | SPU_BASE);
+      Log_DevFmt("Unknown SPU register read: offset 0x{:X} (address 0x{:08X})", offset, offset | SPU_BASE);
       return UINT16_C(0xFFFF);
     }
   }
@@ -729,7 +736,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
   {
     case 0x1F801D80 - SPU_BASE:
     {
-      Log_DebugPrintf("SPU main volume left <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU main volume left <- 0x{:04X}", value);
       GeneratePendingSamples();
       s_main_volume_left_reg.bits = value;
       s_main_volume_left.Reset(s_main_volume_left_reg);
@@ -738,7 +745,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801D82 - SPU_BASE:
     {
-      Log_DebugPrintf("SPU main volume right <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU main volume right <- 0x{:04X}", value);
       GeneratePendingSamples();
       s_main_volume_right_reg.bits = value;
       s_main_volume_right.Reset(s_main_volume_right_reg);
@@ -747,7 +754,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801D84 - SPU_BASE:
     {
-      Log_DebugPrintf("SPU reverb output volume left <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU reverb output volume left <- 0x{:04X}", value);
       GeneratePendingSamples();
       s_reverb_registers.vLOUT = value;
       return;
@@ -755,7 +762,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801D86 - SPU_BASE:
     {
-      Log_DebugPrintf("SPU reverb output volume right <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU reverb output volume right <- 0x{:04X}", value);
       GeneratePendingSamples();
       s_reverb_registers.vROUT = value;
       return;
@@ -763,7 +770,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801D88 - SPU_BASE:
     {
-      Log_DebugPrintf("SPU key on low <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU key on low <- 0x{:04X}", value);
       GeneratePendingSamples();
       s_key_on_register = (s_key_on_register & 0xFFFF0000) | ZeroExtend32(value);
     }
@@ -771,7 +778,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801D8A - SPU_BASE:
     {
-      Log_DebugPrintf("SPU key on high <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU key on high <- 0x{:04X}", value);
       GeneratePendingSamples();
       s_key_on_register = (s_key_on_register & 0x0000FFFF) | (ZeroExtend32(value) << 16);
     }
@@ -779,7 +786,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801D8C - SPU_BASE:
     {
-      Log_DebugPrintf("SPU key off low <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU key off low <- 0x{:04X}", value);
       GeneratePendingSamples();
       s_key_off_register = (s_key_off_register & 0xFFFF0000) | ZeroExtend32(value);
     }
@@ -787,7 +794,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801D8E - SPU_BASE:
     {
-      Log_DebugPrintf("SPU key off high <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU key off high <- 0x{:04X}", value);
       GeneratePendingSamples();
       s_key_off_register = (s_key_off_register & 0x0000FFFF) | (ZeroExtend32(value) << 16);
     }
@@ -797,7 +804,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
     {
       GeneratePendingSamples();
       s_pitch_modulation_enable_register = (s_pitch_modulation_enable_register & 0xFFFF0000) | ZeroExtend32(value);
-      Log_DebugPrintf("SPU pitch modulation enable register <- 0x%08X", s_pitch_modulation_enable_register);
+      Log_DebugFmt("SPU pitch modulation enable register <- 0x{:08X}", s_pitch_modulation_enable_register);
     }
     break;
 
@@ -806,13 +813,13 @@ void SPU::WriteRegister(u32 offset, u16 value)
       GeneratePendingSamples();
       s_pitch_modulation_enable_register =
         (s_pitch_modulation_enable_register & 0x0000FFFF) | (ZeroExtend32(value) << 16);
-      Log_DebugPrintf("SPU pitch modulation enable register <- 0x%08X", s_pitch_modulation_enable_register);
+      Log_DebugFmt("SPU pitch modulation enable register <- 0x{:08X}", s_pitch_modulation_enable_register);
     }
     break;
 
     case 0x1F801D94 - SPU_BASE:
     {
-      Log_DebugPrintf("SPU noise mode register <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU noise mode register <- 0x{:04X}", value);
       GeneratePendingSamples();
       s_noise_mode_register = (s_noise_mode_register & 0xFFFF0000) | ZeroExtend32(value);
     }
@@ -820,7 +827,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801D96 - SPU_BASE:
     {
-      Log_DebugPrintf("SPU noise mode register <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU noise mode register <- 0x{:04X}", value);
       GeneratePendingSamples();
       s_noise_mode_register = (s_noise_mode_register & 0x0000FFFF) | (ZeroExtend32(value) << 16);
     }
@@ -828,7 +835,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801D98 - SPU_BASE:
     {
-      Log_DebugPrintf("SPU reverb on register <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU reverb on register <- 0x{:04X}", value);
       GeneratePendingSamples();
       s_reverb_on_register = (s_reverb_on_register & 0xFFFF0000) | ZeroExtend32(value);
     }
@@ -836,7 +843,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801D9A - SPU_BASE:
     {
-      Log_DebugPrintf("SPU reverb on register <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU reverb on register <- 0x{:04X}", value);
       GeneratePendingSamples();
       s_reverb_on_register = (s_reverb_on_register & 0x0000FFFF) | (ZeroExtend32(value) << 16);
     }
@@ -844,7 +851,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801DA2 - SPU_BASE:
     {
-      Log_DebugPrintf("SPU reverb base address < 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU reverb base address < 0x{:04X}", value);
       GeneratePendingSamples();
       s_reverb_registers.mBASE = value;
       s_reverb_base_address = ZeroExtend32(value << 2) & 0x3FFFFu;
@@ -854,7 +861,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801DA4 - SPU_BASE:
     {
-      Log_DebugPrintf("SPU IRQ address register <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU IRQ address register <- 0x{:04X}", value);
       GeneratePendingSamples();
       s_irq_address = value;
 
@@ -866,14 +873,14 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801DA6 - SPU_BASE:
     {
-      Log_DebugPrintf("SPU transfer address register <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU transfer address register <- 0x{:04X}", value);
       s_transfer_event->InvokeEarly();
       s_transfer_address_reg = value;
       s_transfer_address = ZeroExtend32(value) * 8;
       if (IsRAMIRQTriggerable() && CheckRAMIRQ(s_transfer_address))
       {
-        Log_DebugPrintf("Trigger IRQ @ %08X %04X from transfer address reg set", s_transfer_address,
-                        s_transfer_address / 8);
+        Log_DebugFmt("Trigger IRQ @ {:08X} {:04X} from transfer address reg set", s_transfer_address,
+                     s_transfer_address / 8);
         TriggerRAMIRQ();
       }
       return;
@@ -881,8 +888,8 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801DA8 - SPU_BASE:
     {
-      Log_TracePrintf("SPU transfer data register <- 0x%04X (RAM offset 0x%08X)", ZeroExtend32(value),
-                      s_transfer_address);
+      Log_TraceFmt("SPU transfer data register <- 0x{:04X} (RAM offset 0x{:08X})", ZeroExtend32(value),
+                   s_transfer_address);
 
       ManualTransferWrite(value);
       return;
@@ -890,7 +897,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801DAA - SPU_BASE:
     {
-      Log_DebugPrintf("SPU control register <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU control register <- 0x{:04X}", value);
       GeneratePendingSamples();
 
       const SPUCNT new_value{value};
@@ -904,14 +911,14 @@ void SPU::WriteRegister(u32 offset, u16 value)
           {
             // I would guess on the console it would gradually write the FIFO out. Hopefully nothing relies on this
             // level of timing granularity if we force it all out here.
-            Log_WarningPrintf("Draining write SPU transfer FIFO with %u bytes left", s_transfer_fifo.GetSize());
+            Log_WarningFmt("Draining write SPU transfer FIFO with {} bytes left", s_transfer_fifo.GetSize());
             TickCount ticks = std::numeric_limits<TickCount>::max();
             ExecuteFIFOWriteToRAM(ticks);
             DebugAssert(s_transfer_fifo.IsEmpty());
           }
           else
           {
-            Log_DebugPrintf("Clearing read SPU transfer FIFO with %u bytes left", s_transfer_fifo.GetSize());
+            Log_DebugFmt("Clearing read SPU transfer FIFO with {} bytes left", s_transfer_fifo.GetSize());
             s_transfer_fifo.Clear();
           }
         }
@@ -929,9 +936,14 @@ void SPU::WriteRegister(u32 offset, u16 value)
       s_SPUSTAT.mode = s_SPUCNT.mode.GetValue();
 
       if (!s_SPUCNT.irq9_enable)
+      {
         s_SPUSTAT.irq9_flag = false;
+        InterruptController::SetLineState(InterruptController::IRQ::SPU, false);
+      }
       else if (IsRAMIRQTriggerable())
+      {
         CheckForLateRAMIRQs();
+      }
 
       UpdateEventInterval();
       UpdateDMARequest();
@@ -941,14 +953,14 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801DAC - SPU_BASE:
     {
-      Log_DebugPrintf("SPU transfer control register <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU transfer control register <- 0x{:04X}", value);
       s_transfer_control.bits = value;
       return;
     }
 
     case 0x1F801DB0 - SPU_BASE:
     {
-      Log_DebugPrintf("SPU left cd audio register <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU left cd audio register <- 0x{:04X}", value);
       GeneratePendingSamples();
       s_cd_audio_volume_left = value;
     }
@@ -956,7 +968,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
 
     case 0x1F801DB2 - SPU_BASE:
     {
-      Log_DebugPrintf("SPU right cd audio register <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU right cd audio register <- 0x{:04X}", value);
       GeneratePendingSamples();
       s_cd_audio_volume_right = value;
     }
@@ -965,7 +977,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
     case 0x1F801DB4 - SPU_BASE:
     {
       // External volumes aren't used, so don't bother syncing.
-      Log_DebugPrintf("SPU left external volume register <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU left external volume register <- 0x{:04X}", value);
       s_external_volume_left = value;
     }
     break;
@@ -973,7 +985,7 @@ void SPU::WriteRegister(u32 offset, u16 value)
     case 0x1F801DB6 - SPU_BASE:
     {
       // External volumes aren't used, so don't bother syncing.
-      Log_DebugPrintf("SPU right external volume register <- 0x%04X", ZeroExtend32(value));
+      Log_DebugFmt("SPU right external volume register <- 0x{:04X}", value);
       s_external_volume_right = value;
     }
     break;
@@ -995,14 +1007,14 @@ void SPU::WriteRegister(u32 offset, u16 value)
       if (offset >= (0x1F801DC0 - SPU_BASE) && offset < (0x1F801E00 - SPU_BASE))
       {
         const u32 reg = (offset - (0x1F801DC0 - SPU_BASE)) / 2;
-        Log_DebugPrintf("SPU reverb register %u <- 0x%04X", reg, value);
+        Log_DebugFmt("SPU reverb register {} <- 0x{:04X}", reg, value);
         GeneratePendingSamples();
         s_reverb_registers.rev[reg] = value;
         return;
       }
 
-      Log_DevPrintf("Unknown SPU register write: offset 0x%X (address 0x%08X) value 0x%04X", offset, offset | SPU_BASE,
-                    ZeroExtend32(value));
+      Log_DevFmt("Unknown SPU register write: offset 0x{:X} (address 0x{:08X}) value 0x{:04X}", offset,
+                 offset | SPU_BASE, value);
       return;
     }
   }
@@ -1019,7 +1031,7 @@ u16 SPU::ReadVoiceRegister(u32 offset)
   if (reg_index >= 6 && (voice.IsOn() || s_key_on_register & (1u << voice_index)))
     GeneratePendingSamples();
 
-  Log_TracePrintf("Read voice %u register %u -> 0x%02X", voice_index, reg_index, voice.regs.index[reg_index]);
+  Log_TraceFmt("Read voice {} register {} -> 0x{:02X}", voice_index, reg_index, voice.regs.index[reg_index]);
   return voice.regs.index[reg_index];
 }
 
@@ -1038,7 +1050,7 @@ void SPU::WriteVoiceRegister(u32 offset, u16 value)
   {
     case 0x00: // volume left
     {
-      Log_DebugPrintf("SPU voice %u volume left <- 0x%04X", voice_index, value);
+      Log_DebugFmt("SPU voice {} volume left <- 0x{:04X}", voice_index, value);
       voice.regs.volume_left.bits = value;
       voice.left_volume.Reset(voice.regs.volume_left);
     }
@@ -1046,7 +1058,7 @@ void SPU::WriteVoiceRegister(u32 offset, u16 value)
 
     case 0x02: // volume right
     {
-      Log_DebugPrintf("SPU voice %u volume right <- 0x%04X", voice_index, value);
+      Log_DebugFmt("SPU voice {} volume right <- 0x{:04X}", voice_index, value);
       voice.regs.volume_right.bits = value;
       voice.right_volume.Reset(voice.regs.volume_right);
     }
@@ -1054,21 +1066,21 @@ void SPU::WriteVoiceRegister(u32 offset, u16 value)
 
     case 0x04: // sample rate
     {
-      Log_DebugPrintf("SPU voice %u ADPCM sample rate <- 0x%04X", voice_index, value);
+      Log_DebugFmt("SPU voice {} ADPCM sample rate <- 0x{:04X}", voice_index, value);
       voice.regs.adpcm_sample_rate = value;
     }
     break;
 
     case 0x06: // start address
     {
-      Log_DebugPrintf("SPU voice %u ADPCM start address <- 0x%04X", voice_index, value);
+      Log_DebugFmt("SPU voice {} ADPCM start address <- 0x{:04X}", voice_index, value);
       voice.regs.adpcm_start_address = value;
     }
     break;
 
     case 0x08: // adsr low
     {
-      Log_DebugPrintf("SPU voice %u ADSR low <- 0x%04X (was 0x%04X)", voice_index, value, voice.regs.adsr.bits_low);
+      Log_DebugFmt("SPU voice {} ADSR low <- 0x{:04X} (was 0x{:04X})", voice_index, value, voice.regs.adsr.bits_low);
       voice.regs.adsr.bits_low = value;
       if (voice.IsOn())
         voice.UpdateADSREnvelope();
@@ -1077,7 +1089,7 @@ void SPU::WriteVoiceRegister(u32 offset, u16 value)
 
     case 0x0A: // adsr high
     {
-      Log_DebugPrintf("SPU voice %u ADSR high <- 0x%04X (was 0x%04X)", voice_index, value, voice.regs.adsr.bits_low);
+      Log_DebugFmt("SPU voice {} ADSR high <- 0x{:04X} (was 0x{:04X})", voice_index, value, voice.regs.adsr.bits_low);
       voice.regs.adsr.bits_high = value;
       if (voice.IsOn())
         voice.UpdateADSREnvelope();
@@ -1086,7 +1098,7 @@ void SPU::WriteVoiceRegister(u32 offset, u16 value)
 
     case 0x0C: // adsr volume
     {
-      Log_DebugPrintf("SPU voice %u ADSR volume <- 0x%04X (was 0x%04X)", voice_index, value, voice.regs.adsr_volume);
+      Log_DebugFmt("SPU voice {} ADSR volume <- 0x{:04X} (was 0x{:04X})", voice_index, value, voice.regs.adsr_volume);
       voice.regs.adsr_volume = value;
     }
     break;
@@ -1100,22 +1112,22 @@ void SPU::WriteVoiceRegister(u32 offset, u16 value)
       //  - Valkyrie Profile
 
       const bool ignore_loop_address = voice.IsOn() && !voice.is_first_block;
-      Log_DebugPrintf("SPU voice %u ADPCM repeat address <- 0x%04X", voice_index, value);
+      Log_DebugFmt("SPU voice {} ADPCM repeat address <- 0x{:04X}", voice_index, value);
       voice.regs.adpcm_repeat_address = value;
       voice.ignore_loop_address |= ignore_loop_address;
 
       if (!ignore_loop_address)
       {
-        Log_DevPrintf("Not ignoring loop address, the ADPCM repeat address of 0x%04X for voice %u will be overwritten",
-                      value, voice_index);
+        Log_DevFmt("Not ignoring loop address, the ADPCM repeat address of 0x{:04X} for voice {} will be overwritten",
+                   value, voice_index);
       }
     }
     break;
 
     default:
     {
-      Log_ErrorPrintf("Unknown SPU voice %u register write: offset 0x%X (address 0x%08X) value 0x%04X", offset,
-                      voice_index, offset | SPU_BASE, ZeroExtend32(value));
+      Log_ErrorFmt("Unknown SPU voice {} register write: offset 0x%X (address 0x{:08X}) value 0x{:04X}", offset,
+                   voice_index, offset | SPU_BASE, ZeroExtend32(value));
     }
     break;
   }
@@ -1155,14 +1167,14 @@ void SPU::TriggerRAMIRQ()
 {
   DebugAssert(IsRAMIRQTriggerable());
   s_SPUSTAT.irq9_flag = true;
-  InterruptController::InterruptRequest(InterruptController::IRQ::SPU);
+  InterruptController::SetLineState(InterruptController::IRQ::SPU, true);
 }
 
 void SPU::CheckForLateRAMIRQs()
 {
   if (CheckRAMIRQ(s_transfer_address))
   {
-    Log_DebugPrintf("Trigger IRQ @ %08X %04X from late transfer", s_transfer_address, s_transfer_address / 8);
+    Log_DebugFmt("Trigger IRQ @ {:08X} {:04X} from late transfer", s_transfer_address, s_transfer_address / 8);
     TriggerRAMIRQ();
     return;
   }
@@ -1178,7 +1190,7 @@ void SPU::CheckForLateRAMIRQs()
     const u32 address = v.current_address * 8;
     if (CheckRAMIRQ(address) || CheckRAMIRQ((address + 8) & RAM_MASK))
     {
-      Log_DebugPrintf("Trigger IRQ @ %08X %04X from late", address, address / 8);
+      Log_DebugFmt("Trigger IRQ @ {:08X} ({:04X}) from late", address, address / 8);
       TriggerRAMIRQ();
       return;
     }
@@ -1188,11 +1200,11 @@ void SPU::CheckForLateRAMIRQs()
 void SPU::WriteToCaptureBuffer(u32 index, s16 value)
 {
   const u32 ram_address = (index * CAPTURE_BUFFER_SIZE_PER_CHANNEL) | ZeroExtend16(s_capture_buffer_position);
-  // Log_DebugPrintf("write to capture buffer %u (0x%08X) <- 0x%04X", index, ram_address, u16(value));
+  // Log_DebugFmt("write to capture buffer {} (0x{:08X}) <- 0x{:04X}", index, ram_address, u16(value));
   std::memcpy(&s_ram[ram_address], &value, sizeof(value));
   if (IsRAMIRQTriggerable() && CheckRAMIRQ(ram_address))
   {
-    Log_DebugPrintf("Trigger IRQ @ %08X %04X from capture buffer", ram_address, ram_address / 8);
+    Log_DebugFmt("Trigger IRQ @ {:08X} ({:04X}) from capture buffer", ram_address, ram_address / 8);
     TriggerRAMIRQ();
   }
 }
@@ -1216,7 +1228,7 @@ ALWAYS_INLINE_RELEASE void SPU::ExecuteFIFOReadFromRAM(TickCount& ticks)
 
     if (IsRAMIRQTriggerable() && CheckRAMIRQ(s_transfer_address))
     {
-      Log_DebugPrintf("Trigger IRQ @ %08X %04X from transfer read", s_transfer_address, s_transfer_address / 8);
+      Log_DebugFmt("Trigger IRQ @ {:08X} ({:04X}) from transfer read", s_transfer_address, s_transfer_address / 8);
       TriggerRAMIRQ();
     }
   }
@@ -1233,7 +1245,7 @@ ALWAYS_INLINE_RELEASE void SPU::ExecuteFIFOWriteToRAM(TickCount& ticks)
 
     if (IsRAMIRQTriggerable() && CheckRAMIRQ(s_transfer_address))
     {
-      Log_DebugPrintf("Trigger IRQ @ %08X %04X from transfer write", s_transfer_address, s_transfer_address / 8);
+      Log_DebugFmt("Trigger IRQ @ {:08X} ({:04X}) from transfer write", s_transfer_address, s_transfer_address / 8);
       TriggerRAMIRQ();
     }
   }
@@ -1297,7 +1309,7 @@ void SPU::ManualTransferWrite(u16 value)
 {
   if (!s_transfer_fifo.IsEmpty() && s_SPUCNT.ram_transfer_mode != RAMTransferMode::DMARead)
   {
-    Log_WarningPrintf("FIFO not empty on manual SPU write, draining to hopefully avoid corruption. Game is silly.");
+    Log_WarningPrint("FIFO not empty on manual SPU write, draining to hopefully avoid corruption. Game is silly.");
     if (s_SPUCNT.ram_transfer_mode != RAMTransferMode::Stopped)
       ExecuteTransfer(nullptr, std::numeric_limits<s32>::max(), 0);
   }
@@ -1307,7 +1319,7 @@ void SPU::ManualTransferWrite(u16 value)
 
   if (IsRAMIRQTriggerable() && CheckRAMIRQ(s_transfer_address))
   {
-    Log_DebugPrintf("Trigger IRQ @ %08X %04X from manual write", s_transfer_address, s_transfer_address / 8);
+    Log_DebugFmt("Trigger IRQ @ {:08X} ({:04X}) from manual write", s_transfer_address, s_transfer_address / 8);
     TriggerRAMIRQ();
   }
 }
@@ -1425,7 +1437,7 @@ void SPU::DMARead(u32* words, u32 word_count)
       fill_value = halfwords[size - 1];
     }
 
-    Log_WarningPrintf("Transfer FIFO underflow, filling with 0x%04X", fill_value);
+    Log_WarningFmt("Transfer FIFO underflow, filling with 0x{:04X}", fill_value);
     std::fill_n(&halfwords[size], halfword_count - size, fill_value);
   }
   else
@@ -1446,7 +1458,7 @@ void SPU::DMAWrite(const u32* words, u32 word_count)
   s_transfer_fifo.PushRange(halfwords, words_to_transfer);
 
   if (words_to_transfer != halfword_count) [[unlikely]]
-    Log_WarningPrintf("Transfer FIFO overflow, dropping %u halfwords", halfword_count - words_to_transfer);
+    Log_WarningFmt("Transfer FIFO overflow, dropping {} halfwords", halfword_count - words_to_transfer);
 
   UpdateDMARequest();
   UpdateTransferEvent();
@@ -1485,7 +1497,7 @@ bool SPU::StartDumpingAudio(const char* filename)
   s_dump_writer = std::make_unique<WAVWriter>();
   if (!s_dump_writer->Open(filename, SAMPLE_RATE, 2))
   {
-    Log_ErrorPrintf("Failed to open '%s'", filename);
+    Log_ErrorFmt("Failed to open '{}'", filename);
     s_dump_writer.reset();
     return false;
   }
@@ -1505,7 +1517,7 @@ bool SPU::StartDumpingAudio(const char* filename)
     const std::string voice_filename = Path::ReplaceExtension(filename, new_suffix);
     if (!s_voice_dump_writers[i]->Open(voice_filename.c_str(), SAMPLE_RATE, 2))
     {
-      Log_ErrorPrintf("Failed to open voice dump filename '%s'", voice_filename.c_str());
+      Log_ErrorFmt("Failed to open voice dump filename '{}'", voice_filename.c_str());
       s_voice_dump_writers[i].reset();
     }
   }
@@ -1657,11 +1669,12 @@ static constexpr ADSRTableEntries ComputeADSRTableEntries()
 
 static constexpr ADSRTableEntries s_adsr_table = ComputeADSRTableEntries();
 
-void SPU::VolumeEnvelope::Reset(u8 rate_, bool decreasing_, bool exponential_)
+void SPU::VolumeEnvelope::Reset(u8 rate_, bool decreasing_, bool exponential_, bool phase_invert_)
 {
   rate = rate_;
   decreasing = decreasing_;
   exponential = exponential_;
+  phase_invert = phase_invert_;
 
   const ADSRTableEntry& table_entry = s_adsr_table[BoolToUInt8(decreasing)][rate];
   counter = table_entry.ticks;
@@ -1704,8 +1717,16 @@ s16 SPU::VolumeEnvelope::Tick(s16 current_level)
     }
   }
 
-  return static_cast<s16>(
-    std::clamp<s32>(static_cast<s32>(current_level) + this_step, ENVELOPE_MIN_VOLUME, ENVELOPE_MAX_VOLUME));
+  if (phase_invert) [[unlikely]]
+  {
+    return static_cast<s16>(
+      std::clamp<s32>(static_cast<s32>(current_level) - this_step, -ENVELOPE_MAX_VOLUME, ENVELOPE_MIN_VOLUME));
+  }
+  else
+  {
+    return static_cast<s16>(
+      std::clamp<s32>(static_cast<s32>(current_level) + this_step, ENVELOPE_MIN_VOLUME, ENVELOPE_MAX_VOLUME));
+  }
 }
 
 void SPU::VolumeSweep::Reset(VolumeRegister reg)
@@ -1717,7 +1738,8 @@ void SPU::VolumeSweep::Reset(VolumeRegister reg)
     return;
   }
 
-  envelope.Reset(reg.sweep_rate, reg.sweep_direction_decrease, reg.sweep_exponential);
+  envelope.Reset(reg.sweep_rate, reg.sweep_direction_decrease, reg.sweep_exponential,
+                 !(reg.sweep_exponential && reg.sweep_direction_decrease) && reg.sweep_phase_negative);
   envelope_active = true;
 }
 
@@ -1737,28 +1759,29 @@ void SPU::Voice::UpdateADSREnvelope()
   {
     case ADSRPhase::Off:
       adsr_target = 0;
-      adsr_envelope.Reset(0, false, false);
+      adsr_envelope.Reset(0, false, false, false);
       return;
 
     case ADSRPhase::Attack:
       adsr_target = 32767; // 0 -> max
-      adsr_envelope.Reset(regs.adsr.attack_rate, false, regs.adsr.attack_exponential);
+      adsr_envelope.Reset(regs.adsr.attack_rate, false, regs.adsr.attack_exponential, false);
       break;
 
     case ADSRPhase::Decay:
       adsr_target = static_cast<s16>(std::min<s32>((u32(regs.adsr.sustain_level.GetValue()) + 1) * 0x800,
                                                    ENVELOPE_MAX_VOLUME)); // max -> sustain level
-      adsr_envelope.Reset(regs.adsr.decay_rate_shr2 << 2, true, true);
+      adsr_envelope.Reset(regs.adsr.decay_rate_shr2 << 2, true, true, false);
       break;
 
     case ADSRPhase::Sustain:
       adsr_target = 0;
-      adsr_envelope.Reset(regs.adsr.sustain_rate, regs.adsr.sustain_direction_decrease, regs.adsr.sustain_exponential);
+      adsr_envelope.Reset(regs.adsr.sustain_rate, regs.adsr.sustain_direction_decrease, regs.adsr.sustain_exponential,
+                          false);
       break;
 
     case ADSRPhase::Release:
       adsr_target = 0;
-      adsr_envelope.Reset(regs.adsr.release_rate_shr2 << 2, true, regs.adsr.release_exponential);
+      adsr_envelope.Reset(regs.adsr.release_rate_shr2 << 2, true, regs.adsr.release_exponential, false);
       break;
 
     default:
@@ -1899,7 +1922,7 @@ void SPU::ReadADPCMBlock(u16 address, ADPCMBlock* block)
   u32 ram_address = (ZeroExtend32(address) * 8) & RAM_MASK;
   if (IsRAMIRQTriggerable() && (CheckRAMIRQ(ram_address) || CheckRAMIRQ((ram_address + 8) & RAM_MASK)))
   {
-    Log_DebugPrintf("Trigger IRQ @ %08X %04X from ADPCM reader", ram_address, ram_address / 8);
+    Log_DebugFmt("Trigger IRQ @ {:08X} ({:04X}) from ADPCM reader", ram_address, ram_address / 8);
     TriggerRAMIRQ();
   }
 
@@ -1948,7 +1971,7 @@ ALWAYS_INLINE_RELEASE std::tuple<s32, s32> SPU::SampleVoice(u32 voice_index)
 
     if (voice.current_block_flags.loop_start && !voice.ignore_loop_address)
     {
-      Log_TracePrintf("Voice %u loop start @ 0x%08X", voice_index, ZeroExtend32(voice.current_address));
+      Log_TraceFmt("Voice {} loop start @ 0x{:08X}", voice_index, voice.current_address);
       voice.regs.adpcm_repeat_address = voice.current_address;
     }
   }
@@ -2007,12 +2030,20 @@ ALWAYS_INLINE_RELEASE std::tuple<s32, s32> SPU::SampleVoice(u32 voice_index)
 
       if (!voice.current_block_flags.loop_repeat)
       {
-        Log_TracePrintf("Voice %u loop end+mute @ 0x%08X", voice_index, ZeroExtend32(voice.current_address));
-        voice.ForceOff();
+        // End+Mute flags are ignored when noise is enabled. ADPCM data is still decoded.
+        if (!IsVoiceNoiseEnabled(voice_index))
+        {
+          Log_TraceFmt("Voice {} loop end+mute @ 0x{:04X}", voice_index, voice.current_address);
+          voice.ForceOff();
+        }
+        else
+        {
+          Log_TraceFmt("IGNORING voice {} loop end+mute @ 0x{:04X}", voice_index, voice.current_address);
+        }
       }
       else
       {
-        Log_TracePrintf("Voice %u loop end+repeat @ 0x%08X", voice_index, ZeroExtend32(voice.current_address));
+        Log_TraceFmt("Voice {} loop end+repeat @ 0x{:04X}", voice_index, voice.current_address);
       }
     }
   }

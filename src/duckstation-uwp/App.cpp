@@ -12,6 +12,7 @@
 #include <winrt/Windows.Graphics.Display.Core.h>
 #include <winrt/Windows.Gaming.Input.h>
 #include <winrt/Windows.System.h>
+#include <gamingdeviceinformation.h>
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -37,15 +38,14 @@
 #include "IconsPromptFont.h"
 #include "UWPUtils.h"
 
+#include <deque>
 #include <thread>
 #include <chrono>
 
 #include "win32_key_names.h"
 
-
-// Entrypoint into the emulator
-#include "duckstation-nogui/nogui_host.h"
 #include <util/imgui_fullscreen.h>
+#include <util/gpu_device.h>
 
 Log_SetChannel(App);
 
@@ -126,7 +126,6 @@ private:
   static std::unique_ptr<INISettingsInterface> s_base_settings_interface;
   static bool s_batch_mode = false;
   static bool s_is_fullscreen = false;
-  static bool s_was_paused_by_focus_loss = false;
 
   static Threading::Thread s_cpu_thread;
   static Threading::KernelSemaphore s_platform_window_updated;
@@ -156,7 +155,7 @@ void WinRTHost::SetXboxSettings(INISettingsInterface& si)
   si.SetStringValue("Pad1", "Down",       "XInput-0/DPadDown");
   si.SetStringValue("Pad1", "Left",       "XInput-0/DPadLeft");
   si.SetStringValue("Pad1", "Right",      "XInput-0/DPadRight");
-  si.SetStringValue("Pad1", "Select", "XInput-0/Back");
+  si.SetStringValue("Pad1", "Select",     "XInput-0/Back");
   si.SetStringValue("Pad1", "Start",      "XInput-0/Start");
   si.SetStringValue("Pad1", "Triangle",   "XInput-0/Y");
   si.SetStringValue("Pad1", "Cross",      "XInput-0/A");
@@ -186,7 +185,7 @@ void WinRTHost::SetXboxSettings(INISettingsInterface& si)
 
   si.SetBoolValue("Display", "DisplayAllFrames", true);
   si.SetBoolValue("Main", "SyncToHostRefreshRate", true);
-  si.SetStringValue("Display", "SyncMode", "VSync");
+  si.SetBoolValue("Display", "VSync", true);
 
   if (is_running_on_xbox)
   {
@@ -367,8 +366,8 @@ void WinRTHost::CPUThreadMainLoop()
 
       Host::PumpMessagesOnCPUThread();
       ::System::Internal::IdlePollUpdate();
-      ::System::PresentDisplay(false);
-      if (!g_gpu_device->IsVSyncActive()) // stenzek still hasn't updated this on his own NoGUI host. lmao?
+      ::System::PresentDisplay(false, false);
+      if (!g_gpu_device->IsVSyncEnabled())
         g_gpu_device->ThrottlePresentation();
     }
 }
@@ -592,13 +591,12 @@ std::optional<WindowInfo> Host::AcquireRenderWindow(bool recreate_window)
 
 void Host::ReleaseRenderWindow()
 {
-    // No-op
+  // No-op
 }
 
 void Host::OnSystemStarting()
 {
-  // TODO: Revisit
-  //s_was_paused_by_focus_loss = false;
+  // don't need to do anything here
 }
 
 void Host::OnSystemStarted()
@@ -632,12 +630,12 @@ void Host::RequestResizeHostDisplay(s32 width, s32 height)
 
 void Host::OpenURL(const std::string_view& url)
 {
-    // opening links as of current is not really possible since LaunchUriAsync hates me.
-    // why? no idea! doesn't work even if i run it on the UI thread!
-    // or if I run it synchronously OR async! or do literally anything!
-    // WinRT is evil. I don't even care why it's broken anymore
-    // i figure it's better for it to do nothing than to crash with a general purpose exception that it
-    // doesn't explain, so we're back to a no-op. damn you microsoft and your awful awful async garbage
+  // opening links as of current is not really possible since LaunchUriAsync hates me.
+  // why? no idea! doesn't work even if i run it on the UI thread!
+  // or if I run it synchronously OR async! or do literally anything!
+  // WinRT is evil. I don't even care why it's broken anymore
+  // i figure it's better for it to do nothing than to crash with a general purpose exception that it
+  // doesn't explain, so we're back to a no-op. damn you microsoft and your awful awful async garbage
 }
 
 bool Host::CopyTextToClipboard(const std::string_view& text)
@@ -647,7 +645,10 @@ bool Host::CopyTextToClipboard(const std::string_view& text)
 
 void Host::OnPerformanceCountersUpdated()
 {
-  // noop
+  // not implemented. primary purpose of this is to update a little widget/statusbar
+  // when using a host that has a window containing the viewport (like qt) and then
+  // extra bits like the menu bar. WinRT doesn't have this -- everything is 1 unit
+  // whole single window viewport. This is also why I implemented cheevos login like I did
 }
 
 void Host::OnGameChanged(const std::string& disc_path, const std::string& game_serial, const std::string& game_name)
@@ -678,7 +679,7 @@ void Host::OnAchievementsLoginSuccess(const char* username, u32 points, u32 sc_p
 
 void Host::OnAchievementsRefreshed()
 {
-  // noop
+  // think this is only for rpc. which we can't do. because you can't run discord on an Xbox
 }
 
 void Host::OnAchievementsHardcoreModeChanged(bool enabled)
@@ -731,7 +732,8 @@ void Host::CommitBaseSettingChanges()
 
 void Host::OnCoverDownloaderOpenRequested()
 {
-    // no-op
+  Host::AddIconOSDMessage("uwp_cover_downloader_requested", ICON_FA_FROWN,
+                          "The cover downloader is unimplemented.", 5.0f);
 }
 
 std::optional<WindowInfo> Host::GetTopLevelWindowInfo()
@@ -739,7 +741,7 @@ std::optional<WindowInfo> Host::GetTopLevelWindowInfo()
   return WinRTHost::GetPlatformWindowInfo();
 }
 
-void Host::RequestExit(bool allow_confirm)
+void Host::RequestExitApplication(bool allow_confirm)
 {
   if (::System::IsValid())
   {
@@ -749,6 +751,11 @@ void Host::RequestExit(bool allow_confirm)
   // clear the running flag, this'll break out of the main CPU loop once the VM is shutdown.
   WinRTHost::s_running.store(false, std::memory_order_release);
 }
+
+void Host::RequestExitBigPicture()
+{
+  // we ARE big picture.
+} 
 
 void Host::RequestSystemShutdown(bool allow_confirm, bool save_state)
 {
@@ -934,9 +941,9 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
   {
     std::stringstream filePath;
 
-    if (args.Kind() == Windows::ApplicationModel::Activation::ActivationKind::Protocol)
+    if (args.Kind() == winrt::Windows::ApplicationModel::Activation::ActivationKind::Protocol)
     {
-      auto protocolActivatedEventArgs{args.as<Windows::ApplicationModel::Activation::ProtocolActivatedEventArgs>()};
+      auto protocolActivatedEventArgs{args.as<winrt::Windows::ApplicationModel::Activation::ProtocolActivatedEventArgs>()};
       auto query = protocolActivatedEventArgs.Uri().QueryParsed();
 
       for (uint32_t i = 0; i < query.Size(); i++)
@@ -976,7 +983,10 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
     {
       SystemBootParameters params;
       params.filename = gamePath;
-      Host::RunOnCPUThread([params = std::move(params)]() { ::System::BootSystem(std::move(params)); });
+      Host::RunOnCPUThread([params = std::move(params)]() {
+        Error error;
+        ::System::BootSystem(std::move(params), &error);
+      });
     }
   }
 

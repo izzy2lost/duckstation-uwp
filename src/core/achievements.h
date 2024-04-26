@@ -75,7 +75,7 @@ void Logout();
 void GameChanged(const std::string& path, CDImage* image);
 
 /// Re-enables hardcore mode if it is enabled in the settings.
-bool ResetHardcoreMode();
+bool ResetHardcoreMode(bool is_booting);
 
 /// Forces hardcore mode off until next reset.
 void DisableHardcoreMode();
@@ -118,6 +118,13 @@ const std::string& GetRichPresenceString();
 /// Returns the RetroAchievements title for the current game.
 /// Should be called with the lock held.
 const std::string& GetGameTitle();
+
+/// Returns the logged-in user name.
+const char* GetLoggedInUserName();
+
+/// Returns the path to the user's profile avatar.
+/// Should be called with the lock held.
+std::string GetLoggedInUserBadgePath();
 
 /// Clears all cached state used to render the UI.
 void ClearUIState();

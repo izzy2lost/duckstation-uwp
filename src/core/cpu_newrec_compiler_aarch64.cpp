@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2023 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "cpu_newrec_compiler_aarch64.h"
@@ -693,7 +693,7 @@ void CPU::NewRec::AArch64Compiler::Compile_Fallback()
 {
   Flush(FLUSH_FOR_INTERPRETER);
 
-  EmitCall(armAsm, &CPU::Recompiler::Thunks::InterpretInstruction);
+  EmitCall(reinterpret_cast<const void*>(&CPU::Recompiler::Thunks::InterpretInstruction));
 
   // TODO: make me less garbage
   // TODO: this is wrong, it flushes the load delay on the same cycle when we return.
@@ -1616,9 +1616,9 @@ void CPU::NewRec::AArch64Compiler::Compile_lwx(CompileFlags cf, MemoryAccessSize
   {
     // const u32 mask = UINT32_C(0x00FFFFFF) >> shift;
     // new_value = (value & mask) | (RWRET << (24 - shift));
-    EmitMov(addr, 0xFFFFFFu);
-    armAsm->lsrv(addr, addr, RWARG2);
-    armAsm->and_(value, value, addr);
+    EmitMov(RWSCRATCH, 0xFFFFFFu);
+    armAsm->lsrv(RWSCRATCH, RWSCRATCH, RWARG2);
+    armAsm->and_(value, value, RWSCRATCH);
     armAsm->lslv(RWRET, RWRET, RWARG3);
     armAsm->orr(value, value, RWRET);
   }
@@ -1627,27 +1627,40 @@ void CPU::NewRec::AArch64Compiler::Compile_lwx(CompileFlags cf, MemoryAccessSize
     // const u32 mask = UINT32_C(0xFFFFFF00) << (24 - shift);
     // new_value = (value & mask) | (RWRET >> shift);
     armAsm->lsrv(RWRET, RWRET, RWARG2);
-    EmitMov(addr, 0xFFFFFF00u);
-    armAsm->lslv(addr, addr, RWARG3);
-    armAsm->and_(value, value, addr);
+    EmitMov(RWSCRATCH, 0xFFFFFF00u);
+    armAsm->lslv(RWSCRATCH, RWSCRATCH, RWARG3);
+    armAsm->and_(value, value, RWSCRATCH);
     armAsm->orr(value, value, RWRET);
   }
 
   FreeHostReg(addr.GetCode());
+
+  if (g_settings.gpu_pgxp_enable)
+  {
+    Flush(FLUSH_FOR_C_CALL);
+    armAsm->mov(RWARG3, value);
+    armAsm->and_(RWARG2, addr, armCheckLogicalConstant(~0x3u));
+    EmitMov(RWARG1, inst->bits);
+    EmitCall(reinterpret_cast<const void*>(&PGXP::CPU_LW));
+  }
 }
 
 void CPU::NewRec::AArch64Compiler::Compile_lwc2(CompileFlags cf, MemoryAccessSize size, bool sign, bool use_fastmem,
                                                 const std::optional<VirtualMemoryAddress>& address)
 {
+  const u32 index = static_cast<u32>(inst->r.rt.GetValue());
+  const auto [ptr, action] = GetGTERegisterPointer(index, true);
   const std::optional<WRegister> addr_reg =
     g_settings.gpu_pgxp_enable ? std::optional<WRegister>(WRegister(AllocateTempHostReg(HR_CALLEE_SAVED))) :
                                  std::optional<WRegister>();
   FlushForLoadStore(address, false, use_fastmem);
   const WRegister addr = ComputeLoadStoreAddressArg(cf, address, addr_reg);
-  GenerateLoad(addr, MemoryAccessSize::Word, false, use_fastmem, []() { return RWRET; });
+  const WRegister value = GenerateLoad(addr, MemoryAccessSize::Word, false, use_fastmem, [this, action]() {
+    return (action == GTERegisterAccessAction::CallHandler && g_settings.gpu_pgxp_enable) ?
+             WRegister(AllocateTempHostReg(HR_CALLEE_SAVED)) :
+             RWRET;
+  });
 
-  const u32 index = static_cast<u32>(inst->r.rt.GetValue());
-  const auto [ptr, action] = GetGTERegisterPointer(index, true);
   switch (action)
   {
     case GTERegisterAccessAction::Ignore:
@@ -1657,28 +1670,28 @@ void CPU::NewRec::AArch64Compiler::Compile_lwc2(CompileFlags cf, MemoryAccessSiz
 
     case GTERegisterAccessAction::Direct:
     {
-      armAsm->str(RWRET, PTR(ptr));
+      armAsm->str(value, PTR(ptr));
       break;
     }
 
     case GTERegisterAccessAction::SignExtend16:
     {
-      armAsm->sxth(RWRET, RWRET);
-      armAsm->str(RWRET, PTR(ptr));
+      armAsm->sxth(RWARG3, value);
+      armAsm->str(RWARG3, PTR(ptr));
       break;
     }
 
     case GTERegisterAccessAction::ZeroExtend16:
     {
-      armAsm->uxth(RWRET, RWRET);
-      armAsm->str(RWRET, PTR(ptr));
+      armAsm->uxth(RWARG3, value);
+      armAsm->str(RWARG3, PTR(ptr));
       break;
     }
 
     case GTERegisterAccessAction::CallHandler:
     {
       Flush(FLUSH_FOR_C_CALL);
-      armAsm->mov(RWARG2, RWRET);
+      armAsm->mov(RWARG2, value);
       EmitMov(RWARG1, index);
       EmitCall(reinterpret_cast<const void*>(&GTE::WriteRegister));
       break;
@@ -1689,12 +1702,12 @@ void CPU::NewRec::AArch64Compiler::Compile_lwc2(CompileFlags cf, MemoryAccessSiz
       // SXY0 <- SXY1
       // SXY1 <- SXY2
       // SXY2 <- SXYP
-      DebugAssert(RWRET.GetCode() != RWARG2.GetCode() && RWRET.GetCode() != RWARG3.GetCode());
+      DebugAssert(value.GetCode() != RWARG2.GetCode() && value.GetCode() != RWARG3.GetCode());
       armAsm->ldr(RWARG2, PTR(&g_state.gte_regs.SXY1[0]));
       armAsm->ldr(RWARG3, PTR(&g_state.gte_regs.SXY2[0]));
       armAsm->str(RWARG2, PTR(&g_state.gte_regs.SXY0[0]));
       armAsm->str(RWARG3, PTR(&g_state.gte_regs.SXY1[0]));
-      armAsm->str(RWRET, PTR(&g_state.gte_regs.SXY2[0]));
+      armAsm->str(value, PTR(&g_state.gte_regs.SXY2[0]));
       break;
     }
 
@@ -1708,11 +1721,13 @@ void CPU::NewRec::AArch64Compiler::Compile_lwc2(CompileFlags cf, MemoryAccessSiz
   if (g_settings.gpu_pgxp_enable)
   {
     Flush(FLUSH_FOR_C_CALL);
-    armAsm->mov(RWARG3, RWRET);
+    armAsm->mov(RWARG3, value);
+    if (value.GetCode() != RWRET.GetCode())
+      FreeHostReg(value.GetCode());
     armAsm->mov(RWARG2, addr);
+    FreeHostReg(addr_reg.value().GetCode());
     EmitMov(RWARG1, inst->bits);
     EmitCall(reinterpret_cast<const void*>(&PGXP::CPU_LWC2));
-    FreeHostReg(addr_reg.value().GetCode());
   }
 }
 
@@ -1749,7 +1764,13 @@ void CPU::NewRec::AArch64Compiler::Compile_swx(CompileFlags cf, MemoryAccessSize
 {
   DebugAssert(size == MemoryAccessSize::Word && !sign);
 
+  // TODO: this can take over rt's value if it's no longer needed
+  // NOTE: can't trust T in cf because of the alloc
   const WRegister addr = WRegister(AllocateTempHostReg(HR_CALLEE_SAVED));
+  const WRegister value = g_settings.gpu_pgxp_enable ? WRegister(AllocateTempHostReg(HR_CALLEE_SAVED)) : RWARG2;
+  if (g_settings.gpu_pgxp_enable)
+    MoveMIPSRegToReg(value, inst->r.rt);
+
   FlushForLoadStore(address, true, use_fastmem);
 
   // TODO: if address is constant, this can be simplified..
@@ -1758,19 +1779,13 @@ void CPU::NewRec::AArch64Compiler::Compile_swx(CompileFlags cf, MemoryAccessSize
   armAsm->and_(RWARG1, addr, armCheckLogicalConstant(~0x3u));
   GenerateLoad(RWARG1, MemoryAccessSize::Word, false, use_fastmem, []() { return RWRET; });
 
-  // TODO: this can take over rt's value if it's no longer needed
-  // NOTE: can't trust T in cf because of the flush
-  const Reg rt = inst->r.rt;
-  const WRegister value = RWARG2;
-  if (const std::optional<u32> rtreg = CheckHostReg(HR_MODE_READ, HR_TYPE_CPU_REG, rt); rtreg.has_value())
-    armAsm->mov(value, WRegister(rtreg.value()));
-  else if (HasConstantReg(rt))
-    EmitMov(value, GetConstantRegU32(rt));
-  else
-    armAsm->ldr(value, MipsPtr(rt));
-
   armAsm->and_(RWSCRATCH, addr, 3);
   armAsm->lsl(RWSCRATCH, RWSCRATCH, 3); // *8
+  armAsm->and_(addr, addr, armCheckLogicalConstant(~0x3u));
+
+  // Need to load down here for PGXP-off, because it's in a volatile reg that can get overwritten by flush.
+  if (!g_settings.gpu_pgxp_enable)
+    MoveMIPSRegToReg(value, inst->r.rt);
 
   if (inst->op == InstructionOp::swl)
   {
@@ -1799,24 +1814,42 @@ void CPU::NewRec::AArch64Compiler::Compile_swx(CompileFlags cf, MemoryAccessSize
     armAsm->orr(value, value, RWRET);
   }
 
-  FreeHostReg(addr.GetCode());
+  if (!g_settings.gpu_pgxp_enable)
+  {
+    GenerateStore(addr, value, MemoryAccessSize::Word, use_fastmem);
+    FreeHostReg(addr.GetCode());
+  }
+  else
+  {
+    GenerateStore(addr, value, MemoryAccessSize::Word, use_fastmem);
 
-  armAsm->and_(RWARG1, addr, armCheckLogicalConstant(~0x3u));
-  GenerateStore(RWARG1, value, MemoryAccessSize::Word, use_fastmem);
+    Flush(FLUSH_FOR_C_CALL);
+    armAsm->mov(RWARG3, value);
+    FreeHostReg(value.GetCode());
+    armAsm->mov(RWARG2, addr);
+    FreeHostReg(addr.GetCode());
+    EmitMov(RWARG1, inst->bits);
+    EmitCall(reinterpret_cast<const void*>(&PGXP::CPU_SW));
+  }
 }
 
 void CPU::NewRec::AArch64Compiler::Compile_swc2(CompileFlags cf, MemoryAccessSize size, bool sign, bool use_fastmem,
                                                 const std::optional<VirtualMemoryAddress>& address)
 {
-  FlushForLoadStore(address, true, use_fastmem);
-
   const u32 index = static_cast<u32>(inst->r.rt.GetValue());
   const auto [ptr, action] = GetGTERegisterPointer(index, false);
+  const WRegister addr = (g_settings.gpu_pgxp_enable || action == GTERegisterAccessAction::CallHandler) ?
+                           WRegister(AllocateTempHostReg(HR_CALLEE_SAVED)) :
+                           RWARG1;
+  const WRegister data = g_settings.gpu_pgxp_enable ? WRegister(AllocateTempHostReg(HR_CALLEE_SAVED)) : RWARG2;
+  FlushForLoadStore(address, true, use_fastmem);
+  ComputeLoadStoreAddressArg(cf, address, addr);
+
   switch (action)
   {
     case GTERegisterAccessAction::Direct:
     {
-      armAsm->ldr(RWARG2, PTR(ptr));
+      armAsm->ldr(data, PTR(ptr));
     }
     break;
 
@@ -1826,7 +1859,7 @@ void CPU::NewRec::AArch64Compiler::Compile_swc2(CompileFlags cf, MemoryAccessSiz
       Flush(FLUSH_FOR_C_CALL);
       EmitMov(RWARG1, index);
       EmitCall(reinterpret_cast<const void*>(&GTE::ReadRegister));
-      armAsm->mov(RWARG2, RWRET);
+      armAsm->mov(data, RWRET);
     }
     break;
 
@@ -1837,29 +1870,23 @@ void CPU::NewRec::AArch64Compiler::Compile_swc2(CompileFlags cf, MemoryAccessSiz
     break;
   }
 
-  // PGXP makes this a giant pain.
+  GenerateStore(addr, data, size, use_fastmem);
   if (!g_settings.gpu_pgxp_enable)
   {
-    const WRegister addr = ComputeLoadStoreAddressArg(cf, address);
-    GenerateStore(addr, RWARG2, size, use_fastmem);
-    return;
+    if (addr.GetCode() != RWARG1.GetCode())
+      FreeHostReg(addr.GetCode());
   }
-
-  // TODO: This can be simplified because we don't need to validate in PGXP..
-  const WRegister addr_reg = WRegister(AllocateTempHostReg(HR_CALLEE_SAVED));
-  const WRegister data_backup = WRegister(AllocateTempHostReg(HR_CALLEE_SAVED));
-  FlushForLoadStore(address, true, use_fastmem);
-  ComputeLoadStoreAddressArg(cf, address, addr_reg);
-  armAsm->mov(data_backup, RWARG2);
-  GenerateStore(addr_reg, RWARG2, size, use_fastmem);
-
-  Flush(FLUSH_FOR_C_CALL);
-  armAsm->mov(RWARG3, data_backup);
-  armAsm->mov(RWARG2, addr_reg);
-  EmitMov(RWARG1, inst->bits);
-  EmitCall(reinterpret_cast<const void*>(&PGXP::CPU_SWC2));
-  FreeHostReg(addr_reg.GetCode());
-  FreeHostReg(data_backup.GetCode());
+  else
+  {
+    // TODO: This can be simplified because we don't need to validate in PGXP..
+    Flush(FLUSH_FOR_C_CALL);
+    armAsm->mov(RWARG3, data);
+    FreeHostReg(data.GetCode());
+    armAsm->mov(RWARG2, addr);
+    FreeHostReg(addr.GetCode());
+    EmitMov(RWARG1, inst->bits);
+    EmitCall(reinterpret_cast<const void*>(&PGXP::CPU_SWC2));
+  }
 }
 
 void CPU::NewRec::AArch64Compiler::Compile_mtc0(CompileFlags cf)

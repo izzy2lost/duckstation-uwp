@@ -927,7 +927,11 @@ bool D3D12Device::CreateSwapChainRTV()
 
   if (m_window_info.type == WindowInfo::Type::Win32)
   {
+#ifndef _UWP
     BOOL fullscreen = FALSE;
+#else
+    BOOL fullscreen = TRUE;
+#endif
     DXGI_SWAP_CHAIN_DESC desc;
     if (SUCCEEDED(m_swap_chain->GetFullscreenState(&fullscreen, nullptr)) && fullscreen &&
         SUCCEEDED(m_swap_chain->GetDesc(&desc)))
@@ -1114,7 +1118,7 @@ bool D3D12Device::BeginPresent(bool frame_skip)
   return true;
 }
 
-void D3D12Device::EndPresent()
+void D3D12Device::EndPresent(bool explicit_present)
 {
   DebugAssert(InRenderPass() && m_num_current_render_targets == 0 && !m_current_depth_target);
   EndRenderPass();
@@ -1127,16 +1131,23 @@ void D3D12Device::EndPresent()
                                              D3D12_RESOURCE_STATE_PRESENT);
 
   SubmitCommandList(false);
+  TrimTexturePool();
+
+  if (!explicit_present)
+    SubmitPresent();
+}
+
+void D3D12Device::SubmitPresent()
+{
+  DebugAssert(m_swap_chain);
 
   // DirectX has no concept of tear-or-sync. I guess if we measured times ourselves, we could implement it.
-  if (m_sync_mode == DisplaySyncMode::VSync || m_sync_mode == DisplaySyncMode::VSyncRelaxed)
+  if (m_vsync_enabled)
     m_swap_chain->Present(BoolToUInt32(1), 0);
   else if (m_using_allow_tearing) // Disabled or VRR, VRR requires the allow tearing flag :/
     m_swap_chain->Present(0, DXGI_PRESENT_ALLOW_TEARING);
   else
     m_swap_chain->Present(0, 0);
-
-  TrimTexturePool();
 }
 
 #ifdef _DEBUG
@@ -1211,9 +1222,11 @@ void D3D12Device::SetFeatures(FeatureMask disabled_features)
     /*!(disabled_features & FEATURE_MASK_TEXTURE_COPY_TO_SELF)*/ false; // TODO: Support with Enhanced Barriers
   m_features.supports_texture_buffers = !(disabled_features & FEATURE_MASK_TEXTURE_BUFFERS);
   m_features.texture_buffers_emulated_with_ssbo = false;
+  m_features.feedback_loops = false;
   m_features.geometry_shaders = !(disabled_features & FEATURE_MASK_GEOMETRY_SHADERS);
   m_features.partial_msaa_resolve = true;
   m_features.memory_import = false;
+  m_features.explicit_present = true;
   m_features.gpu_timing = true;
   m_features.shader_cache = true;
   m_features.pipeline_cache = true;
@@ -1569,8 +1582,10 @@ void D3D12Device::DestroyRootSignatures()
     it->Reset();
 }
 
-void D3D12Device::SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds)
+void D3D12Device::SetRenderTargets(GPUTexture* const* rts, u32 num_rts, GPUTexture* ds,
+                                   GPUPipeline::RenderPassFlag feedback_loop)
 {
+  DebugAssert(!feedback_loop);
   if (InRenderPass())
     EndRenderPass();
 
@@ -2160,4 +2175,9 @@ void D3D12Device::DrawIndexed(u32 index_count, u32 base_index, u32 base_vertex)
   PreDrawCheck();
   s_stats.num_draws++;
   GetCommandList()->DrawIndexedInstanced(index_count, 1, base_index, base_vertex, 0);
+}
+
+void D3D12Device::DrawIndexedWithBarrier(u32 index_count, u32 base_index, u32 base_vertex, DrawBarrier type)
+{
+  Panic("Barriers are not supported");
 }

@@ -203,7 +203,6 @@ bool GPU_HW::Initialize()
   m_line_detect_mode = (m_resolution_scale > 1) ? g_settings.gpu_line_detect_mode : GPULineDetectMode::Disabled;
   m_clamp_uvs = ShouldClampUVs();
   m_compute_uv_range = m_clamp_uvs;
-  m_chroma_smoothing = g_settings.gpu_24bit_chroma_smoothing;
   m_downsample_mode = GetDownsampleMode(m_resolution_scale);
   m_wireframe_mode = g_settings.gpu_wireframe_mode;
   m_disable_color_perspective = features.noperspective_interpolation && ShouldDisableColorPerspective();
@@ -305,7 +304,7 @@ bool GPU_HW::DoState(StateWrapper& sw, GPUTexture** host_texture, bool update_di
 void GPU_HW::RestoreDeviceContext()
 {
   g_gpu_device->SetTextureSampler(0, m_vram_read_texture.get(), g_gpu_device->GetNearestSampler());
-  g_gpu_device->SetRenderTarget(m_vram_texture.get(), m_vram_depth_texture.get());
+  SetVRAMRenderTarget();
   g_gpu_device->SetViewport(0, 0, m_vram_texture->GetWidth(), m_vram_texture->GetHeight());
   SetScissor();
   m_batch_ubo_dirty = true;
@@ -329,6 +328,8 @@ void GPU_HW::UpdateSettings(const Settings& old_settings)
   // TODO: Use old_settings
   const bool framebuffer_changed =
     (m_resolution_scale != resolution_scale || m_multisamples != multisamples || m_downsample_mode != downsample_mode ||
+     (static_cast<bool>(m_vram_depth_texture) !=
+      (g_settings.UsingPGXPDepthBuffer() || !m_supports_framebuffer_fetch)) ||
      (m_downsample_mode == GPUDownsampleMode::Box &&
       g_settings.gpu_downsample_scale != old_settings.gpu_downsample_scale));
   const bool shaders_changed =
@@ -336,7 +337,7 @@ void GPU_HW::UpdateSettings(const Settings& old_settings)
      m_true_color != g_settings.gpu_true_color || m_debanding != g_settings.gpu_debanding ||
      m_per_sample_shading != per_sample_shading || m_scaled_dithering != g_settings.gpu_scaled_dithering ||
      m_texture_filtering != g_settings.gpu_texture_filter || m_clamp_uvs != clamp_uvs ||
-     m_chroma_smoothing != g_settings.gpu_24bit_chroma_smoothing || m_downsample_mode != downsample_mode ||
+     m_downsample_mode != downsample_mode ||
      (m_downsample_mode == GPUDownsampleMode::Box &&
       g_settings.gpu_downsample_scale != old_settings.gpu_downsample_scale) ||
      m_wireframe_mode != wireframe_mode || m_pgxp_depth_buffer != g_settings.UsingPGXPDepthBuffer() ||
@@ -389,7 +390,6 @@ void GPU_HW::UpdateSettings(const Settings& old_settings)
   m_line_detect_mode = (m_resolution_scale > 1) ? g_settings.gpu_line_detect_mode : GPULineDetectMode::Disabled;
   m_clamp_uvs = clamp_uvs;
   m_compute_uv_range = m_clamp_uvs;
-  m_chroma_smoothing = g_settings.gpu_24bit_chroma_smoothing;
   m_downsample_mode = downsample_mode;
   m_wireframe_mode = wireframe_mode;
   m_disable_color_perspective = disable_color_perspective;
@@ -402,7 +402,7 @@ void GPU_HW::UpdateSettings(const Settings& old_settings)
     m_batch.use_depth_buffer = false;
 
     // might be null when resizing
-    if (m_vram_texture)
+    if (m_vram_depth_texture)
     {
       if (m_pgxp_depth_buffer)
         ClearDepthBuffer();
@@ -424,7 +424,6 @@ void GPU_HW::UpdateSettings(const Settings& old_settings)
 
   if (framebuffer_changed)
   {
-    // TODO: weird vram loss when rapidly changing resolutions
     if (!CreateBuffers())
       Panic("Failed to recreate buffers.");
 
@@ -622,6 +621,12 @@ void GPU_HW::PrintSettingsToLog()
   Log_InfoFmt("Using software renderer for readbacks: {}", m_sw_renderer ? "YES" : "NO");
 }
 
+bool GPU_HW::NeedsDepthBuffer() const
+{
+  // PGXP depth, or no fbfetch, which means we need depth for the mask bit.
+  return (m_pgxp_depth_buffer || !m_supports_framebuffer_fetch);
+}
+
 bool GPU_HW::CreateBuffers()
 {
   DestroyBuffers();
@@ -630,6 +635,8 @@ bool GPU_HW::CreateBuffers()
   const u32 texture_width = VRAM_WIDTH * m_resolution_scale;
   const u32 texture_height = VRAM_HEIGHT * m_resolution_scale;
   const u8 samples = static_cast<u8>(m_multisamples);
+  const bool needs_depth_buffer = NeedsDepthBuffer();
+  Log_DevFmt("Depth buffer is {}needed", needs_depth_buffer ? "" : "NOT ");
 
   // Needed for Metal resolve.
   const GPUTexture::Type read_texture_type = (g_gpu_device->GetRenderAPI() == RenderAPI::Metal && m_multisamples > 1) ?
@@ -638,8 +645,9 @@ bool GPU_HW::CreateBuffers()
 
   if (!(m_vram_texture = g_gpu_device->FetchTexture(texture_width, texture_height, 1, 1, samples,
                                                     GPUTexture::Type::RenderTarget, VRAM_RT_FORMAT)) ||
-      !(m_vram_depth_texture = g_gpu_device->FetchTexture(texture_width, texture_height, 1, 1, samples,
-                                                          GPUTexture::Type::DepthStencil, VRAM_DS_FORMAT)) ||
+      (needs_depth_buffer &&
+       !(m_vram_depth_texture = g_gpu_device->FetchTexture(texture_width, texture_height, 1, 1, samples,
+                                                           GPUTexture::Type::DepthStencil, VRAM_DS_FORMAT))) ||
       !(m_vram_read_texture =
           g_gpu_device->FetchTexture(texture_width, texture_height, 1, 1, 1, read_texture_type, VRAM_RT_FORMAT)) ||
       !(m_vram_readback_texture = g_gpu_device->FetchTexture(VRAM_WIDTH / 2, VRAM_HEIGHT, 1, 1, 1,
@@ -649,7 +657,8 @@ bool GPU_HW::CreateBuffers()
   }
 
   GL_OBJECT_NAME(m_vram_texture, "VRAM Texture");
-  GL_OBJECT_NAME(m_vram_depth_texture, "VRAM Depth Texture");
+  if (m_vram_depth_texture)
+    GL_OBJECT_NAME(m_vram_depth_texture, "VRAM Depth Texture");
   GL_OBJECT_NAME(m_vram_read_texture, "VRAM Read Texture");
   GL_OBJECT_NAME(m_vram_readback_texture, "VRAM Readback Texture");
 
@@ -691,7 +700,7 @@ bool GPU_HW::CreateBuffers()
   else if (m_downsample_mode == GPUDownsampleMode::Box)
     m_downsample_scale_or_levels = m_resolution_scale / GetBoxDownsampleScale(m_resolution_scale);
 
-  g_gpu_device->SetRenderTarget(m_vram_texture.get(), m_vram_depth_texture.get());
+  SetVRAMRenderTarget();
   SetFullVRAMDirtyRectangle();
   return true;
 }
@@ -699,13 +708,16 @@ bool GPU_HW::CreateBuffers()
 void GPU_HW::ClearFramebuffer()
 {
   g_gpu_device->ClearRenderTarget(m_vram_texture.get(), 0);
-  g_gpu_device->ClearDepth(m_vram_depth_texture.get(), m_pgxp_depth_buffer ? 1.0f : 0.0f);
+  if (m_vram_depth_texture)
+    g_gpu_device->ClearDepth(m_vram_depth_texture.get(), m_pgxp_depth_buffer ? 1.0f : 0.0f);
   ClearVRAMDirtyRectangle();
-
-  if (m_display_private_texture)
-    g_gpu_device->ClearRenderTarget(m_display_private_texture.get(), 0);
-
   m_last_depth_z = 1.0f;
+}
+
+void GPU_HW::SetVRAMRenderTarget()
+{
+  g_gpu_device->SetRenderTarget(m_vram_texture.get(), m_vram_depth_texture.get(),
+                                m_allow_shader_blend ? GPUPipeline::ColorFeedbackLoop : GPUPipeline::NoRenderPassFlags);
 }
 
 void GPU_HW::DestroyBuffers()
@@ -719,29 +731,46 @@ void GPU_HW::DestroyBuffers()
   m_vram_upload_buffer.reset();
   m_vram_readback_download_texture.reset();
   g_gpu_device->RecycleTexture(std::move(m_downsample_texture));
+  g_gpu_device->RecycleTexture(std::move(m_vram_extract_texture));
   g_gpu_device->RecycleTexture(std::move(m_vram_read_texture));
   g_gpu_device->RecycleTexture(std::move(m_vram_depth_texture));
   g_gpu_device->RecycleTexture(std::move(m_vram_texture));
   g_gpu_device->RecycleTexture(std::move(m_vram_readback_texture));
-  g_gpu_device->RecycleTexture(std::move(m_display_private_texture));
 }
 
 bool GPU_HW::CompilePipelines()
 {
   const GPUDevice::Features features = g_gpu_device->GetFeatures();
+  const bool needs_depth_buffer = NeedsDepthBuffer();
+  const bool write_mask_as_depth = (!m_pgxp_depth_buffer && needs_depth_buffer);
+  m_allow_shader_blend = (features.feedback_loops && (m_pgxp_depth_buffer || !needs_depth_buffer));
+
   GPU_HW_ShaderGen shadergen(g_gpu_device->GetRenderAPI(), m_resolution_scale, m_multisamples, m_per_sample_shading,
-                             m_true_color, m_scaled_dithering, m_texture_filtering, m_clamp_uvs, m_pgxp_depth_buffer,
+                             m_true_color, m_scaled_dithering, m_texture_filtering, m_clamp_uvs, write_mask_as_depth,
                              m_disable_color_perspective, m_supports_dual_source_blend, m_supports_framebuffer_fetch,
                              m_debanding);
 
-  ShaderCompileProgressTracker progress("Compiling Pipelines", 2 + (4 * 5 * 9 * 2 * 2) + (3 * 4 * 5 * 9 * 2 * 2) + 1 +
-                                                                 2 + (2 * 2) + 2 + 1 + 1 + (2 * 3) + 1);
+  const u32 total_pipelines = 2 +                                                           // vertex shaders
+                              (5 * 5 * 9 * 2 * 2 * 2) +                                     // fragment shaders
+                              ((m_pgxp_depth_buffer ? 2 : 1) * 5 * 5 * 9 * 2 * 2 * 2) +     // batch pipelines
+                              ((m_wireframe_mode != GPUWireframeMode::Disabled) ? 1 : 0) +  // wireframe
+                              1 +                                                           // fullscreen quad VS
+                              (2 * 2) +                                                     // vram fill
+                              (1 + BoolToUInt32(write_mask_as_depth)) +                     // vram copy
+                              (1 + BoolToUInt32(write_mask_as_depth)) +                     // vram write
+                              1 +                                                           // vram write replacement
+                              (needs_depth_buffer ? 1 : 0) +                                // mask -> depth
+                              1 +                                                           // vram read
+                              2 +                                                           // extract/display
+                              ((m_downsample_mode != GPUDownsampleMode::Disabled) ? 1 : 0); // downsample
+
+  ShaderCompileProgressTracker progress("Compiling Pipelines", total_pipelines);
 
   // vertex shaders - [textured]
-  // fragment shaders - [render_mode][texture_mode][dithering][interlacing]
+  // fragment shaders - [render_mode][transparency_mode][texture_mode][check_mask][dithering][interlacing]
   static constexpr auto destroy_shader = [](std::unique_ptr<GPUShader>& s) { s.reset(); };
   DimensionalArray<std::unique_ptr<GPUShader>, 2> batch_vertex_shaders{};
-  DimensionalArray<std::unique_ptr<GPUShader>, 2, 2, 9, 5, 4> batch_fragment_shaders{};
+  DimensionalArray<std::unique_ptr<GPUShader>, 2, 2, 2, 9, 5, 5> batch_fragment_shaders{};
   ScopedGuard batch_shader_guard([&batch_vertex_shaders, &batch_fragment_shaders]() {
     batch_vertex_shaders.enumerate(destroy_shader);
     batch_fragment_shaders.enumerate(destroy_shader);
@@ -749,55 +778,58 @@ bool GPU_HW::CompilePipelines()
 
   for (u8 textured = 0; textured < 2; textured++)
   {
-    const std::string vs = shadergen.GenerateBatchVertexShader(ConvertToBoolUnchecked(textured));
+    const std::string vs = shadergen.GenerateBatchVertexShader(ConvertToBoolUnchecked(textured), m_pgxp_depth_buffer);
     if (!(batch_vertex_shaders[textured] = g_gpu_device->CreateShader(GPUShaderStage::Vertex, vs)))
       return false;
 
     progress.Increment();
   }
 
-  for (u8 render_mode = 0; render_mode < 4; render_mode++)
+  for (u8 render_mode = 0; render_mode < 5; render_mode++)
   {
     for (u8 transparency_mode = 0; transparency_mode < 5; transparency_mode++)
     {
-      if (m_supports_framebuffer_fetch)
-      {
-        // Don't need multipass shaders.
-        if (render_mode != static_cast<u8>(BatchRenderMode::TransparencyDisabled) &&
-            render_mode != static_cast<u8>(BatchRenderMode::TransparentAndOpaque))
-        {
-          progress.Increment(2 * 2 * 9);
-          continue;
-        }
-      }
-      else
-      {
+      if (
         // Can't generate shader blending.
-        if (transparency_mode != static_cast<u8>(GPUTransparencyMode::Disabled))
-        {
-          progress.Increment(2 * 2 * 9);
-          continue;
-        }
+        ((render_mode == static_cast<u8>(BatchRenderMode::ShaderBlend) && !features.feedback_loops) ||
+         (render_mode != static_cast<u8>(BatchRenderMode::ShaderBlend) &&
+          transparency_mode != static_cast<u8>(GPUTransparencyMode::Disabled))) ||
+        // Don't need multipass shaders.
+        (m_supports_framebuffer_fetch && (render_mode == static_cast<u8>(BatchRenderMode::OnlyOpaque) ||
+                                          render_mode == static_cast<u8>(BatchRenderMode::OnlyTransparent))))
+      {
+        progress.Increment(9 * 2 * 2 * 2);
+        continue;
       }
 
       for (u8 texture_mode = 0; texture_mode < 9; texture_mode++)
       {
-        for (u8 dithering = 0; dithering < 2; dithering++)
+        for (u8 check_mask = 0; check_mask < 2; check_mask++)
         {
-          for (u8 interlacing = 0; interlacing < 2; interlacing++)
+          if (check_mask && render_mode != static_cast<u8>(BatchRenderMode::ShaderBlend))
           {
-            const std::string fs = shadergen.GenerateBatchFragmentShader(
-              static_cast<BatchRenderMode>(render_mode), static_cast<GPUTransparencyMode>(transparency_mode),
-              static_cast<GPUTextureMode>(texture_mode), ConvertToBoolUnchecked(dithering),
-              ConvertToBoolUnchecked(interlacing));
+            // mask bit testing is only valid with shader blending.
+            progress.Increment(2 * 2);
+            continue;
+          }
 
-            if (!(batch_fragment_shaders[render_mode][transparency_mode][texture_mode][dithering][interlacing] =
-                    g_gpu_device->CreateShader(GPUShaderStage::Fragment, fs)))
+          for (u8 dithering = 0; dithering < 2; dithering++)
+          {
+            for (u8 interlacing = 0; interlacing < 2; interlacing++)
             {
-              return false;
-            }
+              const std::string fs = shadergen.GenerateBatchFragmentShader(
+                static_cast<BatchRenderMode>(render_mode), static_cast<GPUTransparencyMode>(transparency_mode),
+                static_cast<GPUTextureMode>(texture_mode), ConvertToBoolUnchecked(dithering),
+                ConvertToBoolUnchecked(interlacing), ConvertToBoolUnchecked(check_mask));
 
-            progress.Increment();
+              if (!(batch_fragment_shaders[render_mode][transparency_mode][texture_mode][check_mask][dithering]
+                                          [interlacing] = g_gpu_device->CreateShader(GPUShaderStage::Fragment, fs)))
+              {
+                return false;
+              }
+
+              progress.Increment();
+            }
           }
         }
       }
@@ -825,116 +857,139 @@ bool GPU_HW::CompilePipelines()
   plconfig.input_layout.vertex_stride = sizeof(BatchVertex);
   plconfig.rasterization = GPUPipeline::RasterizationState::GetNoCullState();
   plconfig.primitive = GPUPipeline::Primitive::Triangles;
-  plconfig.SetTargetFormats(VRAM_RT_FORMAT, VRAM_DS_FORMAT);
+  plconfig.geometry_shader = nullptr;
+  plconfig.SetTargetFormats(VRAM_RT_FORMAT, needs_depth_buffer ? VRAM_DS_FORMAT : GPUTexture::Format::Unknown);
   plconfig.samples = m_multisamples;
   plconfig.per_sample_shading = m_per_sample_shading;
-  plconfig.geometry_shader = nullptr;
+  plconfig.render_pass_flags = m_allow_shader_blend ? GPUPipeline::ColorFeedbackLoop : GPUPipeline::NoRenderPassFlags;
+  plconfig.depth = GPUPipeline::DepthState::GetNoTestsState();
 
-  // [depth_test][render_mode][texture_mode][transparency_mode][dithering][interlacing]
-  for (u8 depth_test = 0; depth_test < 3; depth_test++)
+  // [depth_test][transparency_mode][render_mode][texture_mode][dithering][interlacing][check_mask]
+  for (u8 depth_test = 0; depth_test < 2; depth_test++)
   {
-    for (u8 render_mode = 0; render_mode < 4; render_mode++)
+    if (depth_test && !m_pgxp_depth_buffer)
     {
-      if (m_supports_framebuffer_fetch)
+      // Not used.
+      continue;
+    }
+
+    for (u8 transparency_mode = 0; transparency_mode < 5; transparency_mode++)
+    {
+      for (u8 render_mode = 0; render_mode < 5; render_mode++)
       {
-        // Don't need multipass shaders.
-        if (render_mode != static_cast<u8>(BatchRenderMode::TransparencyDisabled) &&
-            render_mode != static_cast<u8>(BatchRenderMode::TransparentAndOpaque))
+        if (
+          // Can't generate shader blending.
+          (render_mode == static_cast<u8>(BatchRenderMode::ShaderBlend) && !m_allow_shader_blend) ||
+          // Don't need multipass shaders.
+          (m_supports_framebuffer_fetch && (render_mode == static_cast<u8>(BatchRenderMode::OnlyOpaque) ||
+                                            render_mode == static_cast<u8>(BatchRenderMode::OnlyTransparent))))
         {
-          progress.Increment(2 * 2 * 9 * 5);
+          progress.Increment(9 * 2 * 2 * 2);
           continue;
         }
-      }
 
-      for (u8 transparency_mode = 0; transparency_mode < 5; transparency_mode++)
-      {
         for (u8 texture_mode = 0; texture_mode < 9; texture_mode++)
         {
           for (u8 dithering = 0; dithering < 2; dithering++)
           {
             for (u8 interlacing = 0; interlacing < 2; interlacing++)
             {
-              static constexpr std::array<GPUPipeline::DepthFunc, 3> depth_test_values = {
-                GPUPipeline::DepthFunc::Always, GPUPipeline::DepthFunc::GreaterEqual,
-                GPUPipeline::DepthFunc::LessEqual};
-              const bool textured = (static_cast<GPUTextureMode>(texture_mode) != GPUTextureMode::Disabled);
-              const bool use_shader_blending =
-                (textured && NeedsShaderBlending(static_cast<GPUTransparencyMode>(transparency_mode)));
-
-              plconfig.input_layout.vertex_attributes =
-                textured ?
-                  (m_clamp_uvs ? std::span<const GPUPipeline::VertexAttribute>(
-                                   vertex_attributes, NUM_BATCH_TEXTURED_LIMITS_VERTEX_ATTRIBUTES) :
-                                 std::span<const GPUPipeline::VertexAttribute>(vertex_attributes,
-                                                                               NUM_BATCH_TEXTURED_VERTEX_ATTRIBUTES)) :
-                  std::span<const GPUPipeline::VertexAttribute>(vertex_attributes, NUM_BATCH_VERTEX_ATTRIBUTES);
-
-              plconfig.vertex_shader = batch_vertex_shaders[BoolToUInt8(textured)].get();
-              plconfig.fragment_shader =
-                batch_fragment_shaders[render_mode]
-                                      [use_shader_blending ? transparency_mode :
-                                                             static_cast<u8>(GPUTransparencyMode::Disabled)]
-                                      [texture_mode][dithering][interlacing]
-                                        .get();
-
-              plconfig.depth.depth_test = depth_test_values[depth_test];
-              plconfig.depth.depth_write = !m_pgxp_depth_buffer || depth_test != 0;
-              plconfig.blend = GPUPipeline::BlendState::GetNoBlendingState();
-
-              if (!use_shader_blending &&
-                  ((static_cast<GPUTransparencyMode>(transparency_mode) != GPUTransparencyMode::Disabled &&
-                    (static_cast<BatchRenderMode>(render_mode) != BatchRenderMode::TransparencyDisabled &&
-                     static_cast<BatchRenderMode>(render_mode) != BatchRenderMode::OnlyOpaque)) ||
-                   (textured && IsBlendedTextureFiltering(m_texture_filtering))))
+              for (u8 check_mask = 0; check_mask < 2; check_mask++)
               {
-                plconfig.blend.enable = true;
-                plconfig.blend.src_alpha_blend = GPUPipeline::BlendFunc::One;
-                plconfig.blend.dst_alpha_blend = GPUPipeline::BlendFunc::Zero;
-                plconfig.blend.alpha_blend_op = GPUPipeline::BlendOp::Add;
+                const bool textured = (static_cast<GPUTextureMode>(texture_mode) != GPUTextureMode::Disabled);
+                const bool use_shader_blending =
+                  (render_mode == static_cast<u8>(BatchRenderMode::ShaderBlend) &&
+                   ((textured &&
+                     NeedsShaderBlending(static_cast<GPUTransparencyMode>(transparency_mode), (check_mask != 0))) ||
+                    check_mask));
 
-                if (m_supports_dual_source_blend)
+                plconfig.input_layout.vertex_attributes =
+                  textured ?
+                    (m_clamp_uvs ? std::span<const GPUPipeline::VertexAttribute>(
+                                     vertex_attributes, NUM_BATCH_TEXTURED_LIMITS_VERTEX_ATTRIBUTES) :
+                                   std::span<const GPUPipeline::VertexAttribute>(
+                                     vertex_attributes, NUM_BATCH_TEXTURED_VERTEX_ATTRIBUTES)) :
+                    std::span<const GPUPipeline::VertexAttribute>(vertex_attributes, NUM_BATCH_VERTEX_ATTRIBUTES);
+
+                plconfig.vertex_shader = batch_vertex_shaders[BoolToUInt8(textured)].get();
+                plconfig.fragment_shader =
+                  batch_fragment_shaders[render_mode]
+                                        [use_shader_blending ? transparency_mode :
+                                                               static_cast<u8>(GPUTransparencyMode::Disabled)]
+                                        [texture_mode][use_shader_blending ? check_mask : 0][dithering][interlacing]
+                                          .get();
+                Assert(plconfig.vertex_shader && plconfig.fragment_shader);
+
+                if (needs_depth_buffer)
                 {
-                  plconfig.blend.src_blend = GPUPipeline::BlendFunc::One;
-                  plconfig.blend.dst_blend = GPUPipeline::BlendFunc::SrcAlpha1;
-                  plconfig.blend.blend_op =
-                    (static_cast<GPUTransparencyMode>(transparency_mode) ==
-                       GPUTransparencyMode::BackgroundMinusForeground &&
-                     static_cast<BatchRenderMode>(render_mode) != BatchRenderMode::TransparencyDisabled &&
-                     static_cast<BatchRenderMode>(render_mode) != BatchRenderMode::OnlyOpaque) ?
-                      GPUPipeline::BlendOp::ReverseSubtract :
-                      GPUPipeline::BlendOp::Add;
+                  plconfig.depth.depth_test =
+                    m_pgxp_depth_buffer ?
+                      (depth_test ? GPUPipeline::DepthFunc::LessEqual : GPUPipeline::DepthFunc::Always) :
+                      (check_mask ? GPUPipeline::DepthFunc::GreaterEqual : GPUPipeline::DepthFunc::Always);
+
+                  // Don't write for transparent, but still test.
+                  plconfig.depth.depth_write =
+                    !m_pgxp_depth_buffer ||
+                    (depth_test && transparency_mode == static_cast<u8>(GPUTransparencyMode::Disabled));
                 }
-                else
+
+                plconfig.blend = GPUPipeline::BlendState::GetNoBlendingState();
+
+                if (!use_shader_blending &&
+                    ((static_cast<GPUTransparencyMode>(transparency_mode) != GPUTransparencyMode::Disabled &&
+                      (static_cast<BatchRenderMode>(render_mode) != BatchRenderMode::TransparencyDisabled &&
+                       static_cast<BatchRenderMode>(render_mode) != BatchRenderMode::OnlyOpaque)) ||
+                     (textured && IsBlendedTextureFiltering(m_texture_filtering))))
                 {
-                  // TODO: This isn't entirely accurate, 127.5 versus 128.
-                  // But if we use fbfetch on Mali, it doesn't matter.
-                  plconfig.blend.src_blend = GPUPipeline::BlendFunc::One;
-                  plconfig.blend.dst_blend = GPUPipeline::BlendFunc::One;
-                  if (static_cast<GPUTransparencyMode>(transparency_mode) ==
-                      GPUTransparencyMode::HalfBackgroundPlusHalfForeground)
+                  plconfig.blend.enable = true;
+                  plconfig.blend.src_alpha_blend = GPUPipeline::BlendFunc::One;
+                  plconfig.blend.dst_alpha_blend = GPUPipeline::BlendFunc::Zero;
+                  plconfig.blend.alpha_blend_op = GPUPipeline::BlendOp::Add;
+
+                  if (m_supports_dual_source_blend)
                   {
-                    plconfig.blend.dst_blend = GPUPipeline::BlendFunc::ConstantColor;
-                    plconfig.blend.dst_alpha_blend = GPUPipeline::BlendFunc::ConstantColor;
-                    plconfig.blend.constant = 0x00808080u;
+                    plconfig.blend.src_blend = GPUPipeline::BlendFunc::One;
+                    plconfig.blend.dst_blend = GPUPipeline::BlendFunc::SrcAlpha1;
+                    plconfig.blend.blend_op =
+                      (static_cast<GPUTransparencyMode>(transparency_mode) ==
+                         GPUTransparencyMode::BackgroundMinusForeground &&
+                       static_cast<BatchRenderMode>(render_mode) != BatchRenderMode::TransparencyDisabled &&
+                       static_cast<BatchRenderMode>(render_mode) != BatchRenderMode::OnlyOpaque) ?
+                        GPUPipeline::BlendOp::ReverseSubtract :
+                        GPUPipeline::BlendOp::Add;
                   }
+                  else
+                  {
+                    // TODO: This isn't entirely accurate, 127.5 versus 128.
+                    // But if we use fbfetch on Mali, it doesn't matter.
+                    plconfig.blend.src_blend = GPUPipeline::BlendFunc::One;
+                    plconfig.blend.dst_blend = GPUPipeline::BlendFunc::One;
+                    if (static_cast<GPUTransparencyMode>(transparency_mode) ==
+                        GPUTransparencyMode::HalfBackgroundPlusHalfForeground)
+                    {
+                      plconfig.blend.dst_blend = GPUPipeline::BlendFunc::ConstantColor;
+                      plconfig.blend.dst_alpha_blend = GPUPipeline::BlendFunc::ConstantColor;
+                      plconfig.blend.constant = 0x00808080u;
+                    }
 
-                  plconfig.blend.blend_op =
-                    (static_cast<GPUTransparencyMode>(transparency_mode) ==
-                       GPUTransparencyMode::BackgroundMinusForeground &&
-                     static_cast<BatchRenderMode>(render_mode) != BatchRenderMode::TransparencyDisabled &&
-                     static_cast<BatchRenderMode>(render_mode) != BatchRenderMode::OnlyOpaque) ?
-                      GPUPipeline::BlendOp::ReverseSubtract :
-                      GPUPipeline::BlendOp::Add;
+                    plconfig.blend.blend_op =
+                      (static_cast<GPUTransparencyMode>(transparency_mode) ==
+                         GPUTransparencyMode::BackgroundMinusForeground &&
+                       static_cast<BatchRenderMode>(render_mode) != BatchRenderMode::TransparencyDisabled &&
+                       static_cast<BatchRenderMode>(render_mode) != BatchRenderMode::OnlyOpaque) ?
+                        GPUPipeline::BlendOp::ReverseSubtract :
+                        GPUPipeline::BlendOp::Add;
+                  }
                 }
-              }
 
-              if (!(m_batch_pipelines[depth_test][render_mode][texture_mode][transparency_mode][dithering]
-                                     [interlacing] = g_gpu_device->CreatePipeline(plconfig)))
-              {
-                return false;
-              }
+                if (!(m_batch_pipelines[depth_test][transparency_mode][render_mode][texture_mode][dithering]
+                                       [interlacing][check_mask] = g_gpu_device->CreatePipeline(plconfig)))
+                {
+                  return false;
+                }
 
-              progress.Increment();
+                progress.Increment();
+              }
             }
           }
         }
@@ -973,12 +1028,15 @@ bool GPU_HW::CompilePipelines()
     plconfig.vertex_shader = nullptr;
     plconfig.geometry_shader = nullptr;
     plconfig.fragment_shader = nullptr;
+
+    progress.Increment();
   }
 
   batch_shader_guard.Run();
 
+  // use a depth of 1, that way writes will reset the depth
   std::unique_ptr<GPUShader> fullscreen_quad_vertex_shader =
-    g_gpu_device->CreateShader(GPUShaderStage::Vertex, shadergen.GenerateScreenQuadVertexShader());
+    g_gpu_device->CreateShader(GPUShaderStage::Vertex, shadergen.GenerateScreenQuadVertexShader(1.0f));
   if (!fullscreen_quad_vertex_shader)
     return false;
 
@@ -1004,7 +1062,8 @@ bool GPU_HW::CompilePipelines()
         return false;
 
       plconfig.fragment_shader = fs.get();
-      plconfig.depth = GPUPipeline::DepthState::GetAlwaysWriteState();
+      plconfig.depth = needs_depth_buffer ? GPUPipeline::DepthState::GetAlwaysWriteState() :
+                                            GPUPipeline::DepthState::GetNoTestsState();
 
       if (!(m_vram_fill_pipelines[wrapped][interlaced] = g_gpu_device->CreatePipeline(plconfig)))
         return false;
@@ -1023,7 +1082,10 @@ bool GPU_HW::CompilePipelines()
     plconfig.fragment_shader = fs.get();
     for (u8 depth_test = 0; depth_test < 2; depth_test++)
     {
-      plconfig.depth.depth_write = true;
+      if (depth_test && write_mask_as_depth)
+        continue;
+
+      plconfig.depth.depth_write = needs_depth_buffer;
       plconfig.depth.depth_test =
         (depth_test != 0) ? GPUPipeline::DepthFunc::GreaterEqual : GPUPipeline::DepthFunc::Always;
 
@@ -1050,7 +1112,10 @@ bool GPU_HW::CompilePipelines()
     plconfig.fragment_shader = fs.get();
     for (u8 depth_test = 0; depth_test < 2; depth_test++)
     {
-      plconfig.depth.depth_write = true;
+      if (depth_test && write_mask_as_depth)
+        continue;
+
+      plconfig.depth.depth_write = needs_depth_buffer;
       plconfig.depth.depth_test =
         (depth_test != 0) ? GPUPipeline::DepthFunc::GreaterEqual : GPUPipeline::DepthFunc::Always;
 
@@ -1073,12 +1138,17 @@ bool GPU_HW::CompilePipelines()
       return false;
 
     plconfig.fragment_shader = fs.get();
-    plconfig.depth = GPUPipeline::DepthState::GetAlwaysWriteState();
+    plconfig.depth = GPUPipeline::DepthState::GetNoTestsState();
     if (!(m_vram_write_replacement_pipeline = g_gpu_device->CreatePipeline(plconfig)))
       return false;
+
+    progress.Increment();
   }
 
+  plconfig.render_pass_flags = GPUPipeline::NoRenderPassFlags;
+
   // VRAM update depth
+  if (needs_depth_buffer)
   {
     std::unique_ptr<GPUShader> fs =
       g_gpu_device->CreateShader(GPUShaderStage::Fragment, shadergen.GenerateVRAMUpdateDepthFragmentShader());
@@ -1124,22 +1194,17 @@ bool GPU_HW::CompilePipelines()
   {
     for (u8 depth_24 = 0; depth_24 < 2; depth_24++)
     {
-      for (u8 interlace_mode = 0; interlace_mode < 3; interlace_mode++)
-      {
-        std::unique_ptr<GPUShader> fs = g_gpu_device->CreateShader(
-          GPUShaderStage::Fragment,
-          shadergen.GenerateDisplayFragmentShader(
-            ConvertToBoolUnchecked(depth_24), static_cast<InterlacedRenderMode>(interlace_mode), m_chroma_smoothing));
-        if (!fs)
-          return false;
+      std::unique_ptr<GPUShader> fs = g_gpu_device->CreateShader(
+        GPUShaderStage::Fragment, shadergen.GenerateVRAMExtractFragmentShader(ConvertToBoolUnchecked(depth_24)));
+      if (!fs)
+        return false;
 
-        plconfig.fragment_shader = fs.get();
+      plconfig.fragment_shader = fs.get();
 
-        if (!(m_display_pipelines[depth_24][interlace_mode] = g_gpu_device->CreatePipeline(plconfig)))
-          return false;
+      if (!(m_vram_extract_pipeline[depth_24] = g_gpu_device->CreatePipeline(plconfig)))
+        return false;
 
-        progress.Increment();
-      }
+      progress.Increment();
     }
   }
 
@@ -1201,6 +1266,7 @@ bool GPU_HW::CompilePipelines()
     if (!(m_downsample_composite_sampler = g_gpu_device->CreateSampler(config)))
       return false;
     GL_OBJECT_NAME(m_downsample_composite_sampler, "Downsample Trilinear Sampler");
+    progress.Increment();
   }
   else if (m_downsample_mode == GPUDownsampleMode::Box)
   {
@@ -1217,9 +1283,8 @@ bool GPU_HW::CompilePipelines()
       return false;
 
     GL_OBJECT_NAME(m_downsample_first_pass_pipeline, "Downsample First Pass Pipeline");
+    progress.Increment();
   }
-
-  progress.Increment();
 
 #undef UPDATE_PROGRESS
 
@@ -1242,6 +1307,9 @@ void GPU_HW::DestroyPipelines()
   for (std::unique_ptr<GPUPipeline>& p : m_vram_copy_pipelines)
     destroy(p);
 
+  for (std::unique_ptr<GPUPipeline>& p : m_vram_extract_pipeline)
+    destroy(p);
+
   destroy(m_vram_readback_pipeline);
   destroy(m_vram_update_depth_pipeline);
   destroy(m_vram_write_replacement_pipeline);
@@ -1251,8 +1319,6 @@ void GPU_HW::DestroyPipelines()
   destroy(m_downsample_blur_pass_pipeline);
   destroy(m_downsample_composite_pass_pipeline);
   m_downsample_composite_sampler.reset();
-
-  m_display_pipelines.enumerate(destroy);
 }
 
 GPU_HW::BatchRenderMode GPU_HW::BatchConfig::GetRenderMode() const
@@ -1332,7 +1398,7 @@ void GPU_HW::UpdateVRAMReadTexture(bool drawn, bool written)
 
 void GPU_HW::UpdateDepthBufferFromMaskBit()
 {
-  if (m_pgxp_depth_buffer)
+  if (m_pgxp_depth_buffer || !m_vram_depth_texture)
     return;
 
   // Viewport should already be set full, only need to fudge the scissor.
@@ -1345,7 +1411,7 @@ void GPU_HW::UpdateDepthBufferFromMaskBit()
 
   // Restore.
   g_gpu_device->SetTextureSampler(0, m_vram_read_texture.get(), g_gpu_device->GetNearestSampler());
-  g_gpu_device->SetRenderTarget(m_vram_texture.get(), m_vram_depth_texture.get());
+  SetVRAMRenderTarget();
   SetScissor();
 }
 
@@ -1398,21 +1464,18 @@ void GPU_HW::UnmapGPUBuffer(u32 used_vertices, u32 used_indices)
 ALWAYS_INLINE_RELEASE void GPU_HW::DrawBatchVertices(BatchRenderMode render_mode, u32 num_indices, u32 base_index,
                                                      u32 base_vertex)
 {
-  // [depth_test][render_mode][texture_mode][transparency_mode][dithering][interlacing]
-  const u8 depth_test = m_batch.use_depth_buffer ? static_cast<u8>(2) : BoolToUInt8(m_batch.check_mask_before_draw);
-  g_gpu_device->SetPipeline(
-    m_batch_pipelines[depth_test][static_cast<u8>(render_mode)][static_cast<u8>(m_batch.texture_mode)][static_cast<u8>(
-      m_batch.transparency_mode)][BoolToUInt8(m_batch.dithering)][BoolToUInt8(m_batch.interlacing)]
-      .get());
-  g_gpu_device->DrawIndexed(num_indices, base_index, base_vertex);
-}
+  // [depth_test][transparency_mode][render_mode][texture_mode][dithering][interlacing][check_mask]
+  const u8 depth_test = BoolToUInt8(m_batch.use_depth_buffer);
+  const u8 check_mask = BoolToUInt8(m_batch.check_mask_before_draw);
+  g_gpu_device->SetPipeline(m_batch_pipelines[depth_test][static_cast<u8>(m_batch.transparency_mode)][static_cast<u8>(
+    render_mode)][static_cast<u8>(m_batch.texture_mode)][BoolToUInt8(m_batch.dithering)]
+                                             [BoolToUInt8(m_batch.interlacing)][check_mask]
+                                               .get());
 
-void GPU_HW::ClearDisplay()
-{
-  ClearDisplayTexture();
-
-  if (m_display_private_texture)
-    g_gpu_device->ClearRenderTarget(m_display_private_texture.get(), 0xFF000000u);
+  if (render_mode != BatchRenderMode::ShaderBlend || m_supports_framebuffer_fetch)
+    g_gpu_device->DrawIndexed(num_indices, base_index, base_vertex);
+  else
+    g_gpu_device->DrawIndexedWithBarrier(num_indices, base_index, base_vertex, GPUDevice::DrawBarrier::Full);
 }
 
 ALWAYS_INLINE_RELEASE void GPU_HW::HandleFlippedQuadTextureCoordinates(BatchVertex* vertices)
@@ -1890,10 +1953,8 @@ void GPU_HW::LoadVertices()
         }
         else if (m_pgxp_depth_buffer)
         {
-          const bool use_depth = (m_batch.transparency_mode == GPUTransparencyMode::Disabled);
-          SetBatchDepthBuffer(use_depth);
-          if (use_depth)
-            CheckForDepthClear(vertices.data(), num_vertices);
+          SetBatchDepthBuffer(true);
+          CheckForDepthClear(vertices.data(), num_vertices);
         }
       }
 
@@ -2417,33 +2478,21 @@ ALWAYS_INLINE bool GPU_HW::IsFlushed() const
   return (m_batch_index_count == 0);
 }
 
-GPU_HW::InterlacedRenderMode GPU_HW::GetInterlacedRenderMode() const
-{
-  if (IsInterlacedDisplayEnabled())
-  {
-    return m_GPUSTAT.vertical_resolution ? InterlacedRenderMode::InterleavedFields :
-                                           InterlacedRenderMode::SeparateFields;
-  }
-  else
-  {
-    return InterlacedRenderMode::None;
-  }
-}
-
 ALWAYS_INLINE_RELEASE bool GPU_HW::NeedsTwoPassRendering() const
 {
   // We need two-pass rendering when using BG-FG blending and texturing, as the transparency can be enabled
   // on a per-pixel basis, and the opaque pixels shouldn't be blended at all.
 
-  return (m_batch.texture_mode != GPUTextureMode::Disabled && !m_supports_framebuffer_fetch &&
+  return (m_batch.texture_mode != GPUTextureMode::Disabled &&
           (m_batch.transparency_mode == GPUTransparencyMode::BackgroundMinusForeground ||
            (!m_supports_dual_source_blend && m_batch.transparency_mode != GPUTransparencyMode::Disabled)));
 }
 
-ALWAYS_INLINE_RELEASE bool GPU_HW::NeedsShaderBlending(GPUTransparencyMode transparency) const
+ALWAYS_INLINE_RELEASE bool GPU_HW::NeedsShaderBlending(GPUTransparencyMode transparency, bool check_mask) const
 {
-  return (m_supports_framebuffer_fetch &&
-          (transparency == GPUTransparencyMode::BackgroundMinusForeground ||
+  return (m_allow_shader_blend &&
+          ((check_mask && (m_pgxp_depth_buffer || !m_vram_depth_texture)) ||
+           transparency == GPUTransparencyMode::BackgroundMinusForeground ||
            (!m_supports_dual_source_blend &&
             (transparency != GPUTransparencyMode::Disabled || IsBlendedTextureFiltering(m_texture_filtering)))));
 }
@@ -2502,11 +2551,10 @@ void GPU_HW::EnsureVertexBufferSpaceForCurrentCommand()
 
 void GPU_HW::ResetBatchVertexDepth()
 {
-  if (m_pgxp_depth_buffer)
-    return;
-
   Log_PerfPrint("Resetting batch vertex depth");
-  UpdateDepthBufferFromMaskBit();
+
+  if (m_vram_depth_texture && !m_pgxp_depth_buffer)
+    UpdateDepthBufferFromMaskBit();
 
   m_current_depth = 1;
 }
@@ -2766,7 +2814,8 @@ void GPU_HW::UpdateVRAM(u32 x, u32 y, u32 width, u32 height, const void* data, b
   // the viewport should already be set to the full vram, so just adjust the scissor
   const Common::Rectangle<u32> scaled_bounds = bounds * m_resolution_scale;
   g_gpu_device->SetScissor(scaled_bounds.left, scaled_bounds.top, scaled_bounds.GetWidth(), scaled_bounds.GetHeight());
-  g_gpu_device->SetPipeline(m_vram_write_pipelines[BoolToUInt8(check_mask && !m_pgxp_depth_buffer)].get());
+  g_gpu_device->SetPipeline(
+    m_vram_write_pipelines[BoolToUInt8(check_mask && !m_pgxp_depth_buffer && NeedsDepthBuffer())].get());
   g_gpu_device->PushUniformBuffer(&uniforms, sizeof(uniforms));
   if (upload_texture)
   {
@@ -2845,7 +2894,8 @@ void GPU_HW::CopyVRAM(u32 src_x, u32 src_y, u32 dst_x, u32 dst_y, u32 width, u32
     g_gpu_device->SetViewportAndScissor(dst_bounds_scaled.left, dst_bounds_scaled.top, dst_bounds_scaled.GetWidth(),
                                         dst_bounds_scaled.GetHeight());
     g_gpu_device->SetPipeline(
-      m_vram_copy_pipelines[BoolToUInt8(m_GPUSTAT.check_mask_before_draw && !m_pgxp_depth_buffer)].get());
+      m_vram_copy_pipelines[BoolToUInt8(m_GPUSTAT.check_mask_before_draw && !m_pgxp_depth_buffer && NeedsDepthBuffer())]
+        .get());
     g_gpu_device->PushUniformBuffer(&uniforms, sizeof(uniforms));
     g_gpu_device->Draw(3, 0);
     RestoreDeviceContext();
@@ -2975,7 +3025,7 @@ void GPU_HW::DispatchRenderCommand()
     rc.transparency_enable ? m_draw_mode.mode_reg.transparency_mode : GPUTransparencyMode::Disabled;
   const bool dithering_enable = (!m_true_color && rc.IsDitheringEnabled()) ? m_GPUSTAT.dither_enable : false;
   if (texture_mode != m_batch.texture_mode || transparency_mode != m_batch.transparency_mode ||
-      (transparency_mode == GPUTransparencyMode::BackgroundMinusForeground && !m_supports_framebuffer_fetch) ||
+      (transparency_mode == GPUTransparencyMode::BackgroundMinusForeground && !m_allow_shader_blend) ||
       dithering_enable != m_batch.dithering)
   {
     FlushRender();
@@ -2986,8 +3036,9 @@ void GPU_HW::DispatchRenderCommand()
   if (m_batch_index_count == 0)
   {
     // transparency mode change
+    const bool check_mask_before_draw = m_GPUSTAT.check_mask_before_draw;
     if (transparency_mode != GPUTransparencyMode::Disabled &&
-        (texture_mode == GPUTextureMode::Disabled || !NeedsShaderBlending(transparency_mode)))
+        (texture_mode == GPUTextureMode::Disabled || !NeedsShaderBlending(transparency_mode, check_mask_before_draw)))
     {
       static constexpr float transparent_alpha[4][2] = {{0.5f, 0.5f}, {1.0f, 1.0f}, {1.0f, 1.0f}, {0.25f, 1.0f}};
 
@@ -2999,7 +3050,6 @@ void GPU_HW::DispatchRenderCommand()
       m_batch_ubo_data.u_dst_alpha_factor = dst_alpha_factor;
     }
 
-    const bool check_mask_before_draw = m_GPUSTAT.check_mask_before_draw;
     const bool set_mask_while_drawing = m_GPUSTAT.set_mask_while_drawing;
     if (m_batch.check_mask_before_draw != check_mask_before_draw ||
         m_batch.set_mask_while_drawing != set_mask_while_drawing)
@@ -3082,7 +3132,11 @@ void GPU_HW::FlushRender()
 
   if (m_wireframe_mode != GPUWireframeMode::OnlyWireframe)
   {
-    if (NeedsTwoPassRendering())
+    if (NeedsShaderBlending(m_batch.transparency_mode, m_batch.check_mask_before_draw))
+    {
+      DrawBatchVertices(BatchRenderMode::ShaderBlend, index_count, base_index, base_vertex);
+    }
+    else if (NeedsTwoPassRendering())
     {
       DrawBatchVertices(BatchRenderMode::OnlyOpaque, index_count, base_index, base_vertex);
       DrawBatchVertices(BatchRenderMode::OnlyTransparent, index_count, base_index, base_vertex);
@@ -3104,6 +3158,8 @@ void GPU_HW::UpdateDisplay()
 {
   FlushRender();
 
+  GL_SCOPE("UpdateDisplay()");
+
   if (g_settings.debugging.show_vram)
   {
     if (IsUsingMultisampling())
@@ -3119,89 +3175,106 @@ void GPU_HW::UpdateDisplay()
 
     SetDisplayParameters(VRAM_WIDTH, VRAM_HEIGHT, 0, 0, VRAM_WIDTH, VRAM_HEIGHT,
                          static_cast<float>(VRAM_WIDTH) / static_cast<float>(VRAM_HEIGHT));
+    return;
+  }
+
+  SetDisplayParameters(m_crtc_state.display_width, m_crtc_state.display_height, m_crtc_state.display_origin_left,
+                       m_crtc_state.display_origin_top, m_crtc_state.display_vram_width,
+                       m_crtc_state.display_vram_height, ComputeDisplayAspectRatio());
+
+  const bool interlaced = IsInterlacedDisplayEnabled();
+  const u32 interlaced_field = GetInterlacedDisplayField();
+  const u32 resolution_scale = m_GPUSTAT.display_area_color_depth_24 ? 1 : m_resolution_scale;
+  const u32 scaled_vram_offset_x = m_crtc_state.display_vram_left * resolution_scale;
+  const u32 scaled_vram_offset_y = (m_crtc_state.display_vram_top * resolution_scale) +
+                                   ((interlaced && m_GPUSTAT.vertical_resolution) ? interlaced_field : 0);
+  const u32 scaled_display_width = m_crtc_state.display_vram_width * resolution_scale;
+  const u32 scaled_display_height = m_crtc_state.display_vram_height * resolution_scale;
+  const u32 read_height = interlaced ? (scaled_display_height / 2u) : scaled_display_height;
+  const u32 line_skip = BoolToUInt32(interlaced && m_GPUSTAT.vertical_resolution);
+  bool drew_anything = false;
+
+  if (IsDisplayDisabled())
+  {
+    ClearDisplayTexture();
+    return;
+  }
+  else if (!m_GPUSTAT.display_area_color_depth_24 && !IsUsingMultisampling() &&
+           (scaled_vram_offset_x + scaled_display_width) <= m_vram_texture->GetWidth() &&
+           (scaled_vram_offset_y + scaled_display_height) <= m_vram_texture->GetHeight())
+  {
+    // Fast path if no copies are needed.
+    if (interlaced)
+    {
+      GL_INS("Deinterlace fast path");
+      drew_anything = true;
+      Deinterlace(m_vram_texture.get(), scaled_vram_offset_x, scaled_vram_offset_y, scaled_display_width, read_height,
+                  interlaced_field, line_skip);
+    }
+    else
+    {
+      GL_INS("Direct display");
+      SetDisplayTexture(m_vram_texture.get(), scaled_vram_offset_x, scaled_vram_offset_y, scaled_display_width,
+                        scaled_display_height);
+    }
   }
   else
   {
-    // TODO: use a dynamically sized texture
-    SetDisplayParameters(m_crtc_state.display_width, m_crtc_state.display_height, m_crtc_state.display_origin_left,
-                         m_crtc_state.display_origin_top, m_crtc_state.display_vram_width,
-                         m_crtc_state.display_vram_height, ComputeDisplayAspectRatio());
-
-    const u32 resolution_scale = m_GPUSTAT.display_area_color_depth_24 ? 1 : m_resolution_scale;
-    const u32 vram_offset_x = m_crtc_state.display_vram_left;
-    const u32 vram_offset_y = m_crtc_state.display_vram_top;
-    const u32 scaled_vram_offset_x = vram_offset_x * resolution_scale;
-    const u32 scaled_vram_offset_y = vram_offset_y * resolution_scale;
-    const u32 display_width = m_crtc_state.display_vram_width;
-    const u32 display_height = m_crtc_state.display_vram_height;
-    const u32 scaled_display_width = display_width * resolution_scale;
-    const u32 scaled_display_height = display_height * resolution_scale;
-    const InterlacedRenderMode interlaced = GetInterlacedRenderMode();
-
-    if (IsDisplayDisabled())
+    if (!m_vram_extract_texture || m_vram_extract_texture->GetWidth() != scaled_display_width ||
+        m_vram_extract_texture->GetHeight() != read_height)
     {
-      ClearDisplayTexture();
-    }
-    else if (!m_GPUSTAT.display_area_color_depth_24 && interlaced == InterlacedRenderMode::None &&
-             !IsUsingMultisampling() && (scaled_vram_offset_x + scaled_display_width) <= m_vram_texture->GetWidth() &&
-             (scaled_vram_offset_y + scaled_display_height) <= m_vram_texture->GetHeight())
-    {
-
-      if (IsUsingDownsampling())
+      if (!g_gpu_device->ResizeTexture(&m_vram_extract_texture, scaled_display_width, read_height,
+                                       GPUTexture::Type::RenderTarget, GPUTexture::Format::RGBA8)) [[unlikely]]
       {
-        DownsampleFramebuffer(m_vram_texture.get(), scaled_vram_offset_x, scaled_vram_offset_y, scaled_display_width,
-                              scaled_display_height);
+        ClearDisplayTexture();
+        return;
       }
-      else
+    }
+
+    g_gpu_device->InvalidateRenderTarget(m_vram_extract_texture.get());
+    g_gpu_device->SetRenderTarget(m_vram_extract_texture.get());
+    g_gpu_device->SetPipeline(m_vram_extract_pipeline[BoolToUInt8(m_GPUSTAT.display_area_color_depth_24)].get());
+    g_gpu_device->SetTextureSampler(0, m_vram_texture.get(), g_gpu_device->GetNearestSampler());
+
+    const u32 reinterpret_start_x = m_crtc_state.regs.X * resolution_scale;
+    const u32 skip_x = (m_crtc_state.display_vram_left - m_crtc_state.regs.X) * resolution_scale;
+    GL_INS_FMT("Convert 16bpp to 24bpp, skip_x = {}, line_skip = {}", skip_x, line_skip);
+
+    const u32 uniforms[4] = {reinterpret_start_x, scaled_vram_offset_y, skip_x, line_skip};
+    g_gpu_device->PushUniformBuffer(uniforms, sizeof(uniforms));
+
+    g_gpu_device->SetViewportAndScissor(0, 0, scaled_display_width, read_height);
+    g_gpu_device->Draw(3, 0);
+
+    m_vram_extract_texture->MakeReadyForSampling();
+    drew_anything = true;
+
+    if (g_settings.gpu_24bit_chroma_smoothing)
+    {
+      if (ApplyChromaSmoothing(m_vram_extract_texture.get(), 0, 0, scaled_display_width, read_height))
       {
-        SetDisplayTexture(m_vram_texture.get(), scaled_vram_offset_x, scaled_vram_offset_y, scaled_display_width,
-                          scaled_display_height);
+        if (interlaced)
+          Deinterlace(m_display_texture, 0, 0, scaled_display_width, read_height, interlaced_field, 0);
       }
     }
     else
     {
-      if (!m_display_private_texture || m_display_private_texture->GetWidth() != scaled_display_width ||
-          m_display_private_texture->GetHeight() != scaled_display_height)
-      {
-        g_gpu_device->RecycleTexture(std::move(m_display_private_texture));
-        if (!(m_display_private_texture = g_gpu_device->FetchTexture(
-                scaled_display_width, scaled_display_height, 1, 1, 1, GPUTexture::Type::RenderTarget, VRAM_RT_FORMAT)))
-        {
-          Log_ErrorFmt("Failed to create {}x{} display texture", scaled_display_width, scaled_display_height);
-          ClearDisplayTexture();
-          return;
-        }
-
-        GL_OBJECT_NAME(m_display_private_texture, "Display Texture");
-      }
-
-      // TODO: discard vs load for interlaced
-      if (interlaced == InterlacedRenderMode::None)
-        g_gpu_device->InvalidateRenderTarget(m_display_private_texture.get());
-
-      g_gpu_device->SetRenderTarget(m_display_private_texture.get());
-      g_gpu_device->SetPipeline(
-        m_display_pipelines[BoolToUInt8(m_GPUSTAT.display_area_color_depth_24)][static_cast<u8>(interlaced)].get());
-      g_gpu_device->SetTextureSampler(0, m_vram_texture.get(), g_gpu_device->GetNearestSampler());
-
-      const u32 reinterpret_field_offset = (interlaced != InterlacedRenderMode::None) ? GetInterlacedDisplayField() : 0;
-      const u32 reinterpret_start_x = m_crtc_state.regs.X * resolution_scale;
-      const u32 reinterpret_crop_left = (m_crtc_state.display_vram_left - m_crtc_state.regs.X) * resolution_scale;
-      const u32 uniforms[4] = {reinterpret_start_x, scaled_vram_offset_y + reinterpret_field_offset,
-                               reinterpret_crop_left, reinterpret_field_offset};
-      g_gpu_device->PushUniformBuffer(uniforms, sizeof(uniforms));
-
-      g_gpu_device->SetViewportAndScissor(0, 0, scaled_display_width, scaled_display_height);
-      g_gpu_device->Draw(3, 0);
-
-      if (IsUsingDownsampling())
-        DownsampleFramebuffer(m_display_private_texture.get(), 0, 0, scaled_display_width, scaled_display_height);
+      if (interlaced)
+        Deinterlace(m_vram_extract_texture.get(), 0, 0, scaled_display_width, read_height, interlaced_field, 0);
       else
-        SetDisplayTexture(m_display_private_texture.get(), 0, 0, scaled_display_width, scaled_display_height);
-
-      RestoreDeviceContext();
+        SetDisplayTexture(m_vram_extract_texture.get(), 0, 0, scaled_display_width, read_height);
     }
   }
+
+  if (m_downsample_mode != GPUDownsampleMode::Disabled && !m_GPUSTAT.display_area_color_depth_24)
+  {
+    DebugAssert(m_display_texture);
+    DownsampleFramebuffer(m_display_texture, m_display_texture_view_x, m_display_texture_view_y,
+                          m_display_texture_view_width, m_display_texture_view_height);
+  }
+
+  if (drew_anything)
+    RestoreDeviceContext();
 }
 
 void GPU_HW::DownsampleFramebuffer(GPUTexture* source, u32 left, u32 top, u32 width, u32 height)

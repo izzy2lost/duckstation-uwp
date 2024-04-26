@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #pragma once
@@ -23,7 +23,7 @@ public:
   SettingsInterface* GetLayer(Layer layer) const { return m_layers[layer]; }
   void SetLayer(Layer layer, SettingsInterface* sif) { m_layers[layer] = sif; }
 
-  bool Save() override;
+  bool Save(Error* error = nullptr) override;
 
   void Clear() override;
 
@@ -33,6 +33,7 @@ public:
   bool GetDoubleValue(const char* section, const char* key, double* value) const override;
   bool GetBoolValue(const char* section, const char* key, bool* value) const override;
   bool GetStringValue(const char* section, const char* key, std::string* value) const override;
+  bool GetStringValue(const char* section, const char* key, SmallStringBase* value) const override;
 
   void SetIntValue(const char* section, const char* key, s32 value) override;
   void SetUIntValue(const char* section, const char* key, u32 value) override;

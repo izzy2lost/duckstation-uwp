@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2023 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #pragma once
@@ -89,7 +89,7 @@ bool DirectoryIsEmpty(const char* path);
 bool DeleteFile(const char* path);
 
 /// Rename file
-bool RenamePath(const char* OldPath, const char* NewPath);
+bool RenamePath(const char* OldPath, const char* NewPath, Error* error = nullptr);
 
 /// Deleter functor for managed file pointers
 struct FileDeleter
@@ -151,11 +151,11 @@ bool WriteStringToFile(const char* filename, const std::string_view& sv);
 /// if the directory already exists, the return value will be true.
 /// if Recursive is specified, all parent directories will be created
 /// if they do not exist.
-bool CreateDirectory(const char* path, bool recursive);
+bool CreateDirectory(const char* path, bool recursive, Error* error = nullptr);
 
 /// Creates a directory if it doesn't already exist.
 /// Returns false if it does not exist and creation failed.
-bool EnsureDirectoryExists(const char* path, bool recursive);
+bool EnsureDirectoryExists(const char* path, bool recursive, Error* error = nullptr);
 
 /// Removes a directory.
 bool DeleteDirectory(const char* path);
@@ -180,4 +180,9 @@ bool SetWorkingDirectory(const char* path);
 /// Does nothing and returns false on non-Windows platforms.
 bool SetPathCompression(const char* path, bool enable);
 
+#ifdef _WIN32
+// Path limit remover, but also converts to a wide string at the same time.
+bool GetWin32Path(std::wstring* dest, std::string_view str);
+std::wstring GetWin32Path(std::string_view str);
+#endif
 }; // namespace FileSystem

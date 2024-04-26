@@ -11,6 +11,26 @@ DuckStation-UWP is a modification of said emulator to reintroduce the long disco
 
 A "BIOS" ROM image is required to to start the emulator and to play games. You can use an image from any hardware version or region, although mismatching game regions and BIOS regions may have compatibility issues. A ROM image is not provided with the emulator for legal reasons, you should dump this from your own console using Caetla or other means.
 
+## Development has been halted
+
+Due to circumstances out of my control, DuckStation-UWP is no longer actively developed.\
+It is, however, as far as I have tested, in a quite stable, feature complete, and up-to-date state to the point where I am comfortable leaving it.
+
+I wish I could continue development further, however as it stands, I am incapable of doing so.
+
+I don't plan on handing off this project to anyone else officially.
+
+If you fork this, please follow these guidelines:
+
+- **Please only do so if you're actually familiar with C++, ImGui, WinRT, and Git.** This is not a small project to undertake, especially with the rate things are updated in upstream. You will have to resolve merge conflicts, adapt the port to new changes, and do all of this usually with no source reference.
+- **Do NOT, under any circumstances, monetize/exclusivize this project.** This includes Patreon, booster-specific builds in Discord servers, and private builds in general. All builds (legally) MUST have accompanying source code. If this is violated, make a Github issue here.
+- **Retail mode is off limits.** That is like 99% the reason why UWP got so vilified by the emulation community. I didn't make those mistakes here for good reason, and that's why this has lasted so long, and would continue to last if not for personal issues.
+- **Keep the project upstream.** That was the entire reason this fork was created -- other forks were unmaintained/outdated/broken when compared to upstream DuckStation. This is not a hack to get it Just Working, the intent is to be an official-level *port*.
+- **User experience is priority one.** All possible features of DuckStation should be present, and things should work sanely and effectively on the platform, *directly modifying as little code as possible, instead only adding.* RetroAchievements is a great example of this. It was initially non-functional and deferred to Host, which on Qt would open a proper dialog, but no such thing existed for NoGUI/WinRT, so I made one (based off XBSX2's) in ImGui to be opened by the WinRT Host's login function. Put effort in, and be rewarded by actually being able to be proud of your work.
+- **Don't leave things exposed that don't make sense on UWP.** GPU device selection makes no sense on UWP (especially Xbox) and will only result in false reports from Basic Render Driver being selected. Fullscreen on/off and resolution options don't really make sense since UWP basically pretends things are fullscreen constantly. Prevent user error.
+
+Use your head. Godspeed.
+
 ## Features
 
 DuckStation-UWP uses DuckStation's "Big Picture Mode"/TV UI, built in Dear ImGui.

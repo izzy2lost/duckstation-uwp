@@ -77,6 +77,15 @@ enum class GPURenderer : u8
   Count
 };
 
+enum class DisplayDeinterlacingMode : u8
+{
+  Disabled,
+  Weave,
+  Blend,
+  Adaptive,
+  Count
+};
+
 enum class GPUTextureFilter : u8
 {
   Nearest,
@@ -172,22 +181,7 @@ enum class DisplayScreenshotFormat : u8
 {
   PNG,
   JPEG,
-  Count
-};
-
-enum class AudioBackend : u8
-{
-  Null,
-#ifdef ENABLE_CUBEB
-  Cubeb,
-#endif
-#ifdef _WIN32
-  XAudio2,
-#endif
-#ifdef __ANDROID__
-  AAudio,
-  OpenSLES,
-#endif
+  WebP,
   Count
 };
 
@@ -200,6 +194,7 @@ enum class ControllerType
   GunCon,
   PlayStationMouse,
   NeGcon,
+  NeGconRumble,
   Count
 };
 

@@ -91,7 +91,7 @@ bool RegTestHost::InitializeConfig()
 
   // default settings for runner
   SettingsInterface& si = *s_base_settings_interface.get();
-  g_settings.Save(si);
+  g_settings.Save(si, false);
   si.SetStringValue("GPU", "Renderer", Settings::GetRendererName(GPURenderer::Software));
   si.SetBoolValue("GPU", "DisableShaderCache", true);
   si.SetStringValue("Pad1", "Type", Settings::GetControllerTypeName(ControllerType::AnalogController));
@@ -299,7 +299,12 @@ void Host::RequestResizeHostDisplay(s32 width, s32 height)
   //
 }
 
-void Host::RequestExit(bool save_state_if_running)
+void Host::RequestExitApplication(bool save_state_if_running)
+{
+  //
+}
+
+void Host::RequestExitBigPicture()
 {
   //
 }
@@ -657,11 +662,12 @@ int main(int argc, char* argv[])
 
   RegTestHost::HookSignals();
 
+  Error error;
   int result = -1;
   Log_InfoPrintf("Trying to boot '%s'...", autoboot->filename.c_str());
-  if (!System::BootSystem(std::move(autoboot.value())))
+  if (!System::BootSystem(std::move(autoboot.value()), &error))
   {
-    Log_ErrorPrint("Failed to boot system.");
+    Log_ErrorFmt("Failed to boot system: {}", error.GetDescription());
     goto cleanup;
   }
 

@@ -1,14 +1,18 @@
-// SPDX-FileCopyrightText: 2019-2022 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #include "ini_settings_interface.h"
+
+#include "common/error.h"
 #include "common/file_system.h"
 #include "common/log.h"
 #include "common/path.h"
 #include "common/string_util.h"
+
 #include <algorithm>
 #include <iterator>
 #include <mutex>
+
 Log_SetChannel(INISettingsInterface);
 
 #ifdef _WIN32
@@ -42,7 +46,9 @@ static std::string GetTemporaryFileName(const std::string& original_filename)
   return temporary_filename;
 }
 
-INISettingsInterface::INISettingsInterface(std::string filename) : m_filename(std::move(filename)), m_ini(true, true) {}
+INISettingsInterface::INISettingsInterface(std::string filename) : m_filename(std::move(filename)), m_ini(true, true)
+{
+}
 
 INISettingsInterface::~INISettingsInterface()
 {
@@ -64,15 +70,18 @@ bool INISettingsInterface::Load()
   return (err == SI_OK);
 }
 
-bool INISettingsInterface::Save()
+bool INISettingsInterface::Save(Error* error /* = nullptr */)
 {
   if (m_filename.empty())
+  {
+    Error::SetStringView(error, "Filename is not set.");
     return false;
+  }
 
   std::unique_lock lock(s_ini_load_save_mutex);
   std::string temp_filename(GetTemporaryFileName(m_filename));
   SI_Error err = SI_FAIL;
-  std::FILE* fp = FileSystem::OpenCFile(temp_filename.c_str(), "wb");
+  std::FILE* fp = FileSystem::OpenCFile(temp_filename.c_str(), "wb", error);
   if (fp)
   {
     err = m_ini.SaveFile(fp, false);
@@ -80,10 +89,12 @@ bool INISettingsInterface::Save()
 
     if (err != SI_OK)
     {
+      Error::SetStringFmt(error, "INI SaveFile() failed: {}", static_cast<int>(err));
+
       // remove temporary file
       FileSystem::DeleteFile(temp_filename.c_str());
     }
-    else if (!FileSystem::RenamePath(temp_filename.c_str(), m_filename.c_str()))
+    else if (!FileSystem::RenamePath(temp_filename.c_str(), m_filename.c_str(), error))
     {
       Log_ErrorPrintf("Failed to rename '%s' to '%s'", temp_filename.c_str(), m_filename.c_str());
       FileSystem::DeleteFile(temp_filename.c_str());
@@ -177,6 +188,16 @@ bool INISettingsInterface::GetBoolValue(const char* section, const char* key, bo
 }
 
 bool INISettingsInterface::GetStringValue(const char* section, const char* key, std::string* value) const
+{
+  const char* str_value = m_ini.GetValue(section, key);
+  if (!str_value)
+    return false;
+
+  value->assign(str_value);
+  return true;
+}
+
+bool INISettingsInterface::GetStringValue(const char* section, const char* key, SmallStringBase* value) const
 {
   const char* str_value = m_ini.GetValue(section, key);
   if (!str_value)

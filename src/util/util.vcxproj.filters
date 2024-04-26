@@ -32,7 +32,6 @@
     <ClInclude Include="opengl_pipeline.h" />
     <ClInclude Include="opengl_stream_buffer.h" />
     <ClInclude Include="opengl_texture.h" />
-    <ClInclude Include="spirv_compiler.h" />
     <ClInclude Include="vulkan_builders.h" />
     <ClInclude Include="vulkan_device.h" />
     <ClInclude Include="vulkan_entry_points.h" />
@@ -72,7 +71,6 @@
     <ClInclude Include="opengl_context_egl_wayland.h" />
     <ClInclude Include="opengl_context_egl_x11.h" />
     <ClInclude Include="opengl_context_wgl.h" />
-    <ClInclude Include="gpu_types.h" />
     <ClInclude Include="image.h" />
   </ItemGroup>
   <ItemGroup>
@@ -110,7 +108,18 @@
     <ClCompile Include="xinput_source.cpp" />
     <ClCompile Include="input_manager.cpp" />
     <ClCompile Include="input_source.cpp" />
-    <ClCompile Include="spirv_compiler.cpp" />
+    <ClCompile Include="cubeb_audio_stream.cpp" />
+    <ClCompile Include="opengl_device.cpp" />
+    <ClCompile Include="opengl_pipeline.cpp" />
+    <ClCompile Include="opengl_stream_buffer.cpp" />
+    <ClCompile Include="opengl_texture.cpp" />
+    <ClCompile Include="vulkan_builders.cpp" />
+    <ClCompile Include="vulkan_device.cpp" />
+    <ClCompile Include="vulkan_loader.cpp" />
+    <ClCompile Include="vulkan_pipeline.cpp" />
+    <ClCompile Include="vulkan_stream_buffer.cpp" />
+    <ClCompile Include="vulkan_swap_chain.cpp" />
+    <ClCompile Include="vulkan_texture.cpp" />
     <ClCompile Include="window_info.cpp" />
     <ClCompile Include="d3d_common.cpp" />
     <ClCompile Include="d3d11_device.cpp" />
@@ -156,6 +165,7 @@
     <ClCompile Include="opengl_context_egl_x11.cpp" />
     <ClCompile Include="opengl_context_wgl.cpp" />
     <ClCompile Include="image.cpp" />
+    <ClCompile Include="sdl_audio_stream.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="metal_shaders.metal" />

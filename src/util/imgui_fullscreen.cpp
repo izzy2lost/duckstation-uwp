@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2019-2023 Connor McLaughlin <stenzek@gmail.com>
+// SPDX-FileCopyrightText: 2019-2024 Connor McLaughlin <stenzek@gmail.com>
 // SPDX-License-Identifier: (GPL-3.0 OR CC-BY-NC-ND-4.0)
 
 #define IMGUI_DEFINE_MATH_OPERATORS
@@ -10,6 +10,7 @@
 #include "core/settings.h"
 #include "common/assert.h"
 #include "common/easing.h"
+#include "common/error.h"
 #include "common/file_system.h"
 #include "common/log.h"
 #include "common/lru_cache.h"
@@ -73,6 +74,7 @@ ImVec4 UIBackgroundColor;
 ImVec4 UIBackgroundTextColor;
 ImVec4 UIBackgroundLineColor;
 ImVec4 UIBackgroundHighlightColor;
+ImVec4 UIPopupBackgroundColor;
 ImVec4 UIDisabledColor;
 ImVec4 UIPrimaryColor;
 ImVec4 UIPrimaryLightColor;
@@ -98,6 +100,10 @@ static std::condition_variable s_texture_load_cv;
 static std::deque<std::string> s_texture_load_queue;
 static std::deque<std::pair<std::string, RGBA8Image>> s_texture_upload_queue;
 static std::thread s_texture_load_thread;
+
+static SmallString s_fullscreen_footer_text;
+static SmallString s_last_fullscreen_footer_text;
+static float s_fullscreen_text_change_time;
 
 static bool s_choice_dialog_open = false;
 static bool s_choice_dialog_checkable = false;
@@ -244,6 +250,9 @@ void ImGuiFullscreen::Shutdown()
 
   s_notifications.clear();
   s_background_progress_dialogs.clear();
+  s_fullscreen_footer_text.clear();
+  s_last_fullscreen_footer_text.clear();
+  s_fullscreen_text_change_time = 0.0f;
   CloseInputDialog();
   CloseMessageDialog();
   s_choice_dialog_open = false;
@@ -261,6 +270,11 @@ void ImGuiFullscreen::Shutdown()
   s_file_selector_current_directory = {};
   s_file_selector_filters.clear();
   s_file_selector_items.clear();
+  s_message_dialog_open = false;
+  s_message_dialog_title = {};
+  s_message_dialog_message = {};
+  s_message_dialog_buttons = {};
+  s_message_dialog_callback = {};
 }
 
 const std::shared_ptr<GPUTexture>& ImGuiFullscreen::GetPlaceholderTexture()
@@ -271,24 +285,37 @@ const std::shared_ptr<GPUTexture>& ImGuiFullscreen::GetPlaceholderTexture()
 std::optional<RGBA8Image> ImGuiFullscreen::LoadTextureImage(const char* path)
 {
   std::optional<RGBA8Image> image;
-
-  std::optional<std::vector<u8>> data;
   if (Path::IsAbsolute(path))
-    data = FileSystem::ReadBinaryFile(path);
-  else
-    data = Host::ReadResourceFile(path, true);
-  if (data.has_value())
   {
-    image = RGBA8Image();
-    if (!image->LoadFromBuffer(path, data->data(), data->size()))
+    Error error;
+    auto fp = FileSystem::OpenManagedCFile(path, "rb", &error);
+    if (fp)
     {
-      Log_ErrorPrintf("Failed to read texture resource '%s'", path);
-      image.reset();
+      image = RGBA8Image();
+      if (!image->LoadFromFile(path, fp.get()))
+        Log_ErrorFmt("Failed to read texture file '{}'", path);
+    }
+    else
+    {
+      Log_ErrorFmt("Failed to open texture file '{}': {}", path, error.GetDescription());
     }
   }
   else
   {
-    Log_ErrorPrintf("Failed to open texture resource '%s'", path);
+    std::optional<std::vector<u8>> data = Host::ReadResourceFile(path, true);
+    if (data.has_value())
+    {
+      image = RGBA8Image();
+      if (!image->LoadFromBuffer(path, data->data(), data->size()))
+      {
+        Log_ErrorFmt("Failed to read texture resource '{}'", path);
+        image.reset();
+      }
+    }
+    else
+    {
+      Log_ErrorFmt("Failed to open texture resource '{}'", path);
+    }
   }
 
   return image;
@@ -485,6 +512,8 @@ void ImGuiFullscreen::EndLayout()
   DrawInputDialog();
   DrawMessageDialog();
 
+  DrawFullscreenFooter();
+
   const float notification_margin = LayoutScale(10.0f);
   const float spacing = LayoutScale(10.0f);
   const float notification_vertical_pos = GetNotificationVerticalPosition();
@@ -496,6 +525,8 @@ void ImGuiFullscreen::EndLayout()
   DrawToast();
 
   PopResetLayout();
+
+  s_fullscreen_footer_text.clear();
 
   s_rendered_menu_item_border = false;
   s_had_hovered_menu_item = std::exchange(s_has_hovered_menu_item, false);
@@ -525,11 +556,12 @@ void ImGuiFullscreen::PushResetLayout()
   ImGui::PushStyleColor(ImGuiCol_ScrollbarGrab, UIPrimaryColor);
   ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabHovered, UIPrimaryLightColor);
   ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabActive, UIPrimaryDarkColor);
+  ImGui::PushStyleColor(ImGuiCol_PopupBg, UIPopupBackgroundColor);
 }
 
 void ImGuiFullscreen::PopResetLayout()
 {
-  ImGui::PopStyleColor(10);
+  ImGui::PopStyleColor(11);
   ImGui::PopStyleVar(12);
 }
 
@@ -544,11 +576,29 @@ bool ImGuiFullscreen::ResetFocusHere()
   if (!s_focus_reset_queued)
     return false;
 
+  // don't take focus from dialogs
+  if (ImGui::FindBlockingModal(ImGui::GetCurrentWindow()))
+    return false;
+
   s_focus_reset_queued = false;
   ImGui::SetWindowFocus();
 
   // only do the active selection magic when we're using keyboard/gamepad
   return (GImGui->NavInputSource == ImGuiInputSource_Keyboard || GImGui->NavInputSource == ImGuiInputSource_Gamepad);
+}
+
+bool ImGuiFullscreen::IsFocusResetQueued()
+{
+  return s_focus_reset_queued;
+}
+
+void ImGuiFullscreen::ForceKeyNavEnabled()
+{
+  ImGuiContext& g = *ImGui::GetCurrentContext();
+  g.ActiveIdSource = (g.ActiveIdSource == ImGuiInputSource_Mouse) ? ImGuiInputSource_Keyboard : g.ActiveIdSource;
+  g.NavInputSource = (g.NavInputSource == ImGuiInputSource_Mouse) ? ImGuiInputSource_Keyboard : g.ActiveIdSource;
+  g.NavDisableHighlight = false;
+  g.NavDisableMouseHover = true;
 }
 
 bool ImGuiFullscreen::WantsToCloseMenu()
@@ -592,12 +642,12 @@ void ImGuiFullscreen::PopPrimaryColor()
   ImGui::PopStyleColor(5);
 }
 
-bool ImGuiFullscreen::BeginFullscreenColumns(const char* title, float pos_y, bool expand_to_screen_width)
+bool ImGuiFullscreen::BeginFullscreenColumns(const char* title, float pos_y, bool expand_to_screen_width, bool footer)
 {
   ImGui::SetNextWindowPos(ImVec2(expand_to_screen_width ? 0.0f : g_layout_padding_left, pos_y));
   ImGui::SetNextWindowSize(
     ImVec2(expand_to_screen_width ? ImGui::GetIO().DisplaySize.x : LayoutScale(LAYOUT_SCREEN_WIDTH),
-           ImGui::GetIO().DisplaySize.y - pos_y));
+           ImGui::GetIO().DisplaySize.y - pos_y - (footer ? LayoutScale(LAYOUT_FOOTER_HEIGHT) : 0.0f)));
 
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
@@ -691,14 +741,103 @@ void ImGuiFullscreen::EndFullscreenWindow()
   ImGui::PopStyleColor();
 }
 
+bool ImGuiFullscreen::IsGamepadInputSource()
+{
+  return (ImGui::GetCurrentContext()->NavInputSource == ImGuiInputSource_Gamepad);
+}
+
+void ImGuiFullscreen::CreateFooterTextString(SmallStringBase& dest,
+                                             std::span<const std::pair<const char*, std::string_view>> items)
+{
+  dest.clear();
+  for (const auto& [icon, text] : items)
+  {
+    if (!dest.empty())
+      dest.append("    ");
+
+    dest.append(icon);
+    dest.append(' ');
+    dest.append(text);
+  }
+}
+
+void ImGuiFullscreen::SetFullscreenFooterText(std::string_view text)
+{
+  s_fullscreen_footer_text.assign(text);
+}
+
+void ImGuiFullscreen::SetFullscreenFooterText(std::span<const std::pair<const char*, std::string_view>> items)
+{
+  CreateFooterTextString(s_fullscreen_footer_text, items);
+}
+
+void ImGuiFullscreen::DrawFullscreenFooter()
+{
+  const ImGuiIO& io = ImGui::GetIO();
+  if (s_fullscreen_footer_text.empty())
+  {
+    s_last_fullscreen_footer_text.clear();
+    return;
+  }
+
+  const float padding = LayoutScale(LAYOUT_FOOTER_PADDING);
+  const float height = LayoutScale(LAYOUT_FOOTER_HEIGHT);
+
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  dl->AddRectFilled(ImVec2(0.0f, io.DisplaySize.y - height), io.DisplaySize, ImGui::GetColorU32(UIPrimaryColor), 0.0f);
+
+  ImFont* const font = g_medium_font;
+  const float max_width = io.DisplaySize.x - padding * 2.0f;
+
+  float prev_opacity = 0.0f;
+  if (!s_last_fullscreen_footer_text.empty() && s_fullscreen_footer_text != s_last_fullscreen_footer_text)
+  {
+    if (s_fullscreen_text_change_time == 0.0f)
+      s_fullscreen_text_change_time = 0.15f;
+    else
+      s_fullscreen_text_change_time = std::max(s_fullscreen_text_change_time - io.DeltaTime, 0.0f);
+
+    if (s_fullscreen_text_change_time == 0.0f)
+      s_last_fullscreen_footer_text = s_fullscreen_footer_text;
+
+    prev_opacity = s_fullscreen_text_change_time * (1.0f / 0.15f);
+    if (prev_opacity > 0.0f)
+    {
+      const ImVec2 text_size =
+        font->CalcTextSizeA(font->FontSize, max_width, 0.0f, s_last_fullscreen_footer_text.c_str(),
+                            s_last_fullscreen_footer_text.end_ptr());
+      dl->AddText(
+        font, font->FontSize,
+        ImVec2(io.DisplaySize.x - padding * 2.0f - text_size.x, io.DisplaySize.y - font->FontSize - padding),
+        ImGui::GetColorU32(ImVec4(UIPrimaryTextColor.x, UIPrimaryTextColor.y, UIPrimaryTextColor.z, prev_opacity)),
+        s_last_fullscreen_footer_text.c_str(), s_last_fullscreen_footer_text.end_ptr());
+    }
+  }
+  else if (s_last_fullscreen_footer_text.empty())
+  {
+    s_last_fullscreen_footer_text = s_fullscreen_footer_text;
+  }
+
+  if (prev_opacity < 1.0f)
+  {
+    const ImVec2 text_size = font->CalcTextSizeA(font->FontSize, max_width, 0.0f, s_fullscreen_footer_text.c_str(),
+                                                 s_fullscreen_footer_text.end_ptr());
+    dl->AddText(
+      font, font->FontSize,
+      ImVec2(io.DisplaySize.x - padding * 2.0f - text_size.x, io.DisplaySize.y - font->FontSize - padding),
+      ImGui::GetColorU32(ImVec4(UIPrimaryTextColor.x, UIPrimaryTextColor.y, UIPrimaryTextColor.z, 1.0f - prev_opacity)),
+      s_fullscreen_footer_text.c_str(), s_fullscreen_footer_text.end_ptr());
+  }
+}
+
 void ImGuiFullscreen::PrerenderMenuButtonBorder()
 {
   if (!s_had_hovered_menu_item)
     return;
 
   // updating might finish the animation
-  const ImVec2 min = s_menu_button_frame_min_animated.UpdateAndGetValue();
-  const ImVec2 max = s_menu_button_frame_max_animated.UpdateAndGetValue();
+  const ImVec2& min = s_menu_button_frame_min_animated.UpdateAndGetValue();
+  const ImVec2& max = s_menu_button_frame_max_animated.UpdateAndGetValue();
   const ImU32 col = ImGui::GetColorU32(ImGuiCol_ButtonHovered);
 
   const float t = static_cast<float>(std::min(std::abs(std::sin(ImGui::GetTime() * 0.75) * 1.1), 1.0));
@@ -860,7 +999,7 @@ void ImGuiFullscreen::DrawMenuButtonFrame(const ImVec2& p_min, const ImVec2& p_m
                                                MENU_BACKGROUND_ANIMATION_TIME);
       }
       if (frame_max.x != s_menu_button_frame_max_animated.GetEndValue().x ||
-          frame_max.y != s_menu_button_frame_max_animated.GetEndValue().x)
+          frame_max.y != s_menu_button_frame_max_animated.GetEndValue().y)
       {
         s_menu_button_frame_max_animated.Start(s_menu_button_frame_max_animated.GetCurrentValue(), frame_max,
                                                MENU_BACKGROUND_ANIMATION_TIME);
@@ -1349,7 +1488,7 @@ bool ImGuiFullscreen::RangeButton(const char* title, const char* summary, s32* v
   if (!visible)
     return false;
 
-  const std::string value_text(StringUtil::StdStringFromFormat(format, *value));
+  const SmallString value_text = SmallString::from_sprintf(format, *value);
   const ImVec2 value_size(ImGui::CalcTextSize(value_text.c_str()));
 
   const float midpoint = bb.Min.y + font->FontSize + LayoutScale(4.0f);
@@ -1382,7 +1521,8 @@ bool ImGuiFullscreen::RangeButton(const char* title, const char* summary, s32* v
   bool changed = false;
 
   ImGui::SetNextWindowSize(LayoutScale(500.0f, 180.0f));
-  ImGui::SetNextWindowPos(ImGui::GetIO().DisplaySize * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowPos((ImGui::GetIO().DisplaySize - LayoutScale(0.0f, LAYOUT_FOOTER_HEIGHT)) * 0.5f,
+                          ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 
   ImGui::PushFont(g_large_font);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, LayoutScale(10.0f));
@@ -1421,7 +1561,7 @@ bool ImGuiFullscreen::RangeButton(const char* title, const char* summary, float*
   if (!visible)
     return false;
 
-  const std::string value_text(StringUtil::StdStringFromFormat(format, *value));
+  const SmallString value_text = SmallString::from_sprintf(format, *value);
   const ImVec2 value_size(ImGui::CalcTextSize(value_text.c_str()));
 
   const float midpoint = bb.Min.y + font->FontSize + LayoutScale(4.0f);
@@ -1454,7 +1594,8 @@ bool ImGuiFullscreen::RangeButton(const char* title, const char* summary, float*
   bool changed = false;
 
   ImGui::SetNextWindowSize(LayoutScale(500.0f, 180.0f));
-  ImGui::SetNextWindowPos(ImGui::GetIO().DisplaySize * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowPos((ImGui::GetIO().DisplaySize - LayoutScale(0.0f, LAYOUT_FOOTER_HEIGHT)) * 0.5f,
+                          ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 
   ImGui::PushFont(g_large_font);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, LayoutScale(10.0f));
@@ -1780,6 +1921,100 @@ bool ImGuiFullscreen::NavTab(const char* title, bool is_active, bool enabled /* 
   return pressed;
 }
 
+bool ImGuiFullscreen::BeginHorizontalMenu(const char* name, const ImVec2& position, const ImVec2& size, u32 num_items)
+{
+  s_menu_button_index = 0;
+
+  const float item_padding = LayoutScale(LAYOUT_HORIZONTAL_MENU_PADDING);
+  const float item_width = LayoutScale(LAYOUT_HORIZONTAL_MENU_ITEM_WIDTH);
+  const float item_spacing = LayoutScale(30.0f);
+  const float menu_width = static_cast<float>(num_items) * (item_width + item_spacing) - item_spacing;
+  const float menu_height = LayoutScale(LAYOUT_HORIZONTAL_MENU_HEIGHT);
+
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(item_padding, item_padding));
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 0.0f);
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, LayoutScale(1.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(item_spacing, 0.0f));
+
+  if (!BeginFullscreenWindow(position, size, name, UIBackgroundColor, 0.0f, 0.0f))
+    return false;
+
+  ImGui::SetCursorPos(ImVec2((size.x - menu_width) * 0.5f, (size.y - menu_height) * 0.5f));
+
+  PrerenderMenuButtonBorder();
+  return true;
+}
+
+void ImGuiFullscreen::EndHorizontalMenu()
+{
+  ImGui::PopStyleVar(4);
+  EndFullscreenWindow();
+}
+
+bool ImGuiFullscreen::HorizontalMenuItem(GPUTexture* icon, const char* title, const char* description)
+{
+  ImGuiWindow* window = ImGui::GetCurrentWindow();
+  if (window->SkipItems)
+    return false;
+
+  const ImVec2 pos = window->DC.CursorPos;
+  const ImVec2 size = LayoutScale(LAYOUT_HORIZONTAL_MENU_ITEM_WIDTH, LAYOUT_HORIZONTAL_MENU_HEIGHT);
+  ImRect bb = ImRect(pos, pos + size);
+
+  const ImGuiID id = window->GetID(title);
+  ImGui::ItemSize(size);
+  if (!ImGui::ItemAdd(bb, id))
+    return false;
+
+  bool held;
+  bool hovered;
+  const bool pressed = ImGui::ButtonBehavior(bb, id, &hovered, &held, 0);
+  if (hovered)
+  {
+    const ImU32 col = ImGui::GetColorU32(held ? ImGuiCol_ButtonActive : ImGuiCol_ButtonHovered, 1.0f);
+
+    const float t = static_cast<float>(std::min(std::abs(std::sin(ImGui::GetTime() * 0.75) * 1.1), 1.0));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImGui::GetColorU32(ImGuiCol_Border, t));
+
+    DrawMenuButtonFrame(bb.Min, bb.Max, col, true, 0.0f);
+
+    ImGui::PopStyleColor();
+  }
+
+  const ImGuiStyle& style = ImGui::GetStyle();
+  bb.Min += style.FramePadding;
+  bb.Max -= style.FramePadding;
+
+  const float avail_width = bb.Max.x - bb.Min.x;
+  const float icon_size = LayoutScale(150.0f);
+  const ImVec2 icon_pos = bb.Min + ImVec2((avail_width - icon_size) * 0.5f, 0.0f);
+
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  dl->AddImage(reinterpret_cast<ImTextureID>(icon), icon_pos, icon_pos + ImVec2(icon_size, icon_size));
+
+  ImFont* title_font = g_large_font;
+  const ImVec2 title_size = title_font->CalcTextSizeA(title_font->FontSize, avail_width, 0.0f, title);
+  const ImVec2 title_pos =
+    ImVec2(bb.Min.x + (avail_width - title_size.x) * 0.5f, icon_pos.y + icon_size + LayoutScale(10.0f));
+  const ImVec4 title_bb = ImVec4(title_pos.x, title_pos.y, title_pos.x + title_size.x, title_pos.y + title_size.y);
+
+  dl->AddText(title_font, title_font->FontSize, title_pos, ImGui::GetColorU32(ImGuiCol_Text), title, nullptr, 0.0f,
+              &title_bb);
+
+  ImFont* desc_font = g_medium_font;
+  const ImVec2 desc_size = desc_font->CalcTextSizeA(desc_font->FontSize, avail_width, avail_width, description);
+  const ImVec2 desc_pos = ImVec2(bb.Min.x + (avail_width - desc_size.x) * 0.5f, title_bb.w + LayoutScale(10.0f));
+  const ImVec4 desc_bb = ImVec4(desc_pos.x, desc_pos.y, desc_pos.x + desc_size.x, desc_pos.y + desc_size.y);
+
+  dl->AddText(desc_font, desc_font->FontSize, desc_pos, ImGui::GetColorU32(ImGuiCol_Text), description, nullptr,
+              avail_width, &desc_bb);
+
+  ImGui::SameLine();
+
+  s_menu_button_index++;
+  return pressed;
+}
+
 void ImGuiFullscreen::PopulateFileSelectorItems()
 {
   s_file_selector_items.clear();
@@ -1855,7 +2090,7 @@ bool ImGuiFullscreen::IsFileSelectorOpen()
   return s_file_selector_open;
 }
 
-void ImGuiFullscreen::OpenFileSelector(const char* title, bool select_directory, FileSelectorCallback callback,
+void ImGuiFullscreen::OpenFileSelector(std::string_view title, bool select_directory, FileSelectorCallback callback,
                                        FileSelectorFilters filters, std::string initial_directory)
 {
   if (s_file_selector_open)
@@ -1874,6 +2109,7 @@ void ImGuiFullscreen::OpenFileSelector(const char* title, bool select_directory,
     initial_directory = FileSystem::GetWorkingDirectory();
 #endif
   SetFileSelectorDirectory(std::move(initial_directory));
+  QueueResetFocus();
 }
 
 void ImGuiFullscreen::CloseFileSelector()
@@ -1897,8 +2133,9 @@ void ImGuiFullscreen::DrawFileSelector()
   if (!s_file_selector_open)
     return;
 
-  ImGui::SetNextWindowSize(LayoutScale(1000.0f, 680.0f));
-  ImGui::SetNextWindowPos(ImGui::GetIO().DisplaySize * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowSize(LayoutScale(1000.0f, 650.0f));
+  ImGui::SetNextWindowPos((ImGui::GetIO().DisplaySize - LayoutScale(0.0f, LAYOUT_FOOTER_HEIGHT)) * 0.5f,
+                          ImGuiCond_Always, ImVec2(0.5f, 0.5f));
   ImGui::OpenPopup(s_file_selector_title.c_str());
 
   FileSelectorItem* selected = nullptr;
@@ -1911,7 +2148,6 @@ void ImGuiFullscreen::DrawFileSelector()
   ImGui::PushStyleColor(ImGuiCol_Text, UIPrimaryTextColor);
   ImGui::PushStyleColor(ImGuiCol_TitleBg, UIPrimaryDarkColor);
   ImGui::PushStyleColor(ImGuiCol_TitleBgActive, UIPrimaryColor);
-  ImGui::PushStyleColor(ImGuiCol_PopupBg, MulAlpha(UIBackgroundColor, 0.95f));
 
   bool is_open = !WantsToCloseMenu();
   bool directory_selected = false;
@@ -1921,6 +2157,7 @@ void ImGuiFullscreen::DrawFileSelector()
     ImGui::PushStyleColor(ImGuiCol_Text, UIBackgroundTextColor);
 
     BeginMenuButtons();
+    ResetFocusHere();
 
     if (!s_file_selector_current_directory.empty())
     {
@@ -1951,9 +2188,12 @@ void ImGuiFullscreen::DrawFileSelector()
     is_open = false;
   }
 
-  ImGui::PopStyleColor(4);
+  ImGui::PopStyleColor(3);
   ImGui::PopStyleVar(3);
   ImGui::PopFont();
+
+  if (is_open)
+    GetFileSelectorHelpText(s_fullscreen_footer_text);
 
   if (selected)
   {
@@ -1964,6 +2204,7 @@ void ImGuiFullscreen::DrawFileSelector()
     else
     {
       SetFileSelectorDirectory(std::move(selected->full_path));
+      QueueResetFocus();
     }
   }
   else if (directory_selected)
@@ -1976,6 +2217,18 @@ void ImGuiFullscreen::DrawFileSelector()
     s_file_selector_callback(no_path);
     CloseFileSelector();
   }
+  else
+  {
+    if (ImGui::IsKeyPressed(ImGuiKey_Backspace, false) || ImGui::IsKeyPressed(ImGuiKey_NavGamepadMenu, false))
+    {
+      if (!s_file_selector_items.empty() && s_file_selector_items.front().display_name == ICON_FA_FOLDER_OPEN
+                                              "  <Parent Directory>")
+      {
+        SetFileSelectorDirectory(std::move(s_file_selector_items.front().full_path));
+        QueueResetFocus();
+      }
+    }
+  }
 }
 
 bool ImGuiFullscreen::IsChoiceDialogOpen()
@@ -1983,7 +2236,7 @@ bool ImGuiFullscreen::IsChoiceDialogOpen()
   return s_choice_dialog_open;
 }
 
-void ImGuiFullscreen::OpenChoiceDialog(const char* title, bool checkable, ChoiceDialogOptions options,
+void ImGuiFullscreen::OpenChoiceDialog(std::string_view title, bool checkable, ChoiceDialogOptions options,
                                        ChoiceDialogCallback callback)
 {
   if (s_choice_dialog_open)
@@ -1994,6 +2247,7 @@ void ImGuiFullscreen::OpenChoiceDialog(const char* title, bool checkable, Choice
   s_choice_dialog_title = fmt::format("{}##choice_dialog", title);
   s_choice_dialog_options = std::move(options);
   s_choice_dialog_callback = std::move(callback);
+  QueueResetFocus();
 }
 
 void ImGuiFullscreen::CloseChoiceDialog()
@@ -2022,17 +2276,17 @@ void ImGuiFullscreen::DrawChoiceDialog()
   ImGui::PushStyleColor(ImGuiCol_Text, UIPrimaryTextColor);
   ImGui::PushStyleColor(ImGuiCol_TitleBg, UIPrimaryDarkColor);
   ImGui::PushStyleColor(ImGuiCol_TitleBgActive, UIPrimaryColor);
-  ImGui::PushStyleColor(ImGuiCol_PopupBg, MulAlpha(UIBackgroundColor, 0.95f));
 
   const float width = LayoutScale(600.0f);
   const float title_height =
     g_large_font->FontSize + ImGui::GetStyle().FramePadding.y * 2.0f + ImGui::GetStyle().WindowPadding.y * 2.0f;
   const float height =
-    std::min(LayoutScale(450.0f),
+    std::min(LayoutScale(480.0f),
              title_height + LayoutScale(LAYOUT_MENU_BUTTON_HEIGHT_NO_SUMMARY + (LAYOUT_MENU_BUTTON_Y_PADDING * 2.0f)) *
                               static_cast<float>(s_choice_dialog_options.size()));
   ImGui::SetNextWindowSize(ImVec2(width, height));
-  ImGui::SetNextWindowPos(ImGui::GetIO().DisplaySize * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowPos((ImGui::GetIO().DisplaySize - LayoutScale(0.0f, LAYOUT_FOOTER_HEIGHT)) * 0.5f,
+                          ImGuiCond_Always, ImVec2(0.5f, 0.5f));
   ImGui::OpenPopup(s_choice_dialog_title.c_str());
 
   bool is_open = !WantsToCloseMenu();
@@ -2044,6 +2298,7 @@ void ImGuiFullscreen::DrawChoiceDialog()
     ImGui::PushStyleColor(ImGuiCol_Text, UIBackgroundTextColor);
 
     BeginMenuButtons();
+    ResetFocusHere();
 
     if (s_choice_dialog_checkable)
     {
@@ -2090,7 +2345,7 @@ void ImGuiFullscreen::DrawChoiceDialog()
     is_open = false;
   }
 
-  ImGui::PopStyleColor(4);
+  ImGui::PopStyleColor(3);
   ImGui::PopStyleVar(3);
   ImGui::PopFont();
 
@@ -2104,6 +2359,10 @@ void ImGuiFullscreen::DrawChoiceDialog()
     std::string no_string;
     s_choice_dialog_callback(-1, no_string, false);
     CloseChoiceDialog();
+  }
+  else
+  {
+    GetChoiceDialogHelpText(s_fullscreen_footer_text);
   }
 }
 
@@ -2121,6 +2380,7 @@ void ImGuiFullscreen::OpenInputStringDialog(std::string title, std::string messa
   s_input_dialog_caption = std::move(caption);
   s_input_dialog_ok_text = std::move(ok_button_text);
   s_input_dialog_callback = std::move(callback);
+  QueueResetFocus();
 }
 
 void ImGuiFullscreen::DrawInputDialog()
@@ -2129,7 +2389,8 @@ void ImGuiFullscreen::DrawInputDialog()
     return;
 
   ImGui::SetNextWindowSize(LayoutScale(700.0f, 0.0f));
-  ImGui::SetNextWindowPos(ImGui::GetIO().DisplaySize * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowPos((ImGui::GetIO().DisplaySize - LayoutScale(0.0f, LAYOUT_FOOTER_HEIGHT)) * 0.5f,
+                          ImGuiCond_Always, ImVec2(0.5f, 0.5f));
   ImGui::OpenPopup(s_input_dialog_title.c_str());
 
   ImGui::PushFont(g_large_font);
@@ -2140,13 +2401,13 @@ void ImGuiFullscreen::DrawInputDialog()
   ImGui::PushStyleColor(ImGuiCol_Text, UIPrimaryTextColor);
   ImGui::PushStyleColor(ImGuiCol_TitleBg, UIPrimaryDarkColor);
   ImGui::PushStyleColor(ImGuiCol_TitleBgActive, UIPrimaryColor);
-  ImGui::PushStyleColor(ImGuiCol_PopupBg, MulAlpha(UIBackgroundColor, 0.95f));
 
   bool is_open = true;
   if (ImGui::BeginPopupModal(s_input_dialog_title.c_str(), &is_open,
                              ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
                                ImGuiWindowFlags_NoMove))
   {
+    ResetFocusHere();
     ImGui::TextWrapped("%s", s_input_dialog_message.c_str());
 
     BeginMenuButtons();
@@ -2188,8 +2449,10 @@ void ImGuiFullscreen::DrawInputDialog()
   }
   if (!is_open)
     CloseInputDialog();
+  else
+    GetInputDialogHelpText(s_fullscreen_footer_text);
 
-  ImGui::PopStyleColor(4);
+  ImGui::PopStyleColor(3);
   ImGui::PopStyleVar(3);
   ImGui::PopFont();
 }
@@ -2225,6 +2488,7 @@ void ImGuiFullscreen::OpenConfirmMessageDialog(std::string title, std::string me
   s_message_dialog_callback = std::move(callback);
   s_message_dialog_buttons[0] = std::move(yes_button_text);
   s_message_dialog_buttons[1] = std::move(no_button_text);
+  QueueResetFocus();
 }
 
 void ImGuiFullscreen::OpenInfoMessageDialog(std::string title, std::string message, InfoMessageDialogCallback callback,
@@ -2237,6 +2501,7 @@ void ImGuiFullscreen::OpenInfoMessageDialog(std::string title, std::string messa
   s_message_dialog_message = std::move(message);
   s_message_dialog_callback = std::move(callback);
   s_message_dialog_buttons[0] = std::move(button_text);
+  QueueResetFocus();
 }
 
 void ImGuiFullscreen::OpenMessageDialog(std::string title, std::string message, MessageDialogCallback callback,
@@ -2252,6 +2517,7 @@ void ImGuiFullscreen::OpenMessageDialog(std::string title, std::string message, 
   s_message_dialog_buttons[0] = std::move(first_button_text);
   s_message_dialog_buttons[1] = std::move(second_button_text);
   s_message_dialog_buttons[2] = std::move(third_button_text);
+  QueueResetFocus();
 }
 
 void ImGuiFullscreen::CloseMessageDialog()
@@ -2264,6 +2530,7 @@ void ImGuiFullscreen::CloseMessageDialog()
   s_message_dialog_message = {};
   s_message_dialog_buttons = {};
   s_message_dialog_callback = {};
+  QueueResetFocus();
 }
 
 void ImGuiFullscreen::DrawMessageDialog()
@@ -2274,7 +2541,8 @@ void ImGuiFullscreen::DrawMessageDialog()
   const char* win_id = s_message_dialog_title.empty() ? "##messagedialog" : s_message_dialog_title.c_str();
 
   ImGui::SetNextWindowSize(LayoutScale(700.0f, 0.0f));
-  ImGui::SetNextWindowPos(ImGui::GetIO().DisplaySize * 0.5f, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowPos((ImGui::GetIO().DisplaySize - LayoutScale(0.0f, LAYOUT_FOOTER_HEIGHT)) * 0.5f,
+                          ImGuiCond_Always, ImVec2(0.5f, 0.5f));
   ImGui::OpenPopup(win_id);
 
   ImGui::PushFont(g_large_font);
@@ -2286,7 +2554,6 @@ void ImGuiFullscreen::DrawMessageDialog()
   ImGui::PushStyleColor(ImGuiCol_Text, UIPrimaryTextColor);
   ImGui::PushStyleColor(ImGuiCol_TitleBg, UIPrimaryDarkColor);
   ImGui::PushStyleColor(ImGuiCol_TitleBgActive, UIPrimaryColor);
-  ImGui::PushStyleColor(ImGuiCol_PopupBg, MulAlpha(UIBackgroundColor, 0.95f));
 
   bool is_open = true;
   const u32 flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
@@ -2296,6 +2563,7 @@ void ImGuiFullscreen::DrawMessageDialog()
   if (ImGui::BeginPopupModal(win_id, &is_open, flags))
   {
     BeginMenuButtons();
+    ResetFocusHere();
 
     ImGui::TextWrapped("%s", s_message_dialog_message.c_str());
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + LayoutScale(20.0f));
@@ -2315,7 +2583,7 @@ void ImGuiFullscreen::DrawMessageDialog()
     ImGui::EndPopup();
   }
 
-  ImGui::PopStyleColor(4);
+  ImGui::PopStyleColor(3);
   ImGui::PopStyleVar(4);
   ImGui::PopFont();
 
@@ -2337,6 +2605,10 @@ void ImGuiFullscreen::DrawMessageDialog()
       if (func)
         func(result.value_or(1) == 0);
     }
+  }
+  else
+  {
+    GetChoiceDialogHelpText(s_fullscreen_footer_text);
   }
 }
 
@@ -2705,7 +2977,7 @@ void ImGuiFullscreen::DrawToast()
   ImFont* message_font = g_medium_font;
   const float padding = LayoutScale(20.0f);
   const float total_padding = padding * 2.0f;
-  const float margin = LayoutScale(20.0f);
+  const float margin = LayoutScale(20.0f + (s_fullscreen_footer_text.empty() ? 0.0f : LAYOUT_FOOTER_HEIGHT));
   const float spacing = s_toast_title.empty() ? 0.0f : LayoutScale(10.0f);
   const ImVec2 display_size(ImGui::GetIO().DisplaySize);
   const ImVec2 title_size(s_toast_title.empty() ?
@@ -2729,7 +3001,7 @@ void ImGuiFullscreen::DrawToast()
     const float offset = (comb_size.x - title_size.x) * 0.5f;
     dl->AddText(title_font, title_font->FontSize, box_pos + ImVec2(offset + padding, padding),
                 ImGui::GetColorU32(ModAlpha(UIPrimaryTextColor, alpha)), s_toast_title.c_str(),
-                s_toast_title.c_str() + s_toast_title.length());
+                s_toast_title.c_str() + s_toast_title.length(), max_width);
   }
   if (!s_toast_message.empty())
   {
@@ -2737,7 +3009,7 @@ void ImGuiFullscreen::DrawToast()
     dl->AddText(message_font, message_font->FontSize,
                 box_pos + ImVec2(offset + padding, padding + spacing + title_size.y),
                 ImGui::GetColorU32(ModAlpha(UIPrimaryTextColor, alpha)), s_toast_message.c_str(),
-                s_toast_message.c_str() + s_toast_message.length());
+                s_toast_message.c_str() + s_toast_message.length(), max_width);
   }
 }
 
@@ -2752,6 +3024,7 @@ void ImGuiFullscreen::SetTheme(bool light)
     UIBackgroundTextColor = HEX_TO_IMVEC4(0xffffff, 0xff);
     UIBackgroundLineColor = HEX_TO_IMVEC4(0xf0f0f0, 0xff);
     UIBackgroundHighlightColor = HEX_TO_IMVEC4(0x4b4b4b, 0xff);
+    UIPopupBackgroundColor = HEX_TO_IMVEC4(0x212121, 0xf2);
     UIPrimaryColor = HEX_TO_IMVEC4(0x2e2e2e, 0xff);
     UIPrimaryLightColor = HEX_TO_IMVEC4(0x484848, 0xff);
     UIPrimaryDarkColor = HEX_TO_IMVEC4(0x000000, 0xff);
@@ -2767,19 +3040,20 @@ void ImGuiFullscreen::SetTheme(bool light)
   else
   {
     // light
-    UIBackgroundColor = HEX_TO_IMVEC4(0xf5f5f6, 0xff);
+    UIBackgroundColor = HEX_TO_IMVEC4(0xc8c8c8, 0xff);
     UIBackgroundTextColor = HEX_TO_IMVEC4(0x000000, 0xff);
     UIBackgroundLineColor = HEX_TO_IMVEC4(0xe1e2e1, 0xff);
     UIBackgroundHighlightColor = HEX_TO_IMVEC4(0xe1e2e1, 0xff);
-    UIPrimaryColor = HEX_TO_IMVEC4(0x0d47a1, 0xff);
-    UIPrimaryLightColor = HEX_TO_IMVEC4(0x5472d3, 0xff);
-    UIPrimaryDarkColor = HEX_TO_IMVEC4(0x002171, 0xff);
+    UIPopupBackgroundColor = HEX_TO_IMVEC4(0xd8d8d8, 0xf2);
+    UIPrimaryColor = HEX_TO_IMVEC4(0x2a3e78, 0xff);
+    UIPrimaryLightColor = HEX_TO_IMVEC4(0x235cd9, 0xff);
+    UIPrimaryDarkColor = HEX_TO_IMVEC4(0x1d2953, 0xff);
     UIPrimaryTextColor = HEX_TO_IMVEC4(0xffffff, 0xff);
-    UIDisabledColor = HEX_TO_IMVEC4(0xaaaaaa, 0xff);
+    UIDisabledColor = HEX_TO_IMVEC4(0x999999, 0xff);
     UITextHighlightColor = HEX_TO_IMVEC4(0x8e8e8e, 0xff);
     UIPrimaryLineColor = HEX_TO_IMVEC4(0x000000, 0xff);
-    UISecondaryColor = HEX_TO_IMVEC4(0x3d5afe, 0xff);
-    UISecondaryStrongColor = HEX_TO_IMVEC4(0x0031ca, 0xff);
+    UISecondaryColor = HEX_TO_IMVEC4(0x2a3e78, 0xff);
+    UISecondaryStrongColor = HEX_TO_IMVEC4(0x464db1, 0xff);
     UISecondaryWeakColor = HEX_TO_IMVEC4(0xc0cfff, 0xff);
     UISecondaryTextColor = HEX_TO_IMVEC4(0x000000, 0xff);
   }

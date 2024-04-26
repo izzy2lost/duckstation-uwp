@@ -277,7 +277,7 @@ static void DoSectorRead();
 static void ProcessDataSectorHeader(const u8* raw_sector);
 static void ProcessDataSector(const u8* raw_sector, const CDImage::SubChannelQ& subq);
 static void ProcessXAADPCMSector(const u8* raw_sector, const CDImage::SubChannelQ& subq);
-static void ProcessCDDASector(const u8* raw_sector, const CDImage::SubChannelQ& subq);
+static void ProcessCDDASector(const u8* raw_sector, const CDImage::SubChannelQ& subq, bool subq_valid);
 static void StopReadingWithDataEnd();
 static void StartMotor();
 static void StopMotor();
@@ -484,7 +484,7 @@ void CDROM::Reset()
   s_mode.read_raw_sector = true;
   s_interrupt_enable_register = INTERRUPT_REGISTER_MASK;
   s_interrupt_flag_register = 0;
-  s_last_interrupt_time = TimingEvents::GetGlobalTickCounter() - MINIMUM_INTERRUPT_DELAY;
+  s_last_interrupt_time = System::GetGlobalTickCounter() - MINIMUM_INTERRUPT_DELAY;
   ClearAsyncInterrupt();
   s_setloc_position = {};
   s_seek_start_lba = 0;
@@ -605,7 +605,7 @@ bool CDROM::DoState(StateWrapper& sw)
 
   sw.Do(&s_interrupt_enable_register);
   sw.Do(&s_interrupt_flag_register);
-  sw.DoEx(&s_last_interrupt_time, 57, TimingEvents::GetGlobalTickCounter() - MINIMUM_INTERRUPT_DELAY);
+  sw.DoEx(&s_last_interrupt_time, 57, System::GetGlobalTickCounter() - MINIMUM_INTERRUPT_DELAY);
   sw.Do(&s_pending_async_interrupt);
   sw.DoPOD(&s_setloc_position);
   sw.Do(&s_current_lba);
@@ -986,6 +986,7 @@ void CDROM::WriteRegister(u32 offset, u8 value)
       s_interrupt_flag_register &= ~(value & INTERRUPT_REGISTER_MASK);
       if (s_interrupt_flag_register == 0)
       {
+        InterruptController::SetLineState(InterruptController::IRQ::CDROM, false);
         if (HasPendingAsyncInterrupt())
           QueueDeliverAsyncInterrupt();
         else
@@ -1096,7 +1097,7 @@ bool CDROM::HasPendingAsyncInterrupt()
 void CDROM::SetInterrupt(Interrupt interrupt)
 {
   s_interrupt_flag_register = static_cast<u8>(interrupt);
-  s_last_interrupt_time = TimingEvents::GetGlobalTickCounter();
+  s_last_interrupt_time = System::GetGlobalTickCounter();
   UpdateInterruptRequest();
 }
 
@@ -1137,7 +1138,7 @@ void CDROM::QueueDeliverAsyncInterrupt()
     return;
 
   // underflows here are okay
-  const u32 diff = TimingEvents::GetGlobalTickCounter() - s_last_interrupt_time;
+  const u32 diff = System::GetGlobalTickCounter() - s_last_interrupt_time;
   if (diff >= MINIMUM_INTERRUPT_DELAY)
   {
     DeliverAsyncInterrupt(nullptr, 0, 0);
@@ -1212,10 +1213,8 @@ void CDROM::UpdateStatusRegister()
 
 void CDROM::UpdateInterruptRequest()
 {
-  if ((s_interrupt_flag_register & s_interrupt_enable_register) == 0)
-    return;
-
-  InterruptController::InterruptRequest(InterruptController::IRQ::CDROM);
+  InterruptController::SetLineState(InterruptController::IRQ::CDROM,
+                                    (s_interrupt_flag_register & s_interrupt_enable_register) != 0);
 }
 
 bool CDROM::HasPendingDiscEvent()
@@ -2406,8 +2405,9 @@ void CDROM::UpdatePositionWhileSeeking()
 {
   DebugAssert(IsSeeking());
 
-  const float completed_frac = 1.0f - (static_cast<float>(s_drive_event->GetTicksUntilNextExecution()) /
-                                       static_cast<float>(s_drive_event->GetInterval()));
+  const float completed_frac = 1.0f - std::min(static_cast<float>(s_drive_event->GetTicksUntilNextExecution()) /
+                                                 static_cast<float>(s_drive_event->GetInterval()),
+                                               1.0f);
 
   CDImage::LBA current_lba;
   if (s_seek_end_lba > s_seek_start_lba)
@@ -2442,13 +2442,13 @@ void CDROM::UpdatePositionWhileSeeking()
 
   s_current_lba = current_lba;
   s_physical_lba = current_lba;
-  s_physical_lba_update_tick = TimingEvents::GetGlobalTickCounter();
+  s_physical_lba_update_tick = System::GetGlobalTickCounter();
   s_physical_lba_update_carry = 0;
 }
 
 void CDROM::UpdatePhysicalPosition(bool update_logical)
 {
-  const u32 ticks = TimingEvents::GetGlobalTickCounter();
+  const u32 ticks = System::GetGlobalTickCounter();
   if (IsSeeking() || IsReadingOrPlaying() || !IsMotorOn())
   {
     // If we're seeking+reading the first sector (no stat bits set), we need to return the set/current lba, not the last
@@ -2539,7 +2539,7 @@ void CDROM::SetHoldPosition(CDImage::LBA lba, bool update_subq)
 
   s_current_lba = lba;
   s_physical_lba = lba;
-  s_physical_lba_update_tick = TimingEvents::GetGlobalTickCounter();
+  s_physical_lba_update_tick = System::GetGlobalTickCounter();
   s_physical_lba_update_carry = 0;
 }
 
@@ -2607,7 +2607,7 @@ bool CDROM::CompleteSeek()
   }
 
   s_physical_lba = s_current_lba;
-  s_physical_lba_update_tick = TimingEvents::GetGlobalTickCounter();
+  s_physical_lba_update_tick = System::GetGlobalTickCounter();
   s_physical_lba_update_carry = 0;
   return seek_okay;
 }
@@ -2783,7 +2783,7 @@ void CDROM::DoSectorRead()
 
   s_current_lba = s_reader.GetLastReadSector();
   s_physical_lba = s_current_lba;
-  s_physical_lba_update_tick = TimingEvents::GetGlobalTickCounter();
+  s_physical_lba_update_tick = System::GetGlobalTickCounter();
   s_physical_lba_update_carry = 0;
 
   s_secondary_status.SetReadingBits(s_drive_state == DriveState::Playing);
@@ -2837,7 +2837,7 @@ void CDROM::DoSectorRead()
   else if (!is_data_sector &&
            (s_drive_state == DriveState::Playing || (s_drive_state == DriveState::Reading && s_mode.cdda)))
   {
-    ProcessCDDASector(s_reader.GetSectorBuffer().data(), subq);
+    ProcessCDDASector(s_reader.GetSectorBuffer().data(), subq, subq_valid);
 
     if (s_fast_forward_rate != 0)
       next_sector = s_current_lba + SignExtend32(s_fast_forward_rate);
@@ -2856,7 +2856,7 @@ void CDROM::DoSectorRead()
   s_reader.QueueReadSector(s_requested_lba);
 }
 
-void CDROM::ProcessDataSectorHeader(const u8* raw_sector)
+ALWAYS_INLINE_RELEASE void CDROM::ProcessDataSectorHeader(const u8* raw_sector)
 {
   std::memcpy(&s_last_sector_header, &raw_sector[SECTOR_SYNC_SIZE], sizeof(s_last_sector_header));
   std::memcpy(&s_last_sector_subheader, &raw_sector[SECTOR_SYNC_SIZE + sizeof(s_last_sector_header)],
@@ -2864,7 +2864,7 @@ void CDROM::ProcessDataSectorHeader(const u8* raw_sector)
   s_last_sector_header_valid = true;
 }
 
-void CDROM::ProcessDataSector(const u8* raw_sector, const CDImage::SubChannelQ& subq)
+ALWAYS_INLINE_RELEASE void CDROM::ProcessDataSector(const u8* raw_sector, const CDImage::SubChannelQ& subq)
 {
   const u32 sb_num = (s_current_write_sector_buffer + 1) % NUM_SECTOR_BUFFERS;
   Log_DevPrintf("Read sector %u [%s]: mode %u submode 0x%02X into buffer %u", s_current_lba,
@@ -3062,7 +3062,7 @@ void CDROM::ResetAudioDecoder()
   s_audio_fifo.Clear();
 }
 
-void CDROM::ProcessXAADPCMSector(const u8* raw_sector, const CDImage::SubChannelQ& subq)
+ALWAYS_INLINE_RELEASE void CDROM::ProcessXAADPCMSector(const u8* raw_sector, const CDImage::SubChannelQ& subq)
 {
   // Check for automatic ADPCM filter.
   if (s_mode.xa_filter && (s_last_sector_subheader.file_number != s_xa_filter_file_number ||
@@ -3183,13 +3183,14 @@ static s16 GetPeakVolume(const u8* raw_sector, u8 channel)
 #endif
 }
 
-void CDROM::ProcessCDDASector(const u8* raw_sector, const CDImage::SubChannelQ& subq)
+ALWAYS_INLINE_RELEASE void CDROM::ProcessCDDASector(const u8* raw_sector, const CDImage::SubChannelQ& subq,
+                                                    bool subq_valid)
 {
   // For CDDA sectors, the whole sector contains the audio data.
   Log_DevPrintf("Read sector %u as CDDA", s_current_lba);
 
   // The reporting doesn't happen if we're reading with the CDDA mode bit set.
-  if (s_drive_state == DriveState::Playing && s_mode.report_audio)
+  if (s_drive_state == DriveState::Playing && s_mode.report_audio && subq_valid)
   {
     const u8 frame_nibble = subq.absolute_frame_bcd >> 4;
 

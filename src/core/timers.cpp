@@ -66,7 +66,6 @@ struct CounterState
 
 static void UpdateCountingEnabled(CounterState& cs);
 static void CheckForIRQ(u32 index, u32 old_counter);
-static void UpdateIRQ(u32 index);
 
 static void AddSysClkTicks(void*, TickCount sysclk_ticks, TickCount ticks_late);
 
@@ -76,9 +75,9 @@ static void UpdateSysClkEvent();
 static std::unique_ptr<TimingEvent> s_sysclk_event;
 
 static std::array<CounterState, NUM_TIMERS> s_states{};
-static TickCount s_syclk_ticks_carry = 0; // 0 unless overclocking is enabled
-static u32 s_sysclk_div_8_carry = 0;      // partial ticks for timer 3 with sysclk/8
-};                                        // namespace Timers
+static TickCount s_sysclk_ticks_carry = 0; // 0 unless overclocking is enabled
+static u32 s_sysclk_div_8_carry = 0;       // partial ticks for timer 3 with sysclk/8
+};                                         // namespace Timers
 
 void Timers::Initialize()
 {
@@ -106,7 +105,8 @@ void Timers::Reset()
     cs.irq_done = false;
   }
 
-  s_syclk_ticks_carry = 0;
+  s_sysclk_event->Deactivate();
+  s_sysclk_ticks_carry = 0;
   s_sysclk_div_8_carry = 0;
   UpdateSysClkEvent();
 }
@@ -125,7 +125,7 @@ bool Timers::DoState(StateWrapper& sw)
     sw.Do(&cs.irq_done);
   }
 
-  sw.Do(&s_syclk_ticks_carry);
+  sw.Do(&s_sysclk_ticks_carry);
   sw.Do(&s_sysclk_div_8_carry);
 
   if (sw.IsReading())
@@ -136,7 +136,7 @@ bool Timers::DoState(StateWrapper& sw)
 
 void Timers::CPUClocksChanged()
 {
-  s_syclk_ticks_carry = 0;
+  s_sysclk_ticks_carry = 0;
 }
 
 bool Timers::IsUsingExternalClock(u32 timer)
@@ -236,24 +236,36 @@ void Timers::CheckForIRQ(u32 timer, u32 old_counter)
 
   if (interrupt_request)
   {
+    const InterruptController::IRQ irqnum =
+      static_cast<InterruptController::IRQ>(static_cast<u32>(InterruptController::IRQ::TMR0) + timer);
     if (!cs.mode.irq_pulse_n)
     {
-      // this is actually low for a few cycles
-      cs.mode.interrupt_request_n = false;
-      UpdateIRQ(timer);
+      if (!cs.irq_done || cs.mode.irq_repeat)
+      {
+        // this is actually low for a few cycles
+        Log_DebugPrintf("Raising timer %u pulse IRQ", timer);
+        InterruptController::SetLineState(irqnum, false);
+        InterruptController::SetLineState(irqnum, true);
+      }
+
+      cs.irq_done = true;
       cs.mode.interrupt_request_n = true;
     }
     else
     {
+      // TODO: How does the non-repeat mode work here?
       cs.mode.interrupt_request_n ^= true;
-      UpdateIRQ(timer);
+      if (!cs.mode.interrupt_request_n)
+        Log_DebugPrintf("Raising timer %u alternate IRQ", timer);
+
+      InterruptController::SetLineState(irqnum, !cs.mode.interrupt_request_n);
     }
   }
 }
 
 void Timers::AddSysClkTicks(void*, TickCount sysclk_ticks, TickCount ticks_late)
 {
-  sysclk_ticks = System::UnscaleTicksToOverclock(sysclk_ticks, &s_syclk_ticks_carry);
+  sysclk_ticks = System::UnscaleTicksToOverclock(sysclk_ticks, &s_sysclk_ticks_carry);
 
   if (!s_states[0].external_counting_enabled && s_states[0].counting_enabled)
     AddTicks(0, sysclk_ticks);
@@ -371,10 +383,11 @@ void Timers::WriteRegister(u32 offset, u32 value)
       cs.use_external_clock = (cs.mode.clock_source & (timer_index == 2 ? 2 : 1)) != 0;
       cs.counter = 0;
       cs.irq_done = false;
+      InterruptController::SetLineState(
+        static_cast<InterruptController::IRQ>(static_cast<u32>(InterruptController::IRQ::TMR0) + timer_index), false);
 
       UpdateCountingEnabled(cs);
       CheckForIRQ(timer_index, cs.counter);
-      UpdateIRQ(timer_index);
       UpdateSysClkEvent();
     }
     break;
@@ -421,18 +434,6 @@ void Timers::UpdateCountingEnabled(CounterState& cs)
   }
 
   cs.external_counting_enabled = cs.use_external_clock && cs.counting_enabled;
-}
-
-void Timers::UpdateIRQ(u32 index)
-{
-  CounterState& cs = s_states[index];
-  if (cs.mode.interrupt_request_n || (!cs.mode.irq_repeat && cs.irq_done))
-    return;
-
-  Log_DebugPrintf("Raising timer %u IRQ", index);
-  cs.irq_done = true;
-  InterruptController::InterruptRequest(
-    static_cast<InterruptController::IRQ>(static_cast<u32>(InterruptController::IRQ::TMR0) + index));
 }
 
 TickCount Timers::GetTicksUntilNextInterrupt()
