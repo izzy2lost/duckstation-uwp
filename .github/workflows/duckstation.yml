@@ -13,8 +13,21 @@ jobs:
         with:
           fetch-depth: 0 # Ensure the full repository is checked out
 
+      - name: Generate Self-Signed Certificate
+        id: cert
+        run: |
+          $cert = New-SelfSignedCertificate -CertStoreLocation "Cert:\CurrentUser\My" -Subject "CN=MyUWPCert" -KeyAlgorithm RSA -KeyLength 2048 -Provider "Microsoft Enhanced RSA and AES Cryptographic Provider" -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(1)
+          $thumbprint = $cert.Thumbprint
+          echo "THUMBPRINT=$thumbprint" >> $GITHUB_ENV
+        shell: pwsh
+
       - name: Set up MSBuild
         uses: microsoft/setup-msbuild@v2
+
+      - name: Setup NuGet.exe
+        uses: NuGet/setup-nuget@v2
+        with:
+          nuget-version: latest
 
       - name: Download and Extract Dependencies
         run: |
@@ -30,14 +43,7 @@ jobs:
         shell: pwsh
         run: |
           echo "Building DuckStation UWP project..."
-          msbuild duckstation.sln /p:Configuration=ReleaseUWP /p:Platform=x64 /t:Restore,Build
-
-      - name: Create App Packages
-        shell: pwsh
-        run: |
-          echo "Creating App Packages..."
-          $projectPath = "duckstation-uwp"
-          Start-Process "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\Common7\IDE\devenv.exe" -ArgumentList "$PWD\duckstation.sln", "/Build ReleaseUWP", "/Project $projectPath", "/Out build.log" -Wait
+          msbuild duckstation.sln /p:Configuration=ReleaseUWP /p:Platform=x64 /p:AppxPackageSigningEnabled=true /p:PackageCertificateThumbprint=$env:THUMBPRINT /t:Restore,Build
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v3
