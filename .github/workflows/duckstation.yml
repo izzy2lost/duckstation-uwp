@@ -1,0 +1,46 @@
+name: Build and Publish DuckStation UWP
+
+on:
+  workflow_dispatch: # Allows manual dispatch of the workflow
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0 # Ensure the full repository is checked out
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Download and Extract Dependencies
+        run: |
+          echo "Downloading dependencies..."
+          curl -L -o deps-x64.7z https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
+          echo "Extracting dependencies..."
+          7z x deps-x64.7z -odep\msvc
+
+      - name: Restore NuGet Packages
+        run: nuget restore duckstation.sln
+
+      - name: Build DuckStation UWP Project
+        shell: pwsh
+        run: |
+          echo "Building DuckStation UWP project..."
+          msbuild duckstation.sln /p:Configuration=ReleaseUWP /p:Platform=x64 /t:Restore,Build
+
+      - name: Create App Packages
+        shell: pwsh
+        run: |
+          echo "Creating App Packages..."
+          $projectPath = "duckstation-uwp"
+          Start-Process "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\Common7\IDE\devenv.exe" -ArgumentList "$PWD\duckstation.sln", "/Build ReleaseUWP", "/Project $projectPath", "/Out build.log" -Wait
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: DuckStation-UWP-Build
+          path: ${{ github.workspace }}/duckstation-uwp/AppPackages
