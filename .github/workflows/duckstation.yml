@@ -1,33 +1,57 @@
-name: Build and Publish DuckStation UWP
+name: DuckStation UWP Builder
 
+# Controls when the workflow will run
 on:
-  workflow_dispatch: # Allows manual dispatch of the workflow
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag Name'
+        required: true
+        default: 'v1.0.0'
+      package_name:
+        description: 'Package Name'
+        required: true
+        default: 'DuckStation-UWP'
 
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   build:
     runs-on: windows-2022
+    
+    env:
+      SolutionPath: duckstation.sln
+      Platform: x64
+      Configuration: ReleaseUWP
+      BuildMode: SideLoadOnly
+      AppxBundle: Never      
+      ProjectPath: duckstation-uwp
+      ProjectDirectory: .\duckstation-uwp
+      PackageOutputRootDir: C:\AppPackage
+      PackageOutputDir: DuckStation
 
     steps:
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+        
+      - name: Setup NuGet.exe for use with actions
+        uses: NuGet/setup-nuget@v2
+
       - name: Checkout Repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0 # Ensure the full repository is checked out
 
       - name: Generate Self-Signed Certificate
-        id: cert
+        id: generate_cert
         run: |
-          $cert = New-SelfSignedCertificate -CertStoreLocation "Cert:\CurrentUser\My" -Subject "CN=MyUWPCert" -KeyAlgorithm RSA -KeyLength 2048 -Provider "Microsoft Enhanced RSA and AES Cryptographic Provider" -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(1)
-          $thumbprint = $cert.Thumbprint
-          echo "THUMBPRINT=$thumbprint" >> $GITHUB_ENV
+          $cert = New-SelfSignedCertificate -CertStoreLocation "Cert:\CurrentUser\My" -Subject "CN=MyUWPCert" -KeyAlgorithm RSA -KeyLength 2048 -Provider "Microsoft Enhanced RSA and AES Cryptographic Provider" -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(1) -Type CodeSigningCert
+          echo "THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
         shell: pwsh
 
-      - name: Set up MSBuild
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Setup NuGet.exe
-        uses: NuGet/setup-nuget@v2
-        with:
-          nuget-version: latest
+      - name: Set Package Name
+        id: set_package_name
+        run: |
+          echo "PACKAGE_NAME=${{ github.event.inputs.package_name }}_${{ github.event.inputs.tag_name }}" >> $GITHUB_ENV
 
       - name: Download and Extract Dependencies
         run: |
@@ -37,16 +61,55 @@ jobs:
           7z x deps-x64.7z -odep\msvc
 
       - name: Restore NuGet Packages
-        run: nuget restore duckstation.sln
+        run: nuget restore $env:SolutionPath
 
-      - name: Build DuckStation UWP Project
-        shell: pwsh
+      - name: App Build
         run: |
-          echo "Building DuckStation UWP project..."
-          msbuild duckstation.sln /p:Configuration=ReleaseUWP /p:Platform=x64 /p:AppxPackageSigningEnabled=true /p:PackageCertificateThumbprint=$env:THUMBPRINT /t:Restore,Build
+          msbuild $env:SolutionPath `
+            /p:Platform=$env:Platform `
+            /p:Configuration=$env:Configuration `
+            /p:UapAppxPackageBuildMode=$env:BuildMode `
+            /p:AppxBundle=$env:AppxBundle `
+            /p:PackageCertificateThumbprint="${{ env.THUMBPRINT }}" `
+            /p:AppxPackageTestDir="${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}" `
+            /restore
+        shell: pwsh
 
-      - name: Upload Build Artifacts
+      - name: Clean the Package
+        run: |
+          $PackagePath = "${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}"
+          if (Test-Path $PackagePath) {
+            Write-Host "Cleaning package directory: $PackagePath"
+            Remove-Item -Recurse -path "$PackagePath\Add-AppDevPackage.resources" -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -path "$PackagePath\TelemetryDependencies" -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -path "$PackagePath\Dependencies\arm" -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -path "$PackagePath\Dependencies\arm64" -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -path "$PackagePath\Dependencies\x86" -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -path "$PackagePath\Dependencies\Win32" -ErrorAction SilentlyContinue
+            Remove-Item -path "$PackagePath\Add-AppDevPackage.ps1" -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -path "$PackagePath\Install.ps1" -ErrorAction SilentlyContinue
+          } else {
+            Write-Host "Package path does not exist: $PackagePath"
+            exit 1
+          }
+        shell: pwsh
+          
+      - name: Create Archive
+        run: |
+          $PackagePath = "${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}"
+          if (Test-Path $PackagePath) {
+            Write-Host "Creating archive for: $PackagePath"
+            Compress-Archive -Path "$PackagePath\*" -DestinationPath "${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}.zip"
+            Write-Host "Contents of package output directory after archiving:"
+            Get-ChildItem -Path "${{ env.PackageOutputRootDir }}" -Recurse
+          } else {
+            Write-Host "Package path does not exist for archiving: $PackagePath"
+            exit 1
+          }
+        shell: pwsh
+       
+      - name: Upload Build Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: DuckStation-UWP-Build
-          path: ${{ github.workspace }}/duckstation-uwp/AppPackages
+          name: ${{ github.event.inputs.package_name }} Build
+          path: ${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}.zip
