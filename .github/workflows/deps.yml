@@ -1,0 +1,20 @@
+name: Download and Upload Dependencies
+
+on:
+  workflow_dispatch:
+
+jobs:
+  download-and-upload:
+    runs-on: windows-2022
+
+    steps:
+      - name: Download Dependencies
+        run: |
+          echo "Downloading dependencies..."
+          curl -L -o deps-x64.7z https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: duckstation-deps-x64
+          path: deps-x64.7z
