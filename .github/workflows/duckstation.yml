@@ -44,23 +44,6 @@ jobs:
           Move-Item -Path "duckstation-uwp-2024-03-09/*" -Destination "." -Force
           Remove-Item -Recurse -Force "duckstation-uwp-2024-03-09"
 
-      - name: Download SDL
-        run: |
-          echo "Downloading SDL..."
-          wget https://www.libsdl.org/release/SDL2-devel-2.0.14-VC.zip
-        shell: pwsh
-
-      - name: Extract SDL
-        run: |
-          echo "Extracting SDL..."
-          Expand-Archive -Path SDL2-devel-2.0.14-VC.zip -DestinationPath ./
-          if (Test-Path -Path "$env:SDLPath\include\SDL.h") {
-            echo "SDL extracted successfully."
-          } else {
-            Write-Error "Failed to extract SDL."
-          }
-        shell: pwsh
-
       - name: Download Dependencies
         run: |
           echo "Downloading dependencies..."
