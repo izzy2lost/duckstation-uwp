@@ -38,9 +38,9 @@ jobs:
 
       - name: Download and Extract Repository
         run: |
-          Invoke-WebRequest -Uri "https://drive.google.com/file/d/1PXuehNwoDPSPZZ8TBNwudvByfzly5k4N/view?usp=drivesdk" -OutFile "repo.zip"
+          Invoke-WebRequest -Uri "https://github.com/izzy2lost/duckstation-uwp/releases/download/1.0/duckstation-uwp.zip" -OutFile "repo.zip"
           Expand-Archive -Path repo.zip -DestinationPath .
-          Move-Item -Path "duckstation-uwp-2024-03-09/*" -Destination "." -Force
+          Move-Item -Path "duckstation-uwp/*" -Destination "." -Force
           Remove-Item -Recurse -Force "duckstation-uwp-2024-03-09"
 
       - name: Display Environment Variables
