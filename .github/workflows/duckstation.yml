@@ -17,13 +17,13 @@ jobs:
     runs-on: windows-2022
 
     env:
-      SolutionPath: duckstation-uwp-2024-03-09/duckstation.sln
+      SolutionPath: duckstation-uwp/duckstation.sln
       Platform: x64
       Configuration: ReleaseUWP
       BuildMode: SideLoadOnly
       AppxBundle: Never      
-      ProjectPath: duckstation-uwp-2024-03-09/duckstation-uwp
-      ProjectDirectory: .\duckstation-uwp-2024-03-09\duckstation-uwp
+      ProjectPath: duckstation-uwp/duckstation-uwp
+      ProjectDirectory: .\duckstation-uwp\duckstation-uwp
       PackageOutputRootDir: C:\AppPackage
       PackageOutputDir: DuckStation
 
@@ -38,6 +38,20 @@ jobs:
         run: |
           Invoke-WebRequest -Uri "https://github.com/irixaligned/duckstation-uwp/archive/refs/tags/2024-03-09.zip" -OutFile "repo.zip"
           Expand-Archive -Path repo.zip -DestinationPath .
+          Rename-Item -Path duckstation-uwp-2024-03-09 -NewName duckstation-uwp
+
+      - name: Download and Extract Dependencies
+        run: |
+          echo "Downloading dependencies..."
+          curl -L -o deps-x64.7z https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
+          echo "Extracting dependencies..."
+          7z x deps-x64.7z -oduckstation-uwp/dep/msvc/deps-x64
+
+      - name: List Extracted Dependencies
+        run: |
+          echo "Listing extracted dependencies..."
+          Get-ChildItem -Recurse -Path duckstation-uwp/dep/msvc/deps-x64
+        shell: pwsh
 
       - name: Generate Self-Signed Certificate
         id: generate_cert
@@ -50,13 +64,6 @@ jobs:
         id: set_package_name
         run: |
           echo "PACKAGE_NAME=${{ github.event.inputs.package_name }}_${{ github.event.inputs.tag_name }}" >> $GITHUB_ENV
-
-      - name: Download and Extract Dependencies
-        run: |
-          echo "Downloading dependencies..."
-          curl -L -o deps-x64.7z https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
-          echo "Extracting dependencies..."
-          7z x deps-x64.7z -odep\msvc
 
       - name: Restore NuGet Packages
         run: nuget restore $env:SolutionPath
