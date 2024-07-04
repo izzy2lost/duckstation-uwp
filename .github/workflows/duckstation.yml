@@ -45,6 +45,25 @@ jobs:
           echo "Extracting dependencies..."
           7z x deps-x64.7z -odep/msvc/deps-x64
 
+      - name: List Extracted Dependencies
+        run: |
+          echo "Listing contents of dep/msvc/deps-x64/bin..."
+          Get-ChildItem -Recurse -Path dep/msvc/deps-x64/bin
+        shell: pwsh
+
+      - name: Display Environment Variables
+        run: |
+          echo "SolutionPath: $env:SolutionPath"
+          echo "Platform: $env:Platform"
+          echo "Configuration: $env:Configuration"
+          echo "BuildMode: $env:BuildMode"
+          echo "AppxBundle: $env:AppxBundle"
+          echo "ProjectPath: $env:ProjectPath"
+          echo "ProjectDirectory: $env:ProjectDirectory"
+          echo "PackageOutputRootDir: $env:PackageOutputRootDir"
+          echo "PackageOutputDir: $env:PackageOutputDir"
+        shell: pwsh
+
       - name: Generate Self-Signed Certificate
         id: generate_cert
         run: |
@@ -65,8 +84,7 @@ jobs:
             /p:UapAppxPackageBuildMode=$env:BuildMode `
             /p:AppxBundle=$env:AppxBundle `
             /p:PackageCertificateThumbprint="${{ env.THUMBPRINT }}" `
-            /p:AppxPackageTestDir="${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}" `
-            /restore
+            /p:AppxPackageTestDir="${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}"
         shell: pwsh
 
       - name: Clean the Package
