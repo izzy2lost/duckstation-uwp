@@ -41,12 +41,18 @@ jobs:
       - name: Download Dependencies
         run: |
           echo "Downloading dependencies..."
-          curl -L https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
+          wget https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z -O deps-x64.7z
           if (Test-Path -Path "deps-x64.7z") {
             echo "Dependencies downloaded successfully."
           } else {
             Write-Error "Failed to download dependencies."
           }
+        shell: pwsh
+
+      - name: Verify Downloaded File
+        run: |
+          echo "Verifying downloaded file..."
+          Get-ChildItem -Path deps-x64.7z
         shell: pwsh
 
       - name: Extract Dependencies
@@ -134,7 +140,7 @@ jobs:
             exit 1
           }
         shell: pwsh
-         
+       
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
