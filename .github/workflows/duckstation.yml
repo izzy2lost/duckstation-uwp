@@ -41,7 +41,7 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/izzy2lost/duckstation-uwp/releases/download/1.0/duckstation-uwp.zip" -OutFile "repo.zip"
           Expand-Archive -Path repo.zip -DestinationPath .
           Move-Item -Path "duckstation-uwp/*" -Destination "." -Force
-          Remove-Item -Recurse -Force "duckstation-uwp-2024-03-09"
+          Remove-Item -Recurse -Force "duckstation-uwp"
 
       - name: Display Environment Variables
         run: |
