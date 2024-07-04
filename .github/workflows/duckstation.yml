@@ -21,7 +21,7 @@ jobs:
       Platform: x64
       Configuration: ReleaseUWP
       BuildMode: SideLoadOnly
-      AppxBundle: Never      
+      AppxBundle: Never
       ProjectPath: src/duckstation-uwp
       ProjectDirectory: src/duckstation-uwp
       PackageOutputRootDir: C:\AppPackage
@@ -37,10 +37,12 @@ jobs:
           choco install wget -y
         shell: pwsh
 
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
+      - name: Download and Extract Repository
+        run: |
+          Invoke-WebRequest -Uri "https://drive.google.com/file/d/1PXuehNwoDPSPZZ8TBNwudvByfzly5k4N/view?usp=drivesdk" -OutFile "repo.zip"
+          Expand-Archive -Path repo.zip -DestinationPath .
+          Move-Item -Path "duckstation-uwp-2024-03-09/*" -Destination "." -Force
+          Remove-Item -Recurse -Force "duckstation-uwp-2024-03-09"
 
       - name: Display Environment Variables
         run: |
@@ -53,7 +55,6 @@ jobs:
           echo "ProjectDirectory: $env:ProjectDirectory"
           echo "PackageOutputRootDir: $env:PackageOutputRootDir"
           echo "PackageOutputDir: $env:PackageOutputDir"
-          echo "SDLPath: $env:SDLPath"
         shell: pwsh
 
       - name: Generate Self-Signed Certificate
@@ -67,7 +68,6 @@ jobs:
         id: set_package_name
         run: |
           echo "PACKAGE_NAME=${{ github.event.inputs.package_name }}_${{ github.event.inputs.tag_name }}" >> $GITHUB_ENV
-
       - name: Restore NuGet Packages
         run: |
           msbuild $env:SolutionPath /t:restore /p:Configuration=$env:Configuration /p:Platform=$env:Platform /p:PlatformToolset=v143
@@ -79,8 +79,6 @@ jobs:
             /p:Platform=$env:Platform `
             /p:Configuration=$env:Configuration `
             /p:PlatformToolset=v143 `
-            /p:IncludePath="$env:SDLPath/include;$(IncludePath)" `
-            /p:LibraryPath="$env:SDLPath/lib/x64;$(LibraryPath)" `
             /p:UapAppxPackageBuildMode=$env:BuildMode `
             /p:AppxBundle=$env:AppxBundle `
             /p:PackageCertificateThumbprint="${{ env.THUMBPRINT }}" `
