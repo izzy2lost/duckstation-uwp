@@ -21,7 +21,7 @@ jobs:
       Platform: x64
       Configuration: ReleaseUWP
       BuildMode: SideLoadOnly
-      AppxBundle: Never      
+      AppxBundle: Never
       ProjectPath: src/duckstation-uwp
       ProjectDirectory: .\src\duckstation-uwp
       PackageOutputRootDir: C:\AppPackage
@@ -46,7 +46,7 @@ jobs:
           echo "Downloading dependencies..."
           curl -L -o deps-x64.7z https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
           echo "Extracting dependencies..."
-          7z x deps-x64.7z -odep/msvc/deps-x64
+          7z x deps-x64.7z -oduckstation-uwp/dep/msvc/deps-x64
 
       - name: Generate Self-Signed Certificate
         id: generate_cert
