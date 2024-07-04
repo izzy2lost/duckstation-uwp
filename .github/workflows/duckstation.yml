@@ -46,7 +46,7 @@ jobs:
       - name: Download Dependencies
         run: |
           echo "Downloading dependencies..."
-          wget https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z -O deps-x64.7z
+          wget https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
           if (Test-Path -Path "deps-x64.7z") {
             echo "Dependencies downloaded successfully."
           } else {
