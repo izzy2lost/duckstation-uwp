@@ -41,7 +41,7 @@ jobs:
       - name: Download Dependencies
         run: |
           echo "Downloading dependencies..."
-          curl -L -o deps-x64.7z https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
+          curl -L https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
           if (Test-Path -Path "deps-x64.7z") {
             echo "Dependencies downloaded successfully."
           } else {
