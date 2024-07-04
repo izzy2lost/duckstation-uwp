@@ -53,7 +53,7 @@ jobs:
       - name: Extract SDL
         run: |
           echo "Extracting SDL..."
-          Expand-Archive -Path SDL2.zip -DestinationPath SDL2
+          Expand-Archive -Path SDL2-devel-2.0.14-VC.zip 
           if (Test-Path -Path "$env:SDLPath\include\SDL.h") {
             echo "SDL extracted successfully."
           } else {
