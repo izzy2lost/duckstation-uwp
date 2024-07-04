@@ -35,9 +35,9 @@ jobs:
         run: |
           Invoke-WebRequest -Uri "https://github.com/irixaligned/duckstation-uwp/archive/refs/tags/2024-03-09.zip" -OutFile "repo.zip"
           Expand-Archive -Path repo.zip -DestinationPath .
-          Move-Item -Path "duckstation-uwp-2024-03-09/*" -Destination "duckstation-uwp" -Force
+          Move-Item -Path "duckstation-uwp-2024-03-09/*" -Destination "." -Force
           Remove-Item -Recurse -Force "duckstation-uwp-2024-03-09"
-
+          
       - name: Download and Extract Dependencies
         run: |
           echo "Downloading dependencies..."
