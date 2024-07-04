@@ -57,7 +57,7 @@ jobs:
       - name: Extract Dependencies
         run: |
           echo "Extracting dependencies..."
-          7z x deps-x64.7z -odep/msvc/deps-x64
+          7z x deps-x64.7z -odep/msvc/
           if (Test-Path -Path "dep/msvc/deps-x64/bin/rcc.exe") {
             echo "Dependencies extracted successfully."
           } else {
