@@ -21,7 +21,7 @@ jobs:
       Platform: x64
       Configuration: ReleaseUWP
       BuildMode: SideLoadOnly
-      AppxBundle: Never
+      AppxBundle: Never      
       ProjectPath: src/duckstation-uwp
       ProjectDirectory: src/duckstation-uwp
       PackageOutputRootDir: C:\AppPackage
@@ -37,40 +37,10 @@ jobs:
           choco install wget -y
         shell: pwsh
 
-      - name: Download and Extract Repository
-        run: |
-          Invoke-WebRequest -Uri "https://github.com/irixaligned/duckstation-uwp/archive/refs/tags/2024-03-09.zip" -OutFile "repo.zip"
-          Expand-Archive -Path repo.zip -DestinationPath .
-          Move-Item -Path "duckstation-uwp-2024-03-09/*" -Destination "." -Force
-          Remove-Item -Recurse -Force "duckstation-uwp-2024-03-09"
-
-      - name: Download Dependencies
-        run: |
-          echo "Downloading dependencies..."
-          wget https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z -O deps-x64.7z
-          if (Test-Path -Path "deps-x64.7z") {
-            echo "Dependencies downloaded successfully."
-          } else {
-            Write-Error "Failed to download dependencies."
-          }
-        shell: pwsh
-
-      - name: Extract Dependencies
-        run: |
-          echo "Extracting dependencies..."
-          7z x deps-x64.7z -odep/msvc/
-          if (Test-Path -Path "dep/msvc/deps-x64/bin/rcc.exe") {
-            echo "Dependencies extracted successfully."
-          } else {
-            Write-Error "Failed to extract dependencies."
-          }
-        shell: pwsh
-
-      - name: List Extracted Dependencies
-        run: |
-          echo "Listing contents of dep/msvc/deps-x64/bin..."
-          Get-ChildItem -Recurse -Path dep/msvc/deps-x64/bin
-        shell: pwsh
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
       - name: Display Environment Variables
         run: |
@@ -109,6 +79,8 @@ jobs:
             /p:Platform=$env:Platform `
             /p:Configuration=$env:Configuration `
             /p:PlatformToolset=v143 `
+            /p:IncludePath="$env:SDLPath/include;$(IncludePath)" `
+            /p:LibraryPath="$env:SDLPath/lib/x64;$(LibraryPath)" `
             /p:UapAppxPackageBuildMode=$env:BuildMode `
             /p:AppxBundle=$env:AppxBundle `
             /p:PackageCertificateThumbprint="${{ env.THUMBPRINT }}" `
