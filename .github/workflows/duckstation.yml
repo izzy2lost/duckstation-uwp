@@ -21,24 +21,21 @@ jobs:
       Platform: x64
       Configuration: ReleaseUWP
       BuildMode: SideLoadOnly
-      AppxBundle: Never
+      AppxBundle: Never      
       ProjectPath: src/duckstation-uwp
-      ProjectDirectory: .\src\duckstation-uwp
+      ProjectDirectory: src/duckstation-uwp
       PackageOutputRootDir: C:\AppPackage
       PackageOutputDir: DuckStation
 
     steps:
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
-        
-      - name: Setup NuGet.exe for use with actions
-        uses: NuGet/setup-nuget@v2
 
       - name: Download and Extract Repository
         run: |
           Invoke-WebRequest -Uri "https://github.com/irixaligned/duckstation-uwp/archive/refs/tags/2024-03-09.zip" -OutFile "repo.zip"
           Expand-Archive -Path repo.zip -DestinationPath .
-          Move-Item -Path "duckstation-uwp-2024-03-09/*" -Destination "." -Force
+          Move-Item -Path "duckstation-uwp-2024-03-09/*" -Destination "duckstation-uwp" -Force
           Remove-Item -Recurse -Force "duckstation-uwp-2024-03-09"
 
       - name: Download and Extract Dependencies
@@ -59,9 +56,6 @@ jobs:
         id: set_package_name
         run: |
           echo "PACKAGE_NAME=${{ github.event.inputs.package_name }}_${{ github.event.inputs.tag_name }}" >> $GITHUB_ENV
-
-      - name: Restore NuGet Packages
-        run: nuget restore $env:SolutionPath
 
       - name: App Build
         run: |
