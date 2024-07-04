@@ -26,7 +26,6 @@ jobs:
       ProjectDirectory: src/duckstation-uwp
       PackageOutputRootDir: C:\AppPackage
       PackageOutputDir: DuckStation
-      SDLPath: D:\a\duckstation-uwp\duckstation-uwp\SDL2
 
     steps:
       - name: Add msbuild to PATH
