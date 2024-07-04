@@ -22,8 +22,8 @@ jobs:
       Configuration: ReleaseUWP
       BuildMode: SideLoadOnly
       AppxBundle: Never      
-      ProjectPath: duckstation-uwp/duckstation-uwp
-      ProjectDirectory: .\duckstation-uwp\duckstation-uwp
+      ProjectPath: duckstation-uwp/src/duckstation-uwp
+      ProjectDirectory: .\duckstation-uwp\src\duckstation-uwp
       PackageOutputRootDir: C:\AppPackage
       PackageOutputDir: DuckStation
 
