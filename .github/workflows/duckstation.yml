@@ -46,7 +46,7 @@ jobs:
       - name: Download Dependencies
         run: |
           echo "Downloading dependencies..."
-          wget https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
+          wget https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z -O deps-x64.7z
           if (Test-Path -Path "deps-x64.7z") {
             echo "Dependencies downloaded successfully."
           } else {
@@ -96,16 +96,21 @@ jobs:
         run: |
           echo "PACKAGE_NAME=${{ github.event.inputs.package_name }}_${{ github.event.inputs.tag_name }}" >> $GITHUB_ENV
 
+      - name: Restore NuGet Packages
+        run: |
+          msbuild $env:SolutionPath /t:restore /p:Configuration=$env:Configuration /p:Platform=$env:Platform /p:PlatformToolset=v143
+        shell: pwsh
+
       - name: App Build
         run: |
           msbuild $env:SolutionPath `
             /p:Platform=$env:Platform `
             /p:Configuration=$env:Configuration `
+            /p:PlatformToolset=v143 `
             /p:UapAppxPackageBuildMode=$env:BuildMode `
             /p:AppxBundle=$env:AppxBundle `
             /p:PackageCertificateThumbprint="${{ env.THUMBPRINT }}" `
             /p:AppxPackageTestDir="${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}"
-            /t:restore
         shell: pwsh
 
       - name: Clean the Package
