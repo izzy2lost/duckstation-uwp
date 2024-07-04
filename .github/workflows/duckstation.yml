@@ -15,15 +15,15 @@ on:
 jobs:
   build:
     runs-on: windows-2022
-    
+
     env:
-      SolutionPath: duckstation.sln
+      SolutionPath: duckstation-uwp-2024-03-09/duckstation.sln
       Platform: x64
-      Configuration: Release
+      Configuration: ReleaseUWP
       BuildMode: SideLoadOnly
       AppxBundle: Never      
-      ProjectPath: duckstation-uwp
-      ProjectDirectory: .\duckstation-uwp
+      ProjectPath: duckstation-uwp-2024-03-09/duckstation-uwp
+      ProjectDirectory: .\duckstation-uwp-2024-03-09\duckstation-uwp
       PackageOutputRootDir: C:\AppPackage
       PackageOutputDir: DuckStation
 
@@ -34,11 +34,10 @@ jobs:
       - name: Setup NuGet.exe for use with actions
         uses: NuGet/setup-nuget@v2
 
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-        with:
-          submodules: true
-          fetch-depth: 0 # Ensure the full repository is checked out
+      - name: Download and Extract Repository
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/irixaligned/duckstation-uwp/archive/refs/tags/2024-03-09.zip" -OutFile "repo.zip"
+          Expand-Archive -Path repo.zip -DestinationPath .
 
       - name: Generate Self-Signed Certificate
         id: generate_cert
