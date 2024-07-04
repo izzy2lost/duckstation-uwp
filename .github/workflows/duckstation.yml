@@ -38,14 +38,15 @@ jobs:
         run: |
           Invoke-WebRequest -Uri "https://github.com/irixaligned/duckstation-uwp/archive/refs/tags/2024-03-09.zip" -OutFile "repo.zip"
           Expand-Archive -Path repo.zip -DestinationPath .
-          Rename-Item -Path duckstation-uwp-2024-03-09 -NewName duckstation-uwp
+          Move-Item -Path "duckstation-uwp-2024-03-09/*" -Destination "." -Force
+          Remove-Item -Recurse -Force "duckstation-uwp-2024-03-09"
 
       - name: Download and Extract Dependencies
         run: |
           echo "Downloading dependencies..."
           curl -L -o deps-x64.7z https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
           echo "Extracting dependencies..."
-          7z x deps-x64.7z -oduckstation-uwp/dep/msvc/deps-x64
+          7z x deps-x64.7z -odep/msvc/deps-x64
 
       - name: Generate Self-Signed Certificate
         id: generate_cert
