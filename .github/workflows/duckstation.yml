@@ -31,6 +31,11 @@ jobs:
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
 
+      - name: Install wget
+        run: |
+          choco install wget -y
+        shell: pwsh
+
       - name: Download and Extract Repository
         run: |
           Invoke-WebRequest -Uri "https://github.com/irixaligned/duckstation-uwp/archive/refs/tags/2024-03-09.zip" -OutFile "repo.zip"
@@ -41,7 +46,7 @@ jobs:
       - name: Download Dependencies
         run: |
           echo "Downloading dependencies..."
-          curl -L -o deps-x64.7z https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
+          wget https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z -O deps-x64.7z
           if (Test-Path -Path "deps-x64.7z") {
             echo "Dependencies downloaded successfully."
           } else {
@@ -52,7 +57,7 @@ jobs:
       - name: Extract Dependencies
         run: |
           echo "Extracting dependencies..."
-          7z x deps-x64.7z -odep/msvc/deps-x64 -r
+          7z x deps-x64.7z -odep/msvc/deps-x64
           if (Test-Path -Path "dep/msvc/deps-x64/bin/rcc.exe") {
             echo "Dependencies extracted successfully."
           } else {
