@@ -109,7 +109,6 @@ jobs:
             /p:Platform=$env:Platform `
             /p:Configuration=$env:Configuration `
             /p:PlatformToolset=v143 `
-            /p:IncludePath="$env:SDLPath/include;$(IncludePath)" `
             /p:LibraryPath="$env:SDLPath/lib/x64;$(LibraryPath)" `
             /p:UapAppxPackageBuildMode=$env:BuildMode `
             /p:AppxBundle=$env:AppxBundle `
