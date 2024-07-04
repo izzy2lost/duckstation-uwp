@@ -41,7 +41,7 @@ jobs:
       - name: Download Dependencies
         run: |
           echo "Downloading dependencies..."
-          wget https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z -O deps-x64.7z
+          curl -L -o deps-x64.7z https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
           if (Test-Path -Path "deps-x64.7z") {
             echo "Dependencies downloaded successfully."
           } else {
@@ -49,16 +49,10 @@ jobs:
           }
         shell: pwsh
 
-      - name: Verify Downloaded File
-        run: |
-          echo "Verifying downloaded file..."
-          Get-ChildItem -Path deps-x64.7z
-        shell: pwsh
-
       - name: Extract Dependencies
         run: |
           echo "Extracting dependencies..."
-          7z x deps-x64.7z -odep/msvc/deps-x64
+          7z x deps-x64.7z -odep/msvc/deps-x64 -r
           if (Test-Path -Path "dep/msvc/deps-x64/bin/rcc.exe") {
             echo "Dependencies extracted successfully."
           } else {
