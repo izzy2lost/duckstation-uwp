@@ -47,7 +47,7 @@ jobs:
       - name: Download SDL
         run: |
           echo "Downloading SDL..."
-          wget https://www.libsdl.org/release/SDL2-devel-2.0.14-VC.zip -O SDL2.zip
+          wget https://www.libsdl.org/release/SDL2-devel-2.0.14-VC.zip
           if (Test-Path -Path "SDL2.zip") {
             echo "SDL downloaded successfully."
           } else {
