@@ -17,13 +17,13 @@ jobs:
     runs-on: windows-2022
 
     env:
-      SolutionPath: duckstation-uwp/duckstation.sln
+      SolutionPath: duckstation.sln
       Platform: x64
       Configuration: ReleaseUWP
       BuildMode: SideLoadOnly
       AppxBundle: Never      
-      ProjectPath: duckstation-uwp/src/duckstation-uwp
-      ProjectDirectory: .\duckstation-uwp\src\duckstation-uwp
+      ProjectPath: src/duckstation-uwp
+      ProjectDirectory: .\src\duckstation-uwp
       PackageOutputRootDir: C:\AppPackage
       PackageOutputDir: DuckStation
 
@@ -46,12 +46,6 @@ jobs:
           curl -L -o deps-x64.7z https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
           echo "Extracting dependencies..."
           7z x deps-x64.7z -oduckstation-uwp/dep/msvc/deps-x64
-
-      - name: List Extracted Dependencies
-        run: |
-          echo "Listing extracted dependencies..."
-          Get-ChildItem -Recurse -Path duckstation-uwp/dep/msvc/deps-x64
-        shell: pwsh
 
       - name: Generate Self-Signed Certificate
         id: generate_cert
