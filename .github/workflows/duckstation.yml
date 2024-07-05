@@ -36,12 +36,10 @@ jobs:
           choco install wget -y
         shell: pwsh
 
-      - name: Download and Extract Repository
+      - name: Clone Repository
         run: |
-          Invoke-WebRequest -Uri "https://github.com/izzy2lost/duckstation-uwp/releases/download/1.0/duckstation-uwp.zip" -OutFile "repo.zip"
-          Expand-Archive -Path repo.zip -DestinationPath .
-          Move-Item -Path "duckstation-uwp/*" -Destination "." -Force
-          Remove-Item -Recurse -Force "duckstation-uwp"
+          git clone --recursive https://github.com/izzy2fancy/duckstation-uwp.git
+        shell: pwsh
 
       - name: Display Environment Variables
         run: |
