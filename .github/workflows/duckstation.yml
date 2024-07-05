@@ -38,7 +38,7 @@ jobs:
 
       - name: Clone Repository
         run: |
-          git clone --recursive https://github.com/izzy2fancy/duckstation-uwp.git
+          git clone --recursive https://github.com/izzy2fancy/duckstation-uwp.git .
         shell: pwsh
 
       - name: Display Environment Variables
