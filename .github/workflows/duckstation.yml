@@ -44,13 +44,13 @@ jobs:
         run: gdown https://drive.google.com/uc?id=1WsxH-kiVht1l0CHcrAg_lsamWL7Cis19 -O download.zip
 
       - name: Extract downloaded file
-        run: unzip download.zip -d extracted
+        run: Expand-Archive -Path download.zip -DestinationPath extracted
 
       - name: Move extracted files to root
         run: |
-          shopt -s dotglob
-          mv extracted/* .
+          Get-ChildItem -Path extracted -Recurse | Move-Item -Destination .
           ls # List the contents to verify
+        shell: pwsh
 
       - name: Download and Extract Dependencies Pack
         run: |
