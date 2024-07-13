@@ -28,9 +28,7 @@ jobs:
       PackageOutputDir: DuckStation
 
     steps:
-      - name: Add msbuild to PATH
-        uses: microsoft/setup-msbuild@v2
-
+      
       - name: Install wget and 7zip
         run: |
           choco install wget -y
@@ -42,29 +40,20 @@ jobs:
 
       - name: Download and Extract Repository
         run: |
-          Invoke-WebRequest -Uri "https://github.com/izzy2lost/duckstation-uwp/releases/download/1.0/duckstation-uwp.zip" -OutFile "repo.zip"
+          gdown https://drive.google.com/uc?id=1WsxH-kiVht1l0CHcrAg_lsamWL7Cis19 -O repo.zip
           Expand-Archive -Path repo.zip -DestinationPath .
           Move-Item -Path "duckstation-uwp/*" -Destination "." -Force
           Remove-Item -Recurse -Force "duckstation-uwp"
-      
+        shell: pwsh
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2 
+
       - name: Download and Extract Dependencies Pack
         run: |
           wget https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
           7z x deps-x64.7z -odep/msvc
-        shell: pwsh
-
-      - name: Display Environment Variables
-        run: |
-          echo "SolutionPath: $env:SolutionPath"
-          echo "Platform: $env:Platform"
-          echo "Configuration: $env:Configuration"
-          echo "BuildMode: $env:BuildMode"
-          echo "AppxBundle: $env:AppxBundle"
-          echo "ProjectPath: $env:ProjectPath"
-          echo "ProjectDirectory: $env:ProjectDirectory"
-          echo "PackageOutputRootDir: $env:PackageOutputRootDir"
-          echo "PackageOutputDir: $env:PackageOutputDir"
-        shell: pwsh
+        shell: pwsh      
 
       - name: Generate Self-Signed Certificate
         id: generate_cert
