@@ -46,6 +46,12 @@ jobs:
           Remove-Item -Recurse -Force "duckstation-uwp"
         shell: pwsh
 
+      - name: Download and Extract Dependencies Pack
+        run: |
+          wget https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
+          7z x deps-x64.7z -odep/msvc
+        shell: pwsh
+
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2             
 
