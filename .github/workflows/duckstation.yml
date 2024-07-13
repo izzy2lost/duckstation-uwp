@@ -42,13 +42,9 @@ jobs:
           choco install 7zip -y
         shell: pwsh
 
-      - name: Download Dependencies Pack
+      - name: Download and Extract Dependencies Pack
         run: |
-          wget https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z -OutFile deps-x64.7z
-        shell: pwsh
-
-      - name: Extract Dependencies Pack
-        run: |
+          wget https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
           7z x deps-x64.7z -odep/msvc
         shell: pwsh
 
