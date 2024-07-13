@@ -37,13 +37,20 @@ jobs:
           choco install 7zip -y
         shell: pwsh
 
-      - name: Download and Unzip Repository
+      - name: Install gdown
+        run: pip install gdown
+
+      - name: Download file from Google Drive
+        run: gdown https://drive.google.com/uc?id=1WsxH-kiVht1l0CHcrAg_lsamWL7Cis19 -O download.zip
+
+      - name: Extract downloaded file
+        run: unzip download.zip -d extracted
+
+      - name: Move extracted files to root
         run: |
-          wget https://github.com/irixaligned/duckstation-uwp/archive/refs/tags/2024-03-09.zip -O repo.zip
-          7z x repo.zip -o./
-          Move-Item -Path ./duckstation-uwp-2024-03-09/* -Destination ./ -Force
-          Remove-Item -Path ./duckstation-uwp-2024-03-09 -Recurse -Force
-        shell: pwsh
+          shopt -s dotglob
+          mv extracted/* .
+          ls # List the contents to verify
 
       - name: Download and Extract Dependencies Pack
         run: |
