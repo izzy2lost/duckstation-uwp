@@ -41,10 +41,10 @@ jobs:
         run: pip install gdown
 
       - name: Download file from Google Drive
-        run: gdown https://drive.google.com/uc?id=1WsxH-kiVht1l0CHcrAg_lsamWL7Cis19 -O download.zip
+        run: gdown https://drive.google.com/uc?id=1WsxH-kiVht1l0CHcrAg_lsamWL7Cis19 -O 
 
       - name: Extract downloaded file
-        run: Expand-Archive -Path download.zip -DestinationPath extracted
+        run: Expand-Archive -Path -DestinationPath extracted
 
       - name: Move extracted files to root
         run: |
@@ -82,12 +82,7 @@ jobs:
         id: set_package_name
         run: |
           echo "PACKAGE_NAME=${{ github.event.inputs.package_name }}_${{ github.event.inputs.tag_name }}" >> $GITHUB_ENV
-
-      - name: Restore NuGet Packages
-        run: |
-          msbuild $env:SolutionPath /t:restore /p:Configuration=$env:Configuration /p:Platform=$env:Platform /p:PlatformToolset=v143
-        shell: pwsh
-
+      
       - name: App Build
         run: |
           msbuild $env:SolutionPath `
@@ -98,13 +93,4 @@ jobs:
             /p:AppxBundle=$env:AppxBundle `
             /p:PackageCertificateThumbprint="${{ env.THUMBPRINT }}" `
             /p:AppxPackageTestDir="${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}"
-        shell: pwsh
-
-      - name: Check Build Errors
-        if: failure()
-        run: |
-          echo "Build failed. Please check the build log for details."
-          type D:\a\duckstation-uwp\duckstation-uwp\src\duckstation-qt\audiosettingswidget.cpp
-          type D:\a\duckstation-uwp\duckstation-uwp\dep\vixl\src\code-buffer-vixl.cc
-          type D:\a\duckstation-uwp\duckstation-uwp\src\duckstation-regtest\regtest_host.cpp
-        shell: pwsh
+        shell: pwsh      
