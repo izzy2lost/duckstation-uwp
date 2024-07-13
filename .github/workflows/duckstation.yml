@@ -28,16 +28,6 @@ jobs:
       PackageOutputDir: DuckStation
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-        with:
-          ref: refs/heads/uwp
-          submodules: true
-
-      - name: Checkout Specific Commit
-        run: git checkout e080c27
-        shell: pwsh
-
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
 
@@ -45,6 +35,14 @@ jobs:
         run: |
           choco install wget -y
           choco install 7zip -y
+        shell: pwsh
+
+      - name: Download and Unzip Repository
+        run: |
+          wget https://github.com/irixaligned/duckstation-uwp/archive/refs/tags/2024-03-09.zip -O repo.zip
+          7z x repo.zip -o./
+          Move-Item -Path ./duckstation-uwp-2024-03-09/* -Destination ./ -Force
+          Remove-Item -Path ./duckstation-uwp-2024-03-09 -Recurse -Force
         shell: pwsh
 
       - name: Download and Extract Dependencies Pack
@@ -93,4 +91,13 @@ jobs:
             /p:AppxBundle=$env:AppxBundle `
             /p:PackageCertificateThumbprint="${{ env.THUMBPRINT }}" `
             /p:AppxPackageTestDir="${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}"
+        shell: pwsh
+
+      - name: Check Build Errors
+        if: failure()
+        run: |
+          echo "Build failed. Please check the build log for details."
+          type D:\a\duckstation-uwp\duckstation-uwp\src\duckstation-qt\audiosettingswidget.cpp
+          type D:\a\duckstation-uwp\duckstation-uwp\dep\vixl\src\code-buffer-vixl.cc
+          type D:\a\duckstation-uwp\duckstation-uwp\src\duckstation-regtest\regtest_host.cpp
         shell: pwsh
