@@ -31,8 +31,12 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
         with:
-          ref: e080c27
+          ref: refs/heads/main
           submodules: true
+
+      - name: Checkout Specific Commit
+        run: git checkout e080c27
+        shell: pwsh
 
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
