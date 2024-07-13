@@ -14,6 +14,8 @@
 
 #include <cmath>
 
+#include "dep/cubeb/include/cubeb/cubeb.h"
+
 AudioSettingsWidget::AudioSettingsWidget(SettingsWindow* dialog, QWidget* parent) : QWidget(parent), m_dialog(dialog)
 {
   SettingsInterface* sif = dialog->getSettingsInterface();
