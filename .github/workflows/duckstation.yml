@@ -28,6 +28,11 @@ jobs:
       PackageOutputDir: DuckStation
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          submodules: true
+
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
 
@@ -36,11 +41,6 @@ jobs:
           choco install wget -y
           choco install 7zip -y
         shell: pwsh
-
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-        with:
-          submodules: true
 
       - name: Download Dependencies Pack
         run: |
