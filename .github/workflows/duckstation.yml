@@ -31,14 +31,25 @@ jobs:
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
 
-      - name: Install wget
+      - name: Install wget and 7zip
         run: |
           choco install wget -y
+          choco install 7zip -y
         shell: pwsh
 
-      - name: Clone Repository
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          submodules: true
+
+      - name: Download Dependencies Pack
         run: |
-          git clone --recursive https://github.com/izzy2fancy/duckstation-uwp.git .
+          wget https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z -OutFile deps-x64.7z
+        shell: pwsh
+
+      - name: Extract Dependencies Pack
+        run: |
+          7z x deps-x64.7z -odep/msvc
         shell: pwsh
 
       - name: Display Environment Variables
@@ -65,6 +76,7 @@ jobs:
         id: set_package_name
         run: |
           echo "PACKAGE_NAME=${{ github.event.inputs.package_name }}_${{ github.event.inputs.tag_name }}" >> $GITHUB_ENV
+
       - name: Restore NuGet Packages
         run: |
           msbuild $env:SolutionPath /t:restore /p:Configuration=$env:Configuration /p:Platform=$env:Platform /p:PlatformToolset=v143
@@ -81,42 +93,3 @@ jobs:
             /p:PackageCertificateThumbprint="${{ env.THUMBPRINT }}" `
             /p:AppxPackageTestDir="${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}"
         shell: pwsh
-
-      - name: Clean the Package
-        run: |
-          $PackagePath = "${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}"
-          if (Test-Path $PackagePath) {
-            Write-Host "Cleaning package directory: $PackagePath"
-            Remove-Item -Recurse -path "$PackagePath\Add-AppDevPackage.resources" -ErrorAction SilentlyContinue
-            Remove-Item -Recurse -path "$PackagePath\TelemetryDependencies" -ErrorAction SilentlyContinue
-            Remove-Item -Recurse -path "$PackagePath\Dependencies\arm" -ErrorAction SilentlyContinue
-            Remove-Item -Recurse -path "$PackagePath\Dependencies\arm64" -ErrorAction SilentlyContinue
-            Remove-Item -Recurse -path "$PackagePath\Dependencies\x86" -ErrorAction SilentlyContinue
-            Remove-Item -Recurse -path "$PackagePath\Dependencies\Win32" -ErrorAction SilentlyContinue
-            Remove-Item -path "$PackagePath\Add-AppDevPackage.ps1" -ErrorAction SilentlyContinue
-            Remove-Item -Recurse -path "$PackagePath\Install.ps1" -ErrorAction SilentlyContinue
-          } else {
-            Write-Host "Package path does not exist: $PackagePath"
-            exit 1
-          }
-        shell: pwsh
-          
-      - name: Create Archive
-        run: |
-          $PackagePath = "${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}"
-          if (Test-Path $PackagePath) {
-            Write-Host "Creating archive for: $PackagePath"
-            Compress-Archive -Path "$PackagePath\*" -DestinationPath "${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}.zip"
-            Write-Host "Contents of package output directory after archiving:"
-            Get-ChildItem -Path "${{ env.PackageOutputRootDir }}" -Recurse
-          } else {
-            Write-Host "Package path does not exist for archiving: $PackagePath"
-            exit 1
-          }
-        shell: pwsh
-       
-      - name: Upload Build Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ github.event.inputs.package_name }} Build
-          path: ${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}.zip
