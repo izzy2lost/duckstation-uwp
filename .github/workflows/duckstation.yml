@@ -26,9 +26,10 @@ jobs:
       ProjectDirectory: src/duckstation-uwp
       PackageOutputRootDir: C:\AppPackage
       PackageOutputDir: DuckStation
+      SDL2_INCLUDE_DIR: ${{ github.workspace }}\dep\msvc\SDL2
+      SDL2_LIB_DIR: ${{ github.workspace }}\dep\msvc\SDL2\lib
 
     steps:
-      
       - name: Install wget and 7zip
         run: |
           choco install wget -y
@@ -76,5 +77,16 @@ jobs:
             /p:UapAppxPackageBuildMode=$env:BuildMode `
             /p:AppxBundle=$env:AppxBundle `
             /p:PackageCertificateThumbprint="${{ env.THUMBPRINT }}" `
-            /p:AppxPackageTestDir="${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}"
-        shell: pwsh      
+            /p:AppxPackageTestDir="${{ env.PackageOutputRootDir }}\${{ env.PACKAGE_NAME }}" `
+            /p:SDL2_INCLUDE_DIR="${{ env.SDL2_INCLUDE_DIR }}" `
+            /p:SDL2_LIB_DIR="${{ env.SDL2_LIB_DIR }}"
+        shell: pwsh
+
+      - name: Check Build Errors
+        if: failure()
+        run: |
+          echo "Build failed. Please check the build log for details."
+          type D:\a\duckstation-uwp\duckstation-uwp\src\duckstation-qt\audiosettingswidget.cpp
+          type D:\a\duckstation-uwp\duckstation-uwp\dep\vixl\src\code-buffer-vixl.cc
+          type D:\a\duckstation-uwp\duckstation-uwp\src\duckstation-regtest\regtest_host.cpp
+        shell: pwsh
