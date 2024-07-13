@@ -40,18 +40,13 @@ jobs:
       - name: Install gdown
         run: pip install gdown
 
-      - name: Download file from Google Drive
-        run: gdown https://drive.google.com/uc?id=1WsxH-kiVht1l0CHcrAg_lsamWL7Cis19 -O 
-
-      - name: Extract downloaded file
-        run: Expand-Archive -Path -DestinationPath extracted
-
-      - name: Move extracted files to root
+      - name: Download and Extract Repository
         run: |
-          Get-ChildItem -Path extracted -Recurse | Move-Item -Destination .
-          ls # List the contents to verify
-        shell: pwsh
-
+          Invoke-WebRequest -Uri "https://github.com/izzy2lost/duckstation-uwp/releases/download/1.0/duckstation-uwp.zip" -OutFile "repo.zip"
+          Expand-Archive -Path repo.zip -DestinationPath .
+          Move-Item -Path "duckstation-uwp/*" -Destination "." -Force
+          Remove-Item -Recurse -Force "duckstation-uwp"
+      
       - name: Download and Extract Dependencies Pack
         run: |
           wget https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
