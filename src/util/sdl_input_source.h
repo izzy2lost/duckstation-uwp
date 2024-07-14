@@ -4,7 +4,7 @@
 #pragma once
 #include "input_source.h"
 
-#include <SDL.h>
+#include "SDL.h"
 
 #include <array>
 #include <functional>
