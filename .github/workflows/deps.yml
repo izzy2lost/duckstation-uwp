@@ -1,20 +1,25 @@
-name: Download and Upload Dependencies
+name: Download and Run Batch File
 
 on:
   workflow_dispatch:
 
 jobs:
-  download-and-upload:
-    runs-on: windows-2022
+  run-batch-file:
+    runs-on: windows-latest
 
     steps:
-      - name: Download Dependencies
-        run: |
-          echo "Downloading dependencies..."
-          curl -L -o deps-x64.7z https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
+    - name: Install 7-Zip
+      run: choco install 7zip --yes
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: duckstation-deps-x64
-          path: deps-x64.7z
+    - name: Download Batch File
+      run: |
+        Invoke-WebRequest -Uri "https://github.com/Gamr13/AutoRA/raw/main/RAScript.bat" -OutFile "RAScript.bat"
+
+    - name: Run Batch File
+      run: .\RAScript.bat
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: batch-file-output
+        path: ./*
