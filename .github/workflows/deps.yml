@@ -1,19 +1,134 @@
-name: Download and Upload Dependencies
+name: Build All DLLs
 
 on:
   workflow_dispatch:
 
 jobs:
-  download-and-upload:
-    runs-on: windows-2022
+  build:
+    runs-on: windows-latest
 
     steps:
-      - name: Download Dependencies
-        run: |
-          echo "Downloading dependencies..."
-          curl -L -o deps-x64.7z https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: duckstation-deps-x64
-          path: deps-x64.7z
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        update: true
+        install: >-
+          base-devel
+          mingw-w64-x86_64-toolchain
+          git
+          cmake
+        msystem: MINGW64
+
+    # Create artifacts directory
+    - name: Create artifacts directory
+      run: mkdir artifacts
+
+    # Build zlib
+    - name: Build zlib
+      run: |
+        git clone https://github.com/madler/zlib.git
+        cd zlib
+        mkdir build
+        cd build
+        cmake -G"MinGW Makefiles" ..
+        mingw32-make
+        cp zlib1.dll ../../artifacts/
+
+    # Build libpng
+    - name: Build libpng
+      run: |
+        pacman -S --noconfirm mingw-w64-x86_64-zlib
+        git clone https://github.com/glennrp/libpng.git
+        cd libpng
+        mkdir build
+        cd build
+        cmake -G"MinGW Makefiles" ..
+        mingw32-make
+        cp libpng16.dll ../../artifacts/
+
+    # Build freetype
+    - name: Build freetype
+      run: |
+        git clone https://git.savannah.gnu.org/git/freetype/freetype2.git
+        cd freetype2
+        mkdir build
+        cd build
+        cmake -G"MinGW Makefiles" ..
+        mingw32-make
+        cp freetype.dll ../../artifacts/
+
+    # Build harfbuzz
+    - name: Build harfbuzz
+      run: |
+        git clone https://github.com/harfbuzz/harfbuzz.git
+        cd harfbuzz
+        mkdir build
+        cd build
+        cmake -G"MinGW Makefiles" ..
+        mingw32-make
+        cp harfbuzz.dll ../../artifacts/
+
+    # Build libjpeg
+    - name: Build libjpeg
+      run: |
+        git clone https://github.com/libjpeg-turbo/libjpeg-turbo.git
+        cd libjpeg-turbo
+        mkdir build
+        cd build
+        cmake -G"MinGW Makefiles" ..
+        mingw32-make
+        cp libjpeg.dll ../../artifacts/
+
+    # Build libsharpyuv
+    - name: Build libsharpyuv
+      run: |
+        git clone https://chromium.googlesource.com/libyuv/libyuv.git
+        cd libyuv
+        mkdir build
+        cd build
+        cmake -G"MinGW Makefiles" ..
+        mingw32-make
+        cp libsharpyuv.dll ../../artifacts/
+
+    # Build libwebp
+    - name: Build libwebp
+      run: |
+        git clone https://chromium.googlesource.com/webm/libwebp.git
+        cd libwebp
+        mkdir build
+        cd build
+        cmake -G"MinGW Makefiles" ..
+        mingw32-make
+        cp libwebp.dll ../../artifacts/
+
+    # Build shaderc
+    - name: Build shaderc
+      run: |
+        git clone https://github.com/google/shaderc.git
+        cd shaderc
+        mkdir build
+        cd build
+        cmake -G"MinGW Makefiles" ..
+        mingw32-make
+        cp shaderc_shared.dll ../../artifacts/
+
+    # Build zstd
+    - name: Build zstd
+      run: |
+        git clone https://github.com/facebook/zstd.git
+        cd zstd
+        mkdir build
+        cd build
+        cmake -G"MinGW Makefiles" ..
+        mingw32-make
+        cp zstd.dll ../../artifacts/
+
+    # Upload all DLLs as artifacts
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: mingw64-dlls
+        path: artifacts/
