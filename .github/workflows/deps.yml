@@ -13,10 +13,10 @@ jobs:
 
     - name: Download Batch File
       run: |
-        Invoke-WebRequest -Uri "https://github.com/Gamr13/AutoRA/raw/main/RAScript.bat" -OutFile "RAScript.bat"
+        Invoke-WebRequest -Uri "https://github.com/izzy2lost/duckstation-uwp/raw/uwp/scripts/build-dependencies-windows-x64.bat" -OutFile "build-dependencies-windows-x64.bat"
 
     - name: Run Batch File
-      run: .\RAScript.bat
+      run: .\build-dependencies-windows-x64.bat
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v3
