@@ -1,25 +1,19 @@
-name: Download and Run Batch File
+name: Download and Upload Dependencies
 
 on:
   workflow_dispatch:
 
 jobs:
-  run-batch-file:
-    runs-on: windows-latest
+  download-and-upload:
+    runs-on: windows-2022
 
     steps:
-    - name: Install 7-Zip
-      run: choco install 7zip --yes
-
-    - name: Download Batch File
-      run: |
-        Invoke-WebRequest -Uri "https://github.com/izzy2lost/duckstation-uwp/raw/uwp/scripts/build-dependencies-windows-x64.bat" -OutFile "build-dependencies-windows-x64.bat"
-
-    - name: Run Batch File
-      run: .\build-dependencies-windows-x64.bat
-
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v3
-      with:
-        name: batch-file-output
-        path: ./*
+      - name: Download Dependencies
+        run: |
+          echo "Downloading dependencies..."
+          curl -L -o deps-x64.7z https://github.com/stenzek/duckstation-ext-qt-minimal/releases/download/latest/deps-x64.7z
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: duckstation-deps-x64
+          path: deps-x64.7z
