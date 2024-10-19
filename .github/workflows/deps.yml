@@ -33,5 +33,12 @@ jobs:
         run: |
           $toolPath = "${{ github.workspace }}\re-sign-tool\PackageRe-Sign (Release)\pkgrsn.exe"
           $appxPath = "${{ github.workspace }}\app-package.appx"
-          Start-Process -FilePath $toolPath -ArgumentList "-a", $appxPath, "--skip" -Wait
+          Start-Process -FilePath $toolPath -ArgumentList "-a", $appxPath, "--skip" 
         shell: pwsh
+
+      # Step 6: Upload the re-signed .appx as an artifact
+      - name: Upload re-signed appx artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: re-signed-appx
+          path: app-package.appx
