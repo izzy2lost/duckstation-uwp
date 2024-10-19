@@ -28,18 +28,26 @@ jobs:
         run: |
           Expand-Archive -Path re-sign-tool.zip -DestinationPath re-sign-tool
 
-      # Step 5: Run pkgrsn.exe to re-sign the package using Start-Process and log the output
-      - name: Re-Sign App Package
+      # Step 5: Run pkgrsn.exe to re-sign the package using Start-Process with timeout
+      - name: Re-Sign App Package with Timeout
         run: |
           $toolPath = "${{ github.workspace }}\re-sign-tool\PackageRe-Sign (Release)\pkgrsn.exe"
           $appxPath = "${{ github.workspace }}\app-package.appx"
-          $output = Start-Process -FilePath $toolPath -ArgumentList "-a", $appxPath, "--skip" -Wait -PassThru
-          Write-Output "Process exit code: $($output.ExitCode)"
-          Write-Output "Process stdout: $($output.StandardOutput)"
-          Write-Output "Process stderr: $($output.StandardError)"
+          $process = Start-Process -FilePath $toolPath -ArgumentList "-a", $appxPath, "--skip" -NoNewWindow -Wait -PassThru -Timeout 120
+          if ($process.ExitCode -eq 0) {
+              Write-Output "Package re-signed successfully."
+          } else {
+              Write-Output "Package re-signing failed with exit code: $($process.ExitCode)"
+              exit 1
+          }
         shell: pwsh
 
-      # Step 6: Upload the re-signed .appx as an artifact
+      # Step 6: Wait for 2 minutes before proceeding
+      - name: Wait for 2 minutes
+        run: |
+          Start-Sleep -Seconds 120
+
+      # Step 7: Upload the re-signed .appx as an artifact
       - name: Upload re-signed appx artifact
         uses: actions/upload-artifact@v3
         with:
