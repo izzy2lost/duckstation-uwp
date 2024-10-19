@@ -28,15 +28,10 @@ jobs:
         run: |
           Expand-Archive -Path re-sign-tool.zip -DestinationPath re-sign-tool
 
-      # Step 5: List contents of unzipped folder for debugging
-      - name: List contents of unzipped tool folder
-        run: |
-          Get-ChildItem -Recurse re-sign-tool
-
-      # Step 6: Run pkgrsn.exe to re-sign the package with full path
+      # Step 5: Run pkgrsn.exe to re-sign the package using Start-Process
       - name: Re-Sign App Package
         run: |
-          $toolPath = "${{ github.workspace }}\re-sign-tool\PackageRe-Sign\pkgrsn.exe"
+          $toolPath = "${{ github.workspace }}\re-sign-tool\PackageRe-Sign (Release)\pkgrsn.exe"
           $appxPath = "${{ github.workspace }}\app-package.appx"
-          & $toolPath -a $appxPath --skip
+          Start-Process -FilePath $toolPath -ArgumentList "-a", $appxPath, "--skip" -Wait
         shell: pwsh
