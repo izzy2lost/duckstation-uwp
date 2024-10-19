@@ -1,7 +1,9 @@
 name: Re-Sign Package
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - uwp
 
 jobs:
   re-sign-package:
@@ -26,7 +28,15 @@ jobs:
         run: |
           Expand-Archive -Path re-sign-tool.zip -DestinationPath re-sign-tool
 
-      # Step 5: Run pkgrsn.exe to re-sign the package
+      # Step 5: List contents of unzipped folder for debugging
+      - name: List contents of unzipped tool folder
+        run: |
+          Get-ChildItem -Recurse re-sign-tool
+
+      # Step 6: Run pkgrsn.exe to re-sign the package with full path
       - name: Re-Sign App Package
         run: |
-          .\re-sign-tool\PackageRe-Sign\pkgrsn.exe -a app-package.appx --skip
+          $toolPath = "${{ github.workspace }}\re-sign-tool\PackageRe-Sign\pkgrsn.exe"
+          $appxPath = "${{ github.workspace }}\app-package.appx"
+          & $toolPath -a $appxPath --skip
+        shell: pwsh
