@@ -46,4 +46,4 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: re-signed-appx
-          path: "${{ github.workspace }}\Angry Birds Space Full.appx"
+          path: "${{ github.workspace }}Angry Birds Space Full.appx"
