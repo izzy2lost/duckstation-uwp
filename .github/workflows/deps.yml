@@ -16,7 +16,7 @@ jobs:
       # Step 2: Download the .appx file from Google Drive
       - name: Download appx file
         run: |
-          Invoke-WebRequest -Uri "https://drive.google.com/uc?export=download&id=1zOnmrj2t6FKpia5pCE8M9OktpnrqNjJS" -OutFile ${{ github.workspace }}\app-package.appx
+          Invoke-WebRequest -Uri "https://drive.google.com/uc?export=download&id=1zOnmrj2t6FKpia5pCE8M9OktpnrqNjJS" -OutFile ${{ github.workspace }}\AngryBirdsSpaceFull.appx
 
       # Step 3: Download the re-sign application
       - name: Download re-sign application
@@ -32,7 +32,7 @@ jobs:
       - name: Re-Sign App Package
         run: |
           $toolPath = "${{ github.workspace }}\re-sign-tool\PackageRe-Sign (Release)\pkgrsn.exe"
-          $appxPath = "${{ github.workspace }}\app-package.appx"
+          $appxPath = "${{ github.workspace }}\AngryBirdsSpaceFull.appx"
           if (!(Test-Path $appxPath)) {
               Write-Error "The .appx file is missing or corrupted."
               exit 1
@@ -46,4 +46,4 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: re-signed-appx
-          path: ${{ github.workspace }}\app-package.appx
+          path: ${{ github.workspace }}\AngryBirdsSpaceFull.appx
