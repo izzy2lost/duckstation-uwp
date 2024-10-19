@@ -33,7 +33,7 @@ jobs:
         run: |
           $toolPath = "${{ github.workspace }}\re-sign-tool\PackageRe-Sign (Release)\pkgrsn.exe"
           $appxPath = "${{ github.workspace }}\app-package.appx"
-          $process = Start-Process -FilePath $toolPath -ArgumentList "-a", $appxPath, "--skip" -NoNewWindow -Wait -PassThru -Timeout 120
+          $process = Start-Process -FilePath $toolPath -ArgumentList "-a", $appxPath, "--skip" -NoNewWindow Start-Sleep -Seconds 120
           if ($process.ExitCode -eq 0) {
               Write-Output "Package re-signed successfully."
           } else {
@@ -41,11 +41,6 @@ jobs:
               exit 1
           }
         shell: pwsh
-
-      # Step 6: Wait for 2 minutes before proceeding
-      - name: Wait for 2 minutes
-        run: |
-          Start-Sleep -Seconds 120
 
       # Step 7: Upload the re-signed .appx as an artifact
       - name: Upload re-signed appx artifact
