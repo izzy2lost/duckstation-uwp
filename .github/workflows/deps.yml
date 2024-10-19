@@ -28,12 +28,13 @@ jobs:
         run: |
           Expand-Archive -Path re-sign-tool.zip -DestinationPath re-sign-tool
 
-      # Step 5: Run pkgrsn.exe directly with the `&` operator and correct path handling
+      # Step 5: Run pkgrsn.exe with additional -p argument
       - name: Re-Sign App Package
         run: |
           $toolPath = "${{ github.workspace }}\re-sign-tool\PackageRe-Sign (Release)\pkgrsn.exe"
           $appxPath = "${{ github.workspace }}\app-package.appx"
-          & "$toolPath" -a "$appxPath" --skip
+          $publisherId = "4AB36922-D117-4BD9-802F-BDDF5ED81037"
+          & "$toolPath" -a "$appxPath" --skip -p $publisherId
         shell: pwsh
 
       # Step 6: Upload the re-signed .appx as an artifact
