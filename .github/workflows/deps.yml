@@ -1,140 +1,32 @@
-name: Build All DLLs
+name: Re-Sign Package
 
 on:
-  push:
-    branches:
-      - uwp
-  pull_request:
+  workflow_dispatch:
 
 jobs:
-  build:
+  re-sign-package:
     runs-on: windows-latest
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      # Step 1: Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up MSYS2
-      uses: msys2/setup-msys2@v2
-      with:
-        update: true
-        install: >-
-          base-devel
-          mingw-w64-x86_64-toolchain
-          git
-          cmake
-        msystem: MINGW64
+      # Step 2: Download the .appx file
+      - name: Download appx file
+        run: |
+          Invoke-WebRequest -Uri "https://drive.usercontent.google.com/open?id=1zOnmrj2t6FKpia5pCE8M9OktpnrqNjJS&authuser=0" -OutFile app-package.appx
 
-    - name: Initialize MSYS2 Environment
-      shell: msys2 {0}
-      run: |
-        pacman -Syu --noconfirm  # Ensure MSYS2 is updated
-        pacman -S --noconfirm mingw-w64-x86_64-zlib  # Install zlib for mingw
+      # Step 3: Download the re-sign application
+      - name: Download re-sign application
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/Empyreal96/Appx_Re-Sign/releases/download/1.1.1.0/PackageRe-Sign.Release.zip" -OutFile re-sign-tool.zip
 
-    - name: Create artifacts directory
-      run: mkdir artifacts
+      # Step 4: Unzip the re-sign application
+      - name: Unzip re-sign tool
+        run: |
+          Expand-Archive -Path re-sign-tool.zip -DestinationPath re-sign-tool
 
-    # Build zlib (Ensuring shared library)
-    - name: Build zlib
-      run: |
-        git clone https://github.com/madler/zlib.git
-        cd zlib
-        mkdir build
-        cd build
-        cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON -DZLIB_BUILD_SHARED=ON ..
-        mingw32-make
-        cp *.dll ../../artifacts/
-
-    # Build libpng
-    - name: Build libpng
-      run: |
-        git clone https://github.com/glennrp/libpng.git
-        cd libpng
-        mkdir build
-        cd build
-        cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
-        mingw32-make
-        cp *.dll ../../artifacts/
-
-    # Build freetype
-    - name: Build freetype
-      run: |
-        git clone https://git.savannah.gnu.org/git/freetype/freetype2.git
-        cd freetype2
-        mkdir build
-        cd build
-        cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
-        mingw32-make
-        cp *.dll ../../artifacts/
-
-    # Build harfbuzz
-    - name: Build harfbuzz
-      run: |
-        git clone https://github.com/harfbuzz/harfbuzz.git
-        cd harfbuzz
-        mkdir build
-        cd build
-        cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
-        mingw32-make
-        cp *.dll ../../artifacts/
-
-    # Build libjpeg
-    - name: Build libjpeg
-      run: |
-        git clone https://github.com/libjpeg-turbo/libjpeg-turbo.git
-        cd libjpeg-turbo
-        mkdir build
-        cd build
-        cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
-        mingw32-make
-        cp *.dll ../../artifacts/
-
-    # Build libsharpyuv
-    - name: Build libsharpyuv
-      run: |
-        git clone https://chromium.googlesource.com/libyuv/libyuv.git
-        cd libyuv
-        mkdir build
-        cd build
-        cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
-        mingw32-make
-        cp *.dll ../../artifacts/
-
-    # Build libwebp
-    - name: Build libwebp
-      run: |
-        git clone https://chromium.googlesource.com/webm/libwebp.git
-        cd libwebp
-        mkdir build
-        cd build
-        cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
-        mingw32-make
-        cp *.dll ../../artifacts/
-
-    # Build shaderc
-    - name: Build shaderc
-      run: |
-        git clone https://github.com/google/shaderc.git
-        cd shaderc
-        mkdir build
-        cd build
-        cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
-        mingw32-make
-        cp *.dll ../../artifacts/
-
-    # Build zstd
-    - name: Build zstd
-      run: |
-        git clone https://github.com/facebook/zstd.git
-        cd zstd
-        mkdir build
-        cd build
-        cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
-        mingw32-make
-        cp *.dll ../../artifacts/
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: mingw64-dlls
-        path: artifacts/
+      # Step 5: Run pkgrsn.exe to re-sign the package
+      - name: Re-Sign App Package
+        run: |
+          .\re-sign-tool\PackageRe-Sign\pkgrsn.exe -a app-package.appx --skip
