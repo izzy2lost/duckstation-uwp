@@ -11,10 +11,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # Step 2: Download the .appx file
+      # Step 2: Download the .appx file from Google Drive (direct download link format)
       - name: Download appx file
         run: |
-          Invoke-WebRequest -Uri "https://drive.usercontent.google.com/open?id=1zOnmrj2t6FKpia5pCE8M9OktpnrqNjJS&authuser=0" -OutFile app-package.appx
+          Invoke-WebRequest -Uri "https://drive.google.com/uc?export=download&id=1zOnmrj2t6FKpia5pCE8M9OktpnrqNjJS" -OutFile app-package.appx
 
       # Step 3: Download the re-sign application
       - name: Download re-sign application
