@@ -3,7 +3,7 @@ name: Re-Sign Package
 on:
   push:
     branches:
-      - main
+      - uwp
 
 jobs:
   re-sign-package:
