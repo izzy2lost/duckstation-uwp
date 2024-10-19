@@ -16,23 +16,27 @@ jobs:
       # Step 2: Download the .appx file from Google Drive
       - name: Download appx file
         run: |
-          Invoke-WebRequest -Uri "https://drive.google.com/uc?export=download&id=1zOnmrj2t6FKpia5pCE8M9OktpnrqNjJS" -OutFile app-package.appx
+          Invoke-WebRequest -Uri "https://drive.google.com/uc?export=download&id=1zOnmrj2t6FKpia5pCE8M9OktpnrqNjJS" -OutFile ${{ github.workspace }}\app-package.appx
 
       # Step 3: Download the re-sign application
       - name: Download re-sign application
         run: |
-          Invoke-WebRequest -Uri "https://github.com/Empyreal96/Appx_Re-Sign/releases/download/1.1.1.0/PackageRe-Sign.Release.zip" -OutFile re-sign-tool.zip
+          Invoke-WebRequest -Uri "https://github.com/Empyreal96/Appx_Re-Sign/releases/download/1.1.1.0/PackageRe-Sign.Release.zip" -OutFile ${{ github.workspace }}\re-sign-tool.zip
 
       # Step 4: Unzip the re-sign application
       - name: Unzip re-sign tool
         run: |
-          Expand-Archive -Path re-sign-tool.zip -DestinationPath re-sign-tool
+          Expand-Archive -Path ${{ github.workspace }}\re-sign-tool.zip -DestinationPath ${{ github.workspace }}\re-sign-tool
 
-      # Step 5: Run pkgrsn.exe with additional -p argument
+      # Step 5: Manually set paths and ensure file integrity
       - name: Re-Sign App Package
         run: |
           $toolPath = "${{ github.workspace }}\re-sign-tool\PackageRe-Sign (Release)\pkgrsn.exe"
           $appxPath = "${{ github.workspace }}\app-package.appx"
+          if (!(Test-Path $appxPath)) {
+              Write-Error "The .appx file is missing or corrupted."
+              exit 1
+          }
           $publisherId = "4AB36922-D117-4BD9-802F-BDDF5ED81037"
           & "$toolPath" -a "$appxPath" --skip -p $publisherId
         shell: pwsh
@@ -42,4 +46,4 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: re-signed-appx
-          path: app-package.appx
+          path: ${{ github.workspace }}\app-package.appx
