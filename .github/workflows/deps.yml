@@ -13,7 +13,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # Step 2: Download the .appx file from Google Drive (direct download link format)
+      # Step 2: Download the .appx file from Google Drive
       - name: Download appx file
         run: |
           Invoke-WebRequest -Uri "https://drive.google.com/uc?export=download&id=1zOnmrj2t6FKpia5pCE8M9OktpnrqNjJS" -OutFile app-package.appx
@@ -28,12 +28,15 @@ jobs:
         run: |
           Expand-Archive -Path re-sign-tool.zip -DestinationPath re-sign-tool
 
-      # Step 5: Run pkgrsn.exe to re-sign the package using Start-Process
+      # Step 5: Run pkgrsn.exe to re-sign the package using Start-Process and log the output
       - name: Re-Sign App Package
         run: |
           $toolPath = "${{ github.workspace }}\re-sign-tool\PackageRe-Sign (Release)\pkgrsn.exe"
           $appxPath = "${{ github.workspace }}\app-package.appx"
-          Start-Process -FilePath $toolPath -ArgumentList "-a", $appxPath, "--skip" 
+          $output = Start-Process -FilePath $toolPath -ArgumentList "-a", $appxPath, "--skip" -Wait -PassThru
+          Write-Output "Process exit code: $($output.ExitCode)"
+          Write-Output "Process stdout: $($output.StandardOutput)"
+          Write-Output "Process stderr: $($output.StandardError)"
         shell: pwsh
 
       # Step 6: Upload the re-signed .appx as an artifact
