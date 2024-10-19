@@ -25,6 +25,12 @@ jobs:
           cmake
         msystem: MINGW64
 
+    - name: Initialize MSYS2 Environment
+      shell: msys2 {0}
+      run: |
+        pacman -Syu --noconfirm  # Ensure MSYS2 is updated
+        pacman -S --noconfirm mingw-w64-x86_64-zlib  # Install zlib for mingw
+
     - name: Create artifacts directory
       run: mkdir artifacts
 
@@ -42,7 +48,6 @@ jobs:
     # Build libpng
     - name: Build libpng
       run: |
-        pacman -S --noconfirm mingw-w64-x86_64-zlib
         git clone https://github.com/glennrp/libpng.git
         cd libpng
         mkdir build
