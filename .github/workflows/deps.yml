@@ -1,7 +1,10 @@
 name: Build All DLLs
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - uwp
+  pull_request:
 
 jobs:
   build:
@@ -22,22 +25,21 @@ jobs:
           cmake
         msystem: MINGW64
 
-    # Create artifacts directory
     - name: Create artifacts directory
       run: mkdir artifacts
 
-    # Build zlib (Ensuring shared libraries are built)
+    # Build zlib (Ensuring shared library)
     - name: Build zlib
       run: |
         git clone https://github.com/madler/zlib.git
         cd zlib
         mkdir build
         cd build
-        cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
+        cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON -DZLIB_BUILD_SHARED=ON ..
         mingw32-make
-        cp zlib1.dll ../../artifacts/
+        cp *.dll ../../artifacts/
 
-    # Build libpng (Depends on zlib, ensures shared libraries)
+    # Build libpng
     - name: Build libpng
       run: |
         pacman -S --noconfirm mingw-w64-x86_64-zlib
@@ -47,9 +49,9 @@ jobs:
         cd build
         cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
         mingw32-make
-        cp libpng16.dll ../../artifacts/
+        cp *.dll ../../artifacts/
 
-    # Build freetype (Depends on zlib, ensures shared libraries)
+    # Build freetype
     - name: Build freetype
       run: |
         git clone https://git.savannah.gnu.org/git/freetype/freetype2.git
@@ -58,9 +60,9 @@ jobs:
         cd build
         cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
         mingw32-make
-        cp freetype.dll ../../artifacts/
+        cp *.dll ../../artifacts/
 
-    # Build harfbuzz (Ensures shared libraries)
+    # Build harfbuzz
     - name: Build harfbuzz
       run: |
         git clone https://github.com/harfbuzz/harfbuzz.git
@@ -69,9 +71,9 @@ jobs:
         cd build
         cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
         mingw32-make
-        cp harfbuzz.dll ../../artifacts/
+        cp *.dll ../../artifacts/
 
-    # Build libjpeg (Ensures shared libraries)
+    # Build libjpeg
     - name: Build libjpeg
       run: |
         git clone https://github.com/libjpeg-turbo/libjpeg-turbo.git
@@ -80,9 +82,9 @@ jobs:
         cd build
         cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
         mingw32-make
-        cp libjpeg.dll ../../artifacts/
+        cp *.dll ../../artifacts/
 
-    # Build libsharpyuv (Ensures shared libraries)
+    # Build libsharpyuv
     - name: Build libsharpyuv
       run: |
         git clone https://chromium.googlesource.com/libyuv/libyuv.git
@@ -91,9 +93,9 @@ jobs:
         cd build
         cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
         mingw32-make
-        cp libsharpyuv.dll ../../artifacts/
+        cp *.dll ../../artifacts/
 
-    # Build libwebp (Ensures shared libraries)
+    # Build libwebp
     - name: Build libwebp
       run: |
         git clone https://chromium.googlesource.com/webm/libwebp.git
@@ -102,9 +104,9 @@ jobs:
         cd build
         cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
         mingw32-make
-        cp libwebp.dll ../../artifacts/
+        cp *.dll ../../artifacts/
 
-    # Build shaderc (Ensures shared libraries)
+    # Build shaderc
     - name: Build shaderc
       run: |
         git clone https://github.com/google/shaderc.git
@@ -113,9 +115,9 @@ jobs:
         cd build
         cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
         mingw32-make
-        cp shaderc_shared.dll ../../artifacts/
+        cp *.dll ../../artifacts/
 
-    # Build zstd (Ensures shared libraries)
+    # Build zstd
     - name: Build zstd
       run: |
         git clone https://github.com/facebook/zstd.git
@@ -124,9 +126,8 @@ jobs:
         cd build
         cmake -G"MinGW Makefiles" -DBUILD_SHARED_LIBS=ON ..
         mingw32-make
-        cp libzstd.dll ../../artifacts/
+        cp *.dll ../../artifacts/
 
-    # Upload all DLLs as artifacts
     - name: Upload artifacts
       uses: actions/upload-artifact@v3
       with:
