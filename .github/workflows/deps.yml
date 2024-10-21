@@ -14,11 +14,15 @@ jobs:
         run: |
           curl -L -o export.appx "https://drive.google.com/uc?export=download&id=1ODdhUmh4KixddOP1QWGOHeZHAgjDYkL0"
 
+      - name: Create extract directory
+        run: |
+          mkdir extractDir
+
       - name: Run MakeAppx pack
         shell: cmd
         run: |
           "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat" ^
-          && "C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x86\makeappx.exe" pack /d "%extractDir%" /p export.appx
+          && "C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x86\makeappx.exe" pack /d "%CD%\extractDir" /p "%CD%\export.appx"
 
       - name: Upload appx file as artifact
         uses: actions/upload-artifact@v3
