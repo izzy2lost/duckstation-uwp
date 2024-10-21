@@ -10,17 +10,15 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Set up Developer Command Prompt for VS 2022
-        run: |
-          "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
-
       - name: Download export.appx from Google Drive
         run: |
           curl -L -o export.appx "https://drive.google.com/uc?export=download&id=1ODdhUmh4KixddOP1QWGOHeZHAgjDYkL0"
 
-      - name: Run MakeAppx pack
+      - name: Set up Developer Command Prompt and Run MakeAppx pack
+        shell: cmd
         run: |
-          makeappx pack /d "%extractDir%" /p export.appx
+          "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat" ^
+          && makeappx pack /d "%extractDir%" /p export.appx
 
       - name: Upload appx file as artifact
         uses: actions/upload-artifact@v3
