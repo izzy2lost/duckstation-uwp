@@ -1,43 +1,29 @@
-name: Sign MegaManX-CodeRed APPX
+name: Download and Pack Appx
 
 on:
   push:
     branches:
-      - main
-  workflow_dispatch:
+      - uwp
 
 jobs:
-  sign-appx:
+  download_and_pack:
     runs-on: windows-latest
 
     steps:
-    # Step 1: Checkout the repository
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Set up Developer Command Prompt for VS 2019
+        run: |
+          call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\Common7\Tools\VsDevCmd.bat"
 
-    # Step 2: Set up Python and install gdown to download from Google Drive
-    - name: Set up Python
-      uses: actions/setup-python@v3
-      with:
-        python-version: '3.x'
+      - name: Download export.appx from Google Drive
+        run: |
+          curl -L -o export.appx "https://drive.google.com/uc?export=download&id=1ODdhUmh4KixddOP1QWGOHeZHAgjDYkL0"
 
-    - name: Install gdown
-      run: |
-        pip install gdown
+      - name: Run MakeAppx pack
+        run: |
+          makeappx pack /d "%extractDir%" /p export.appx
 
-    # Step 3: Download MegaManX-CodeRed.appx file from Google Drive
-    - name: Download APPX file from Google Drive
-      run: |
-        gdown https://drive.google.com/uc?id=15XdTuEDbP_JK83IXZ9AbbQgT3Uy5cN58 -O MegaManX-CodeRed.appx
-
-    # Step 4: Sign the MegaManX-CodeRed.appx file
-    - name: Sign the APPX file
-      run: |
-        MakeAppx pack MegaManX-CodeRed.appx
-
-    # Step 5: Upload the signed APPX file as an artifact
-    - name: Upload signed APPX as an artifact
-      uses: actions/upload-artifact@v3
-      with:
-        name: signed-megamanx-appx
-        path: MegaManX-CodeRed.appx
+      - name: Upload appx file as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: export-appx
+          path: export.appx
