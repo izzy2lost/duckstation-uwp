@@ -1,49 +1,43 @@
-name: Re-Sign Package
+name: Sign MegaManX-CodeRed APPX
 
 on:
   push:
     branches:
-      - uwp
+      - main
+  workflow_dispatch:
 
 jobs:
-  re-sign-package:
+  sign-appx:
     runs-on: windows-latest
+
     steps:
-      # Step 1: Checkout repository
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    # Step 1: Checkout the repository
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-      # Step 2: Download the .appx file from Google Drive
-      - name: Download appx file
-        run: |
-          Invoke-WebRequest -Uri "https://drive.google.com/uc?export=download&id=1zOnmrj2t6FKpia5pCE8M9OktpnrqNjJS" -OutFile "${{ github.workspace }}\Angry` Birds` Space` Full.appx"
+    # Step 2: Set up Python and install gdown to download from Google Drive
+    - name: Set up Python
+      uses: actions/setup-python@v3
+      with:
+        python-version: '3.x'
 
-      # Step 3: Download the re-sign application
-      - name: Download re-sign application
-        run: |
-          Invoke-WebRequest -Uri "https://github.com/Empyreal96/Appx_Re-Sign/releases/download/1.1.1.0/PackageRe-Sign.Release.zip" -OutFile "${{ github.workspace }}\re-sign-tool.zip"
+    - name: Install gdown
+      run: |
+        pip install gdown
 
-      # Step 4: Unzip the re-sign application
-      - name: Unzip re-sign tool
-        run: |
-          Expand-Archive -Path "${{ github.workspace }}\re-sign-tool.zip" -DestinationPath "${{ github.workspace }}\re-sign-tool"
+    # Step 3: Download MegaManX-CodeRed.appx file from Google Drive
+    - name: Download APPX file from Google Drive
+      run: |
+        gdown https://drive.google.com/uc?id=15XdTuEDbP_JK83IXZ9AbbQgT3Uy5cN58 -O MegaManX-CodeRed.appx
 
-      # Step 5: Manually set paths and ensure file integrity
-      - name: Re-Sign App Package
-        run: |
-          $toolPath = "${{ github.workspace }}\re-sign-tool\PackageRe-Sign` (Release)\pkgrsn.exe"
-          $appxPath = "${{ github.workspace }}\Angry` Birds` Space` Full.appx"
-          if (!(Test-Path $appxPath)) {
-              Write-Error "The .appx file is missing or corrupted."
-              exit 1
-          }
-          $publisherId = "4AB36922-D117-4BD9-802F-BDDF5ED81037"
-          & "$toolPath" -a "$appxPath" --skip -p $publisherId
-        shell: pwsh
+    # Step 4: Sign the MegaManX-CodeRed.appx file
+    - name: Sign the APPX file
+      run: |
+        MakeAppx pack MegaManX-CodeRed.appx
 
-      # Step 6: Upload the re-signed .appx as an artifact
-      - name: Upload re-signed appx artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: re-signed-appx
-          path: "${{ github.workspace }}Angry` Birds` Space` Full.appx"
+    # Step 5: Upload the signed APPX file as an artifact
+    - name: Upload signed APPX as an artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: signed-megamanx-appx
+        path: MegaManX-CodeRed.appx
