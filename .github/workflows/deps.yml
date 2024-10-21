@@ -10,9 +10,9 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Set up Developer Command Prompt for VS 2019
+      - name: Set up Developer Command Prompt for VS 2022
         run: |
-          call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\Common7\Tools\VsDevCmd.bat"
+          call "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
 
       - name: Download export.appx from Google Drive
         run: |
